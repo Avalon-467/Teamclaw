@@ -37,6 +37,22 @@ mainagent.py (FastAPI + LangGraph)  ── 核心 AI Agent，集成 DeepSeek LLM
 
 ## 快速开始
 
+### 一键运行
+
+首次使用或日常启动，只需一条命令（自动完成环境配置 + 启动所有服务）：
+
+```bash
+# Linux / macOS（首次使用需赋予执行权限）
+chmod +x run.sh
+./run.sh
+
+# Windows
+run.bat
+```
+
+> 首次运行会自动安装 uv、创建虚拟环境、安装依赖；后续运行会跳过已完成的步骤直接启动。
+> 启动前需先完成下方的 **环境变量配置** 和 **用户账号创建**。
+
 ### 1. 环境配置
 
 **一键配置（推荐）：**
@@ -194,6 +210,8 @@ Flask → POST /login → FastAPI (mainagent.py)
 mini_timebot/
 ├── LICENSE
 ├── README.md
+├── run.sh                     # 一键运行 (Linux / macOS)
+├── run.bat                    # 一键运行 (Windows)
 ├── scripts/                   # 脚本集中目录
 │   ├── setup_env.sh           # 自动环境配置 (Linux / macOS)
 │   ├── setup_env.bat          # 自动环境配置 (Windows)
