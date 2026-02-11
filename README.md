@@ -37,25 +37,32 @@ mainagent.py (FastAPI + LangGraph)  ── 核心 AI Agent，集成 DeepSeek LLM
 
 ## 快速开始
 
-### 1. 环境配置（推荐使用 uv）
+### 1. 环境配置
 
-推荐使用 [uv](https://docs.astral.sh/uv/) 管理 Python 环境，比 pip 快 10-100 倍。
+**一键配置（推荐）：**
 
-**安装 uv：**
+自动检查并安装 uv、创建虚拟环境、安装所有依赖：
 
 ```bash
-# Linux / macOS
-curl -LsSf https://astral.sh/uv/install.sh | sh
+# Linux / macOS（首次使用需赋予执行权限）
+chmod +x setup_env.sh
+./setup_env.sh
 
-# Windows (PowerShell)
-powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
+# Windows
+setup_env.bat
 ```
 
-安装后重启终端，确认 `uv --version` 可用。
+**手动配置：**
 
-**创建虚拟环境并安装依赖：**
+如需手动操作，推荐使用 [uv](https://docs.astral.sh/uv/) 管理 Python 环境，比 pip 快 10-100 倍。
 
 ```bash
+# 安装 uv
+# Linux / macOS
+curl -LsSf https://astral.sh/uv/install.sh | sh
+# Windows (PowerShell)
+powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
+
 # 创建虚拟环境（Python 3.11+）
 uv venv .venv --python 3.11
 
@@ -188,6 +195,8 @@ mini_timebot/
 ├── LICENSE
 ├── README.md
 ├── requirements.txt
+├── setup_env.sh           # 自动环境配置脚本 (Linux / macOS)
+├── setup_env.bat          # 自动环境配置脚本 (Windows)
 ├── start.sh               # 一键启动脚本 (Linux / macOS)
 ├── start.bat              # 一键启动脚本 (Windows)
 ├── adduser.sh             # 添加用户脚本 (Linux / macOS)
@@ -198,6 +207,8 @@ mini_timebot/
 │   └── users.json.example # 用户配置格式示例
 ├── data/
 │   ├── agent_memory.db    # Agent 对话记忆数据库（运行时自动生成）
+│   ├── timeset/
+│   │   └── tasks.json     # 定时任务持久化存储（JSON，可手动编辑）
 │   └── user_files/        # 用户文件存储目录（按用户名隔离，运行时自动生成）
 │       └── <username>/    # 各用户的独立文件空间
 ├── src/
@@ -229,6 +240,7 @@ mini_timebot/
 **`data/`** — 运行时数据目录
 
 - `agent_memory.db`：SQLite 数据库，由 LangGraph 的 `AsyncSqliteSaver` 自动创建，用于持久化对话历史。包含 `checkpoints` 和 `writes` 两张表，以 `thread_id`（用户 ID）区分不同用户的对话记录。
+- `timeset/tasks.json`：定时任务持久化文件，JSON 格式，重启后自动恢复。可直接编辑修改任务配置。
 - `user_files/`：用户文件存储目录，按用户名（`thread_id`）自动创建子目录，实现用户间文件隔离。
 
 **文件管理机制**
