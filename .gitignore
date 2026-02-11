@@ -12,6 +12,9 @@ config/.env
 # 用户密码配置（含哈希）
 config/users.json
 
+# 但 requirements.txt 需要上传
+!config/requirements.txt
+
 # 运行时数据库
 data
 

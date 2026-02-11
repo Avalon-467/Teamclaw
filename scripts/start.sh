@@ -1,7 +1,7 @@
 #!/bin/bash
 # Mini TimeBot 一键启动脚本
 
-cd "$(dirname "$0")"
+cd "$(dirname "$0")/.."
 
 # 检查 .env 配置
 if [ ! -f config/.env ]; then

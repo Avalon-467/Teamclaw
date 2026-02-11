@@ -45,11 +45,11 @@ mainagent.py (FastAPI + LangGraph)  ── 核心 AI Agent，集成 DeepSeek LLM
 
 ```bash
 # Linux / macOS（首次使用需赋予执行权限）
-chmod +x setup_env.sh
-./setup_env.sh
+chmod +x scripts/setup_env.sh
+scripts/setup_env.sh
 
 # Windows
-setup_env.bat
+scripts\setup_env.bat
 ```
 
 **手动配置：**
@@ -75,10 +75,10 @@ source .venv/bin/activate
 .venv\Scripts\activate.bat
 
 # 安装依赖
-uv pip install -r requirements.txt
+uv pip install -r config/requirements.txt
 ```
 
-> 也可以用传统方式：`python -m venv .venv` + `pip install -r requirements.txt`
+> 也可以用传统方式：`python -m venv .venv` + `pip install -r config/requirements.txt`
 
 ### 2. 配置环境变量
 
@@ -94,11 +94,11 @@ DEEPSEEK_API_KEY=your_deepseek_api_key_here
 
 ```bash
 # Linux / macOS（首次使用需赋予执行权限）
-chmod +x adduser.sh
-./adduser.sh
+chmod +x scripts/adduser.sh
+scripts/adduser.sh
 
 # Windows
-adduser.bat
+scripts\adduser.bat
 ```
 
 该工具会将用户名和密码的 SHA-256 哈希写入 `config/users.json`。可多次运行以添加多个用户。
@@ -117,11 +117,11 @@ adduser.bat
 
 ```bash
 # Linux / macOS（首次使用需赋予执行权限）
-chmod +x start.sh
-./start.sh
+chmod +x scripts/start.sh
+scripts/start.sh
 
 # Windows
-start.bat
+scripts\start.bat
 ```
 
 Linux 按 `Ctrl+C` 停止所有服务；Windows 按任意键停止。
@@ -194,15 +194,16 @@ Flask → POST /login → FastAPI (mainagent.py)
 mini_timebot/
 ├── LICENSE
 ├── README.md
-├── requirements.txt
-├── setup_env.sh           # 自动环境配置脚本 (Linux / macOS)
-├── setup_env.bat          # 自动环境配置脚本 (Windows)
-├── start.sh               # 一键启动脚本 (Linux / macOS)
-├── start.bat              # 一键启动脚本 (Windows)
-├── adduser.sh             # 添加用户脚本 (Linux / macOS)
-├── adduser.bat            # 添加用户脚本 (Windows)
+├── scripts/                   # 脚本集中目录
+│   ├── setup_env.sh           # 自动环境配置 (Linux / macOS)
+│   ├── setup_env.bat          # 自动环境配置 (Windows)
+│   ├── start.sh               # 一键启动 (Linux / macOS)
+│   ├── start.bat              # 一键启动 (Windows)
+│   ├── adduser.sh             # 添加用户 (Linux / macOS)
+│   └── adduser.bat            # 添加用户 (Windows)
 ├── config/
 │   ├── .env               # 环境变量配置（需自行创建，不纳入版本控制）
+│   ├── requirements.txt   # Python 依赖列表
 │   ├── users.json         # 用户名-密码哈希（需用 gen_password.py 生成，不纳入版本控制）
 │   └── users.json.example # 用户配置格式示例
 ├── data/
