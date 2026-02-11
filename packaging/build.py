@@ -1,6 +1,6 @@
 """
 打包脚本：将 launcher.py 打包为单个 exe（MiniTimeBot.exe）
-用法：python scripts/build.py
+用法：python packaging/build.py
 """
 import subprocess
 import shutil
@@ -9,7 +9,7 @@ import os
 
 # 项目根目录
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-SCRIPTS_DIR = os.path.join(ROOT, "scripts")
+PACKAGING_DIR = os.path.join(ROOT, "packaging")
 DIST_DIR = os.path.join(ROOT, "dist")
 
 
@@ -28,8 +28,8 @@ def build_exe():
         print("[ERROR] 请先安装 PyInstaller：pip install pyinstaller")
         sys.exit(1)
 
-    launcher = os.path.join(SCRIPTS_DIR, "launcher.py")
-    icon = os.path.join(SCRIPTS_DIR, "icon.ico")
+    launcher = os.path.join(PACKAGING_DIR, "launcher.py")
+    icon = os.path.join(PACKAGING_DIR, "icon.ico")
 
     cmd = [
         sys.executable, "-m", "PyInstaller",
@@ -46,9 +46,7 @@ def build_exe():
     if os.path.exists(icon):
         cmd += ["--icon", icon]
 
-    # 不显示控制台窗口（run.bat 自己会开 cmd）
-    # 注意：不能用 --noconsole，因为 run.bat 需要交互（用户输入 y/N）
-    # 所以保留控制台
+    # 保留控制台（run.bat 需要交互：用户输入 y/N）
     cmd.append(launcher)
 
     print(f"[BUILD] 正在打包 MiniTimeBot.exe ...")
@@ -77,7 +75,7 @@ def main():
     print("  MiniTimeBot 打包工具")
     print("=" * 50)
     build_exe()
-    print("\n[提示] 打包完成后可用 Inno Setup 打开 scripts/installer.iss 制作安装包")
+    print("\n[提示] 打包完成后可用 Inno Setup 打开 packaging/installer.iss 制作安装包")
 
 
 if __name__ == "__main__":
