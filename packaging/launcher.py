@@ -15,7 +15,7 @@ def main():
     else:
         exe_dir = os.path.dirname(os.path.abspath(__file__))
 
-    # run.bat 在项目根目录（exe 放在根目录时直接同级；放在 scripts/ 时往上一级）
+    # run.bat 在项目根目录（exe 放在根目录时直接同级；放在 packaging/ 时往上一级）
     run_bat = os.path.join(exe_dir, "run.bat")
     if not os.path.exists(run_bat):
         run_bat = os.path.join(os.path.dirname(exe_dir), "run.bat")

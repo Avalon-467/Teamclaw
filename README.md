@@ -223,7 +223,8 @@ mini_timebot/
 │   ├── start.sh               # 一键启动 (Linux / macOS)
 │   ├── start.bat              # 一键启动 (Windows)
 │   ├── adduser.sh             # 添加用户 (Linux / macOS)
-│   ├── adduser.bat            # 添加用户 (Windows)
+│   └── adduser.bat            # 添加用户 (Windows)
+├── packaging/                 # 打包发布相关
 │   ├── launcher.py            # exe 启动器源码（调用 run.bat）
 │   ├── build.py               # PyInstaller 打包脚本
 │   └── installer.iss          # Inno Setup 安装包脚本
@@ -308,10 +309,10 @@ Agent 通过 `mcp_filemanager.py` 提供文件管理能力，支持 5 个操作�
 pip install pyinstaller
 
 # 2. 打包 exe（生成 MiniTimeBot.exe 到项目根目录）
-python scripts/build.py
+python packaging/build.py
 
 # 3. 制作安装包（可选）
-#    用 Inno Setup 打开 scripts/installer.iss，点击编译
+#    用 Inno Setup 打开 packaging/installer.iss，点击编译
 #    生成 dist/MiniTimeBot_Setup_1.0.0.exe
 ```
 
