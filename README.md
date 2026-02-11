@@ -39,7 +39,7 @@ mainagent.py (FastAPI + LangGraph)  ── 核心 AI Agent，集成 DeepSeek LLM
 
 ### 一键运行（推荐）
 
-**一站式脚本**，自动完成 环境配置 → 创建用户 → 启动服务，无需手动执行其他步骤：
+**一站式脚本**，自动完成 环境配置 → API Key 配置 → 创建用户 → 启动服务，无需手动执行其他步骤：
 
 ```bash
 # Linux / macOS（首次使用需赋予执行权限）
@@ -52,10 +52,11 @@ run.bat
 
 脚本会依次执行：
 1. **环境配置** — 检查并安装 uv、创建虚拟环境、安装依赖（已完成则自动跳过）
-2. **用户管理** — 询问是否添加新用户（可跳过）
-3. **启动服务** — 拉起全部服务并打开 Web UI
+2. **API Key 配置** — 检查并引导输入 DeepSeek API Key（已配置则自动跳过）
+3. **用户管理** — 询问是否添加新用户（可跳过）
+4. **启动服务** — 拉起全部服务并打开 Web UI
 
-> 只需配置好 `config/.env`（填入 API Key），其余一切交给脚本处理。
+> 一切交给脚本处理，无需手动编辑任何配置文件。
 > 以下章节为手动分步操作说明，使用 `run.sh` / `run.bat` 可跳过。
 
 ### 1. 环境配置
@@ -223,7 +224,9 @@ mini_timebot/
 │   ├── start.sh               # 一键启动 (Linux / macOS)
 │   ├── start.bat              # 一键启动 (Windows)
 │   ├── adduser.sh             # 添加用户 (Linux / macOS)
-│   └── adduser.bat            # 添加用户 (Windows)
+│   ├── adduser.bat            # 添加用户 (Windows)
+│   ├── setup_apikey.sh        # API Key 配置 (Linux / macOS)
+│   └── setup_apikey.bat       # API Key 配置 (Windows)
 ├── packaging/                 # 打包发布相关
 │   ├── launcher.py            # exe 启动器源码（调用 run.bat）
 │   ├── build.py               # PyInstaller 打包脚本
