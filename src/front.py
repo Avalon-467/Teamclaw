@@ -26,15 +26,35 @@ HTML_TEMPLATE = """
         .markdown-body code { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; font-size: 0.9em; }
         .message-user { border-radius: 1.25rem 1.25rem 0.2rem 1.25rem; }
         .message-agent { border-radius: 1.25rem 1.25rem 1.25rem 0.2rem; }
-        
-        /* 打字动画效果 */
         .dot { width: 6px; height: 6px; background: #3b82f6; border-radius: 50%; animation: pulse 1.5s infinite; }
         @keyframes pulse { 0%, 100% { opacity: 0.3; transform: scale(0.8); } 50% { opacity: 1; transform: scale(1.2); } }
     </style>
 </head>
 <body class="bg-gray-100 font-sans leading-normal tracking-normal">
 
-    <div class="max-w-4xl mx-auto h-screen flex flex-col shadow-2xl bg-white border-x border-gray-200">
+    <!-- ========== 登录页 ========== -->
+    <div id="login-screen" class="min-h-screen flex items-center justify-center">
+        <div class="bg-white rounded-2xl shadow-2xl p-8 w-full max-w-md border">
+            <div class="flex items-center justify-center space-x-3 mb-6">
+                <div class="bg-blue-600 p-3 rounded-xl text-white font-bold text-2xl">X</div>
+                <h1 class="text-2xl font-bold text-gray-800">Xavier AnyControl</h1>
+            </div>
+            <p class="text-center text-gray-500 text-sm mb-8">输入用户名以开始对话</p>
+            <div class="space-y-4">
+                <input id="username-input" type="text" maxlength="32"
+                    class="w-full p-3 border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 text-center text-lg"
+                    placeholder="请输入用户名" autofocus>
+                <button onclick="handleLogin()" id="login-btn"
+                    class="w-full bg-blue-600 hover:bg-blue-700 text-white py-3 rounded-xl font-bold text-lg transition-all shadow-lg">
+                    进入
+                </button>
+            </div>
+            <p class="text-xs text-gray-400 text-center mt-6">用户名将作为身份标识，用于隔离对话和文件</p>
+        </div>
+    </div>
+
+    <!-- ========== 聊天页（初始隐藏） ========== -->
+    <div id="chat-screen" class="max-w-4xl mx-auto h-screen flex-col shadow-2xl bg-white border-x border-gray-200" style="display:none;">
         <header class="p-4 border-b bg-white flex justify-between items-center sticky top-0 z-10">
             <div class="flex items-center space-x-3">
                 <div class="bg-blue-600 p-2 rounded-lg text-white font-bold text-xl">X</div>
@@ -43,13 +63,16 @@ HTML_TEMPLATE = """
                     <p class="text-xs text-green-500 flex items-center">● 链路已加密 (HTTPS)</p>
                 </div>
             </div>
-            <div class="text-sm font-mono bg-gray-100 px-3 py-1 rounded border">UID: Xavier_01</div>
+            <div class="flex items-center space-x-2">
+                <div id="uid-display" class="text-sm font-mono bg-gray-100 px-3 py-1 rounded border"></div>
+                <button onclick="handleLogout()" class="text-xs text-gray-400 hover:text-red-500 px-2 py-1 rounded transition-colors" title="切换用户">退出</button>
+            </div>
         </header>
 
         <div id="chat-box" class="chat-container overflow-y-auto p-6 space-y-6 flex-grow bg-gray-50">
             <div class="flex justify-start">
                 <div class="message-agent bg-white border p-4 max-w-[85%] shadow-sm text-gray-700">
-                    你好！我是 Xavier 智能助手。我已经准备好在公网为你服务，请输入你的指令。
+                    你好！我是 Xavier 智能助手。我已经准备好为你服务，请输入你的指令。
                 </div>
             </div>
         </div>
@@ -71,7 +94,6 @@ HTML_TEMPLATE = """
     </div>
 
     <script>
-        // 初始化 Markdown 渲染配置
         marked.setOptions({
             highlight: function(code, lang) {
                 const language = hljs.getLanguage(lang) ? lang : 'plaintext';
@@ -80,34 +102,83 @@ HTML_TEMPLATE = """
             langPrefix: 'hljs language-'
         });
 
+        let currentUserId = null;
+
+        // ===== 登录逻辑 =====
+        function handleLogin() {
+            const input = document.getElementById('username-input');
+            const name = input.value.trim();
+            if (!name) { input.focus(); return; }
+
+            // 仅允许字母、数字、下划线、短横线
+            if (!/^[a-zA-Z0-9_\\-\\u4e00-\\u9fa5]+$/.test(name)) {
+                alert('用户名只能包含字母、数字、下划线、短横线或中文');
+                return;
+            }
+
+            currentUserId = name;
+            localStorage.setItem('userId', name);
+
+            document.getElementById('uid-display').textContent = 'UID: ' + name;
+            document.getElementById('login-screen').style.display = 'none';
+            document.getElementById('chat-screen').style.display = 'flex';
+            document.getElementById('user-input').focus();
+        }
+
+        function handleLogout() {
+            currentUserId = null;
+            localStorage.removeItem('userId');
+            document.getElementById('chat-screen').style.display = 'none';
+            document.getElementById('login-screen').style.display = 'flex';
+            document.getElementById('username-input').value = '';
+            document.getElementById('username-input').focus();
+            // 清空聊天记录（UI 层面）
+            const chatBox = document.getElementById('chat-box');
+            chatBox.innerHTML = `
+                <div class="flex justify-start">
+                    <div class="message-agent bg-white border p-4 max-w-[85%] shadow-sm text-gray-700">
+                        你好！我是 Xavier 智能助手。我已经准备好为你服务，请输入你的指令。
+                    </div>
+                </div>`;
+        }
+
+        // 页面加载时自动恢复登录状态
+        (function autoLogin() {
+            const saved = localStorage.getItem('userId');
+            if (saved) {
+                document.getElementById('username-input').value = saved;
+                handleLogin();
+            }
+        })();
+
+        // 登录输入框回车
+        document.getElementById('username-input').addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') { e.preventDefault(); handleLogin(); }
+        });
+
+        // ===== 聊天逻辑 =====
         const chatBox = document.getElementById('chat-box');
         const inputField = document.getElementById('user-input');
         const sendBtn = document.getElementById('send-btn');
 
-        // 将消息渲染到页面
         function appendMessage(content, isUser = false) {
             const wrapper = document.createElement('div');
             wrapper.className = `flex ${isUser ? 'justify-end' : 'justify-start'} animate-in fade-in duration-300`;
-            
             const div = document.createElement('div');
             div.className = `p-4 max-w-[85%] shadow-sm ${isUser ? 'bg-blue-600 text-white message-user' : 'bg-white border text-gray-800 message-agent'}`;
-            
             if (isUser) {
                 div.innerText = content;
             } else {
                 div.className += " markdown-body";
                 div.innerHTML = marked.parse(content);
-                // 渲染代码块高亮
                 div.querySelectorAll('pre code').forEach((block) => hljs.highlightElement(block));
             }
-            
             wrapper.appendChild(div);
             chatBox.appendChild(wrapper);
             chatBox.scrollTop = chatBox.scrollHeight;
             return div;
         }
 
-        // 显示思考中的打字状态
         function showTyping() {
             const wrapper = document.createElement('div');
             wrapper.id = 'typing-indicator';
@@ -124,34 +195,24 @@ HTML_TEMPLATE = """
             const text = inputField.value.trim();
             if (!text || sendBtn.disabled) return;
 
-            // 1. 发送用户消息
             appendMessage(text, true);
             inputField.value = '';
             inputField.style.height = 'auto';
-            
-            // 2. 状态锁定
             sendBtn.disabled = true;
             showTyping();
 
             try {
-                // 请求本地 Flask 代理
                 const response = await fetch("/proxy_ask", {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ content: text })
+                    body: JSON.stringify({ content: text, user_id: currentUserId })
                 });
-
                 const typingIndicator = document.getElementById('typing-indicator');
                 if (typingIndicator) typingIndicator.remove();
-
                 if (!response.ok) throw new Error("Agent 响应异常");
-
                 const data = await response.json();
-                
-                // 3. 渲染 Agent 返回（适配你后端返回的 response 字段）
                 const agentReply = data.response || data.output || JSON.stringify(data);
                 appendMessage(agentReply, false);
-
             } catch (error) {
                 const typingIndicator = document.getElementById('typing-indicator');
                 if (typingIndicator) typingIndicator.remove();
@@ -161,17 +222,12 @@ HTML_TEMPLATE = """
             }
         }
 
-        // 自适应高度与回车监听
         inputField.addEventListener('input', function() {
             this.style.height = 'auto';
             this.style.height = (this.scrollHeight) + 'px';
         });
-
         inputField.addEventListener('keydown', (e) => {
-            if (e.key === 'Enter' && !e.shiftKey) {
-                e.preventDefault();
-                handleSend();
-            }
+            if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(); }
         });
     </script>
 </body>
@@ -185,11 +241,10 @@ def index():
 @app.route("/proxy_ask", methods=["POST"])
 def proxy_ask():
     user_content = request.json.get("content")
+    user_id = request.json.get("user_id", "anonymous")
     
-    # 构造发送给本地 FastAPI 的格式
-    # 这里的 user_id 你可以根据需要从前端传入或在此固定
     payload = {
-        "user_id": "Xavier_01",
+        "user_id": user_id,
         "text": user_content
     }
     
