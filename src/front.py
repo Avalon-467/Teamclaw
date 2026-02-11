@@ -1,11 +1,13 @@
-from flask import Flask, render_template_string, request, jsonify
+from flask import Flask, render_template_string, request, jsonify, session
 import requests
+import os
 
 app = Flask(__name__)
+app.secret_key = os.urandom(24)
 
 # --- 配置区 ---
-# 指向你本地正在运行的 FastAPI Agent 端口
 LOCAL_AGENT_URL = "http://127.0.0.1:8000/ask"
+LOCAL_LOGIN_URL = "http://127.0.0.1:8000/login"
 
 HTML_TEMPLATE = """
 <!DOCTYPE html>
@@ -39,17 +41,21 @@ HTML_TEMPLATE = """
                 <div class="bg-blue-600 p-3 rounded-xl text-white font-bold text-2xl">X</div>
                 <h1 class="text-2xl font-bold text-gray-800">Xavier AnyControl</h1>
             </div>
-            <p class="text-center text-gray-500 text-sm mb-8">输入用户名以开始对话</p>
+            <p class="text-center text-gray-500 text-sm mb-8">请登录以开始对话</p>
             <div class="space-y-4">
                 <input id="username-input" type="text" maxlength="32"
                     class="w-full p-3 border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 text-center text-lg"
-                    placeholder="请输入用户名" autofocus>
+                    placeholder="用户名" autofocus>
+                <input id="password-input" type="password" maxlength="64"
+                    class="w-full p-3 border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 text-center text-lg"
+                    placeholder="密码">
+                <div id="login-error" class="text-red-500 text-sm text-center hidden"></div>
                 <button onclick="handleLogin()" id="login-btn"
                     class="w-full bg-blue-600 hover:bg-blue-700 text-white py-3 rounded-xl font-bold text-lg transition-all shadow-lg">
-                    进入
+                    登录
                 </button>
             </div>
-            <p class="text-xs text-gray-400 text-center mt-6">用户名将作为身份标识，用于隔离对话和文件</p>
+            <p class="text-xs text-gray-400 text-center mt-6">身份验证后方可使用，对话和文件按用户隔离</p>
         </div>
     </div>
 
@@ -105,34 +111,70 @@ HTML_TEMPLATE = """
         let currentUserId = null;
 
         // ===== 登录逻辑 =====
-        function handleLogin() {
-            const input = document.getElementById('username-input');
-            const name = input.value.trim();
-            if (!name) { input.focus(); return; }
+        async function handleLogin() {
+            const nameInput = document.getElementById('username-input');
+            const pwInput = document.getElementById('password-input');
+            const errorDiv = document.getElementById('login-error');
+            const loginBtn = document.getElementById('login-btn');
+            const name = nameInput.value.trim();
+            const password = pwInput.value;
 
-            // 仅允许字母、数字、下划线、短横线
+            errorDiv.classList.add('hidden');
+
+            if (!name) { nameInput.focus(); return; }
+            if (!password) { pwInput.focus(); return; }
+
             if (!/^[a-zA-Z0-9_\\-\\u4e00-\\u9fa5]+$/.test(name)) {
-                alert('用户名只能包含字母、数字、下划线、短横线或中文');
+                errorDiv.textContent = '用户名只能包含字母、数字、下划线、短横线或中文';
+                errorDiv.classList.remove('hidden');
                 return;
             }
 
-            currentUserId = name;
-            localStorage.setItem('userId', name);
+            loginBtn.disabled = true;
+            loginBtn.textContent = '验证中...';
 
-            document.getElementById('uid-display').textContent = 'UID: ' + name;
-            document.getElementById('login-screen').style.display = 'none';
-            document.getElementById('chat-screen').style.display = 'flex';
-            document.getElementById('user-input').focus();
+            try {
+                const resp = await fetch("/proxy_login", {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ user_id: name, password: password })
+                });
+                const data = await resp.json();
+                if (!resp.ok) {
+                    errorDiv.textContent = data.detail || data.error || '登录失败';
+                    errorDiv.classList.remove('hidden');
+                    return;
+                }
+
+                currentUserId = name;
+                // 不存储密码明文到 localStorage，存到 sessionStorage
+                sessionStorage.setItem('userId', name);
+                sessionStorage.setItem('authToken', data.token || '');
+
+                document.getElementById('uid-display').textContent = 'UID: ' + name;
+                document.getElementById('login-screen').style.display = 'none';
+                document.getElementById('chat-screen').style.display = 'flex';
+                document.getElementById('user-input').focus();
+            } catch (e) {
+                errorDiv.textContent = '网络错误: ' + e.message;
+                errorDiv.classList.remove('hidden');
+            } finally {
+                loginBtn.disabled = false;
+                loginBtn.textContent = '登录';
+            }
         }
 
         function handleLogout() {
             currentUserId = null;
-            localStorage.removeItem('userId');
+            sessionStorage.removeItem('userId');
+            sessionStorage.removeItem('authToken');
+            fetch("/proxy_logout", { method: 'POST' });
             document.getElementById('chat-screen').style.display = 'none';
             document.getElementById('login-screen').style.display = 'flex';
             document.getElementById('username-input').value = '';
+            document.getElementById('password-input').value = '';
+            document.getElementById('login-error').classList.add('hidden');
             document.getElementById('username-input').focus();
-            // 清空聊天记录（UI 层面）
             const chatBox = document.getElementById('chat-box');
             chatBox.innerHTML = `
                 <div class="flex justify-start">
@@ -142,17 +184,23 @@ HTML_TEMPLATE = """
                 </div>`;
         }
 
-        // 页面加载时自动恢复登录状态
-        (function autoLogin() {
-            const saved = localStorage.getItem('userId');
+        // 页面加载时检查 session（不自动登录，需要重新输入密码）
+        (function checkSession() {
+            const saved = sessionStorage.getItem('userId');
             if (saved) {
-                document.getElementById('username-input').value = saved;
-                handleLogin();
+                // session 还在（同一标签页未关闭），恢复显示
+                currentUserId = saved;
+                document.getElementById('uid-display').textContent = 'UID: ' + saved;
+                document.getElementById('login-screen').style.display = 'none';
+                document.getElementById('chat-screen').style.display = 'flex';
             }
         })();
 
         // 登录输入框回车
         document.getElementById('username-input').addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') { e.preventDefault(); document.getElementById('password-input').focus(); }
+        });
+        document.getElementById('password-input').addEventListener('keydown', (e) => {
             if (e.key === 'Enter') { e.preventDefault(); handleLogin(); }
         });
 
@@ -205,10 +253,15 @@ HTML_TEMPLATE = """
                 const response = await fetch("/proxy_ask", {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ content: text, user_id: currentUserId })
+                    body: JSON.stringify({ content: text })
                 });
                 const typingIndicator = document.getElementById('typing-indicator');
                 if (typingIndicator) typingIndicator.remove();
+                if (response.status === 401) {
+                    appendMessage("⚠️ 登录已过期，请重新登录", false);
+                    handleLogout();
+                    return;
+                }
                 if (!response.ok) throw new Error("Agent 响应异常");
                 const data = await response.json();
                 const agentReply = data.response || data.output || JSON.stringify(data);
@@ -238,22 +291,53 @@ HTML_TEMPLATE = """
 def index():
     return render_template_string(HTML_TEMPLATE)
 
+@app.route("/proxy_login", methods=["POST"])
+def proxy_login():
+    """代理登录请求到后端 Agent"""
+    user_id = request.json.get("user_id", "")
+    password = request.json.get("password", "")
+
+    try:
+        r = requests.post(LOCAL_LOGIN_URL, json={"user_id": user_id, "password": password}, timeout=10)
+        if r.status_code == 200:
+            # 登录成功，在 Flask session 中记录
+            session["user_id"] = user_id
+            session["password"] = password  # 需要传给后端每次验证
+            return jsonify(r.json())
+        else:
+            return jsonify(r.json()), r.status_code
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
 @app.route("/proxy_ask", methods=["POST"])
 def proxy_ask():
+    # 从 Flask session 中获取已验证的用户信息
+    user_id = session.get("user_id")
+    password = session.get("password")
+    if not user_id or not password:
+        return jsonify({"error": "未登录"}), 401
+
     user_content = request.json.get("content")
-    user_id = request.json.get("user_id", "anonymous")
     
     payload = {
         "user_id": user_id,
+        "password": password,
         "text": user_content
     }
     
     try:
-        # Flask 作为中转，直接调本机 8000 端口
         r = requests.post(LOCAL_AGENT_URL, json=payload, timeout=120)
+        if r.status_code == 401:
+            session.clear()
+            return jsonify(r.json()), 401
         return jsonify(r.json())
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+
+@app.route("/proxy_logout", methods=["POST"])
+def proxy_logout():
+    session.clear()
+    return jsonify({"status": "success"})
 
 if __name__ == "__main__":
     # 重要：运行在 9000 端口，对应你的隧道设置

@@ -1,11 +1,13 @@
 import os
 import copy
+import json
+import hashlib
 import asyncio
 from datetime import datetime
 from typing import Annotated, TypedDict, Optional
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 import uvicorn
 
@@ -32,9 +34,28 @@ root_dir = os.path.dirname(current_dir)
 # 3. 拼接 env 和 db 的路径
 env_path = os.path.join(root_dir, "config", ".env")
 db_path = os.path.join(root_dir, "data", "agent_memory.db")
+users_path = os.path.join(root_dir, "config", "users.json")
 
 # 加载配置
 load_dotenv(dotenv_path=env_path)
+
+
+def load_users() -> dict:
+    """加载用户名-密码哈希配置"""
+    if not os.path.exists(users_path):
+        print(f"⚠️ 未找到用户配置文件 {users_path}，请先运行 python tools/gen_password.py 创建用户")
+        return {}
+    with open(users_path, "r", encoding="utf-8") as f:
+        return json.load(f)
+
+
+def verify_password(username: str, password: str) -> bool:
+    """验证用户密码：对输入密码做 sha256 后与配置中的哈希比对"""
+    users = load_users()
+    if username not in users:
+        return False
+    pw_hash = hashlib.sha256(password.encode("utf-8")).hexdigest()
+    return pw_hash == users[username]
 
 # 文件管理工具名称集合（需要自动注入 username 的工具）
 FILE_TOOLS = {"list_files", "read_file", "write_file", "append_file", "delete_file"}
@@ -205,17 +226,32 @@ app = FastAPI(lifespan=lifespan)
 
 # --- 5. API 定义 ---
 
+class LoginRequest(BaseModel):
+    user_id: str
+    password: str
+
 class UserRequest(BaseModel):
     user_id: str
+    password: str
     text: str
 
 class SystemTriggerRequest(BaseModel):
     user_id: str
     text: str = "summary" # 默认为总结指令
 
-# A. 用户输入接口
+# 登录验证接口
+@app.post("/login")
+async def login(req: LoginRequest):
+    if verify_password(req.user_id, req.password):
+        return {"status": "success", "message": "登录成功"}
+    raise HTTPException(status_code=401, detail="用户名或密码错误")
+
+# A. 用户输入接口（需要密码验证）
 @app.post("/ask")
 async def ask_agent(req: UserRequest):
+    if not verify_password(req.user_id, req.password):
+        raise HTTPException(status_code=401, detail="用户名或密码错误")
+
     agent_app = app.state.agent_app
     config = {"configurable": {"thread_id": req.user_id}}
     
