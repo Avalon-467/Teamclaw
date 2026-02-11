@@ -3,7 +3,7 @@ chcp 65001 >nul 2>&1
 setlocal enabledelayedexpansion
 
 :: Mini TimeBot 自动环境配置脚本
-cd /d "%~dp0"
+cd /d "%~dp0\.."
 
 echo ==========================================
 echo   Mini TimeBot 环境自动配置
@@ -41,14 +41,14 @@ if !errorlevel! neq 0 echo [ERROR] 激活失败 && pause && exit /b 1
 python --version
 
 :: --- 4. 安装依赖 ---
-if not exist "requirements.txt" goto no_req
+if not exist "config\requirements.txt" goto no_req
 echo [INSTALL] 正在安装依赖...
-uv pip install -r requirements.txt
+uv pip install -r config\requirements.txt
 echo [OK] 依赖安装完成
 goto req_done
 
 :no_req
-echo [SKIP] 未找到 requirements.txt
+echo [SKIP] 未找到 config\requirements.txt
 
 :req_done
 
@@ -60,6 +60,6 @@ if exist "config\users.json" (echo [OK] users.json 存在) else (echo [WARN] use
 
 echo.
 echo ==========================================
-echo   配置完成！输入 start.bat 启动服务
+echo   配置完成！输入 scripts\start.bat 启动服务
 echo ==========================================
 pause

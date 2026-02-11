@@ -2,7 +2,7 @@
 # Mini TimeBot 自动环境配置脚本 (Linux / macOS)
 
 set -e
-cd "$(dirname "$0")"
+cd "$(dirname "$0")/.."
 
 echo "=========================================="
 echo "  Mini TimeBot 环境自动配置"
@@ -39,8 +39,8 @@ source .venv/bin/activate
 echo "✅ 虚拟环境已激活: $(python --version)"
 
 # --- 4. 安装/更新依赖 ---
-echo "📦 安装依赖 (requirements.txt)..."
-uv pip install -r requirements.txt
+echo "📦 安装依赖 (config/requirements.txt)..."
+uv pip install -r config/requirements.txt
 echo "✅ 依赖安装完成"
 
 # --- 5. 检查配置文件 ---
@@ -56,11 +56,11 @@ fi
 if [ -f "config/users.json" ]; then
     echo "✅ config/users.json 已存在"
 else
-    echo "⚠️  config/users.json 不存在，请运行 ./adduser.sh 创建用户"
+    echo "⚠️  config/users.json 不存在，请运行 scripts/adduser.sh 创建用户"
 fi
 
 echo ""
 echo "=========================================="
 echo "  ✅ 环境配置完成！"
-echo "  启动服务: ./start.sh"
+echo "  启动服务: scripts/start.sh"
 echo "=========================================="

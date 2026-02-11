@@ -4,7 +4,7 @@ setlocal EnableDelayedExpansion
 
 :: Mini TimeBot 一键启动脚本 (Windows)
 
-cd /d "%~dp0"
+cd /d "%~dp0\.."
 
 :: 检查 .env 配置
 if not exist "config\.env" (
