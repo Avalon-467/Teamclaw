@@ -31,6 +31,21 @@ else:
 
 venv_python = venv_path if os.path.exists(venv_path) else sys.executable
 
+# 模拟虚拟环境激活：设置环境变量，确保子进程及其孙进程都能找到正确的 Python
+# （等效于 source .venv/bin/activate）
+env = os.environ.copy()
+venv_dir = os.path.join(PROJECT_ROOT, ".venv")
+if os.path.exists(venv_dir):
+    env["VIRTUAL_ENV"] = venv_dir
+    if sys.platform == "win32":
+        venv_bin = os.path.join(venv_dir, "Scripts")
+    else:
+        venv_bin = os.path.join(venv_dir, "bin")
+    # 把虚拟环境的 bin 目录放到 PATH 最前面
+    env["PATH"] = venv_bin + os.pathsep + env.get("PATH", "")
+    # 移除可能干扰的 PYTHONHOME
+    env.pop("PYTHONHOME", None)
+
 # 子进程列表
 procs = []
 cleanup_done = False
@@ -116,6 +131,7 @@ for msg, script, wait_time in services:
     proc = subprocess.Popen(
         [venv_python, script],
         cwd=PROJECT_ROOT,
+        env=env,      # 传递含虚拟环境的环境变量
         stdout=None,  # 继承父进程的 stdout
         stderr=None,  # 继承父进程的 stderr
     )
