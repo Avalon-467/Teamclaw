@@ -1,6 +1,7 @@
 #!/bin/bash
 # ==============================================
-#  MiniTimeBot macOS DMG 打包脚本
+#  MiniTimeBot macOS 打包脚本
+#  生成 .app 应用包 + DMG/tar.gz
 #  用法: bash packaging/build_dmg.sh
 # ==============================================
 
@@ -9,17 +10,19 @@ set -e
 # ---- 配置 ----
 APP_NAME="MiniTimeBot"
 VERSION="1.0.0"
+BUNDLE_ID="com.minitimebot.app"
 DMG_NAME="${APP_NAME}_${VERSION}.dmg"
 
 # 项目根目录
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 ROOT="$(dirname "$SCRIPT_DIR")"
 BUILD_DIR="${ROOT}/build/dmg"
-STAGE_DIR="${BUILD_DIR}/${APP_NAME}"
+APP_BUNDLE="${BUILD_DIR}/${APP_NAME}.app"
 OUTPUT_DIR="${ROOT}/dist"
 
 echo "============================================"
-echo "  ${APP_NAME} macOS DMG 打包工具 v${VERSION}"
+echo "  ${APP_NAME} macOS 打包工具 v${VERSION}"
+echo "  生成 .app 应用包"
 echo "============================================"
 echo ""
 
@@ -27,10 +30,10 @@ echo ""
 if [[ "$(uname)" != "Darwin" ]]; then
     echo "⚠️  当前系统非 macOS ($(uname))，将生成 tar.gz 替代 DMG"
     echo "   DMG 格式仅支持在 macOS 上构建"
+    echo "   .app 结构仍然会正确生成"
     USE_TAR=true
 else
     USE_TAR=false
-    # 检查 hdiutil（macOS 自带）
     if ! command -v hdiutil &>/dev/null; then
         echo "❌ 未找到 hdiutil，请确认 macOS 环境"
         exit 1
@@ -40,72 +43,156 @@ fi
 # ---- 2. 清理旧构建 ----
 echo "🧹 清理旧构建..."
 rm -rf "${BUILD_DIR}"
-mkdir -p "${STAGE_DIR}"
+mkdir -p "${BUILD_DIR}"
 mkdir -p "${OUTPUT_DIR}"
 
-# ---- 3. 复制项目文件到暂存目录 ----
-echo "📦 准备打包文件..."
+# ---- 3. 构建 .app 应用包结构 ----
+echo "📱 构建 ${APP_NAME}.app ..."
+
+# macOS .app 标准目录结构
+CONTENTS="${APP_BUNDLE}/Contents"
+MACOS_DIR="${CONTENTS}/MacOS"
+RESOURCES="${CONTENTS}/Resources"
+
+mkdir -p "${MACOS_DIR}"
+mkdir -p "${RESOURCES}"
+
+# ---- 3a. 创建 Info.plist（应用元数据）----
+cat > "${CONTENTS}/Info.plist" << PLIST
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleName</key>
+    <string>${APP_NAME}</string>
+    <key>CFBundleDisplayName</key>
+    <string>Mini TimeBot</string>
+    <key>CFBundleIdentifier</key>
+    <string>${BUNDLE_ID}</string>
+    <key>CFBundleVersion</key>
+    <string>${VERSION}</string>
+    <key>CFBundleShortVersionString</key>
+    <string>${VERSION}</string>
+    <key>CFBundlePackageType</key>
+    <string>APPL</string>
+    <key>CFBundleSignature</key>
+    <string>????</string>
+    <key>CFBundleExecutable</key>
+    <string>launch</string>
+    <key>CFBundleIconFile</key>
+    <string>AppIcon</string>
+    <key>LSMinimumSystemVersion</key>
+    <string>10.15</string>
+    <key>NSHighResolutionCapable</key>
+    <true/>
+    <key>LSApplicationCategoryType</key>
+    <string>public.app-category.productivity</string>
+    <key>NSAppleEventsUsageDescription</key>
+    <string>MiniTimeBot 需要控制终端来启动服务</string>
+</dict>
+</plist>
+PLIST
+
+echo "  ✅ Info.plist"
+
+# ---- 3b. 创建启动器脚本（Contents/MacOS/launch）----
+cat > "${MACOS_DIR}/launch" << 'LAUNCHER'
+#!/bin/bash
+# MiniTimeBot .app 启动器
+# 双击 .app 时 macOS 会执行此脚本
+
+# 获取 Resources 目录（项目文件所在位置）
+RESOURCES_DIR="$(dirname "$0")/../Resources"
+RESOURCES_DIR="$(cd "$RESOURCES_DIR" && pwd)"
+
+# 在 Terminal.app 中打开并运行 run.sh
+osascript <<EOF
+tell application "Terminal"
+    activate
+    do script "cd '${RESOURCES_DIR}' && bash run.sh"
+end tell
+EOF
+LAUNCHER
+chmod +x "${MACOS_DIR}/launch"
+echo "  ✅ 启动器 (MacOS/launch)"
+
+# ---- 3c. 复制项目文件到 Resources ----
+echo "  📦 复制项目文件到 Resources..."
 
 # 核心脚本
-cp "${ROOT}/run.sh" "${STAGE_DIR}/"
-chmod +x "${STAGE_DIR}/run.sh"
+cp "${ROOT}/run.sh" "${RESOURCES}/"
+chmod +x "${RESOURCES}/run.sh"
 
 # scripts 目录（仅 .sh 文件）
-mkdir -p "${STAGE_DIR}/scripts"
+mkdir -p "${RESOURCES}/scripts"
 for f in setup_env.sh start.sh adduser.sh setup_apikey.sh; do
     if [ -f "${ROOT}/scripts/${f}" ]; then
-        cp "${ROOT}/scripts/${f}" "${STAGE_DIR}/scripts/"
-        chmod +x "${STAGE_DIR}/scripts/${f}"
+        cp "${ROOT}/scripts/${f}" "${RESOURCES}/scripts/"
+        chmod +x "${RESOURCES}/scripts/${f}"
     fi
 done
 
 # 源码
-cp -r "${ROOT}/src" "${STAGE_DIR}/src"
+cp -r "${ROOT}/src" "${RESOURCES}/src"
 
 # 工具
 if [ -d "${ROOT}/tools" ]; then
-    cp -r "${ROOT}/tools" "${STAGE_DIR}/tools"
+    cp -r "${ROOT}/tools" "${RESOURCES}/tools"
 fi
 
 # 配置模板
-mkdir -p "${STAGE_DIR}/config"
-cp "${ROOT}/config/requirements.txt" "${STAGE_DIR}/config/"
-if [ -f "${ROOT}/config/.env.example" ]; then
-    cp "${ROOT}/config/.env.example" "${STAGE_DIR}/config/"
-fi
-if [ -f "${ROOT}/config/users.json.example" ]; then
-    cp "${ROOT}/config/users.json.example" "${STAGE_DIR}/config/"
-fi
+mkdir -p "${RESOURCES}/config"
+cp "${ROOT}/config/requirements.txt" "${RESOURCES}/config/"
+[ -f "${ROOT}/config/.env.example" ] && cp "${ROOT}/config/.env.example" "${RESOURCES}/config/"
+[ -f "${ROOT}/config/users.json.example" ] && cp "${ROOT}/config/users.json.example" "${RESOURCES}/config/"
 
-# 数据目录结构（空目录）
-mkdir -p "${STAGE_DIR}/data/timeset"
-mkdir -p "${STAGE_DIR}/data/user_files"
+# 数据目录结构
+mkdir -p "${RESOURCES}/data/timeset"
+mkdir -p "${RESOURCES}/data/user_files"
 
 # 许可证
-if [ -f "${ROOT}/LICENSE" ]; then
-    cp "${ROOT}/LICENSE" "${STAGE_DIR}/"
+[ -f "${ROOT}/LICENSE" ] && cp "${ROOT}/LICENSE" "${RESOURCES}/"
+
+echo "  ✅ 项目文件复制完成"
+
+# ---- 3d. 生成应用图标（如果有 icon.png 则转换，否则用默认）----
+ICON_SRC="${ROOT}/packaging/icon.png"
+if [ -f "$ICON_SRC" ] && [[ "$(uname)" == "Darwin" ]]; then
+    echo "  🎨 生成应用图标..."
+    ICONSET="${BUILD_DIR}/AppIcon.iconset"
+    mkdir -p "$ICONSET"
+    for size in 16 32 64 128 256 512; do
+        sips -z $size $size "$ICON_SRC" --out "${ICONSET}/icon_${size}x${size}.png" &>/dev/null
+        double=$((size * 2))
+        sips -z $double $double "$ICON_SRC" --out "${ICONSET}/icon_${size}x${size}@2x.png" &>/dev/null
+    done
+    iconutil -c icns "$ICONSET" -o "${RESOURCES}/AppIcon.icns"
+    rm -rf "$ICONSET"
+    echo "  ✅ 应用图标已生成"
+else
+    echo "  ℹ️  未找到 packaging/icon.png，使用默认图标"
+    echo "     提示：放一张 1024x1024 的 PNG 到 packaging/icon.png 可自定义图标"
 fi
 
-# ---- 4. 生成 macOS 快速启动说明 ----
-cat > "${STAGE_DIR}/使用说明.txt" << 'GUIDE'
+# ---- 3e. 生成使用说明 ----
+cat > "${BUILD_DIR}/使用说明.txt" << 'GUIDE'
 ==========================================
   MiniTimeBot macOS 使用说明
 ==========================================
 
-【首次使用】
-  1. 打开「终端」应用
-  2. 将本文件夹拖入终端窗口（自动 cd 到目录）
-  3. 运行: bash run.sh
-  4. 按提示配置 API Key 和用户
+【安装】
+  将 MiniTimeBot.app 拖到「应用程序」文件夹
+  （或任意你喜欢的位置）
+
+【首次启动】
+  1. 双击 MiniTimeBot.app
+  2. 如果弹出"无法验证开发者"提示：
+     → 右键点击 app → 选择「打开」→ 点击「打开」
+     → 或在终端执行: xattr -cr /path/to/MiniTimeBot.app
+  3. 首次运行会自动在终端中打开，按提示配置
 
 【日常启动】
-  在终端中运行: bash run.sh
-
-【快捷方式（可选）】
-  在终端中执行以下命令，创建命令别名：
-  echo 'alias timebot="cd /path/to/MiniTimeBot && bash run.sh"' >> ~/.zshrc
-  source ~/.zshrc
-  之后直接输入 timebot 即可启动
+  双击 MiniTimeBot.app 即可
 
 【访问地址】
   启动后浏览器打开: http://127.0.0.1:9000
@@ -116,13 +203,23 @@ cat > "${STAGE_DIR}/使用说明.txt" << 'GUIDE'
 ==========================================
 GUIDE
 
-# ---- 5. 生成安装包 ----
+echo ""
+echo "📱 ${APP_NAME}.app 构建完成！"
+echo "   结构:"
+echo "   ${APP_NAME}.app/"
+echo "   └── Contents/"
+echo "       ├── Info.plist"
+echo "       ├── MacOS/launch      ← 启动器"
+echo "       └── Resources/        ← 项目文件"
+echo ""
+
+# ---- 4. 生成安装包 ----
 if [ "$USE_TAR" = true ]; then
-    # 非 macOS 环境：生成 tar.gz
+    # 非 macOS 环境：生成 tar.gz（保留 .app 目录结构）
     ARCHIVE_NAME="${APP_NAME}_${VERSION}_macos.tar.gz"
     echo "📦 生成 ${ARCHIVE_NAME}..."
     cd "${BUILD_DIR}"
-    tar -czf "${OUTPUT_DIR}/${ARCHIVE_NAME}" "${APP_NAME}"
+    tar -czf "${OUTPUT_DIR}/${ARCHIVE_NAME}" "${APP_NAME}.app" "使用说明.txt"
     cd "${ROOT}"
 
     FINAL_PATH="${OUTPUT_DIR}/${ARCHIVE_NAME}"
@@ -132,26 +229,40 @@ if [ "$USE_TAR" = true ]; then
     echo "  📦 文件: ${FINAL_PATH}"
     echo "  📏 大小: $(du -sh "${FINAL_PATH}" | cut -f1)"
     echo ""
-    echo "  ⚠️  这是 tar.gz 格式（非 macOS 环境构建）"
-    echo "  在 macOS 上运行此脚本可生成 .dmg 格式"
+    echo "  包含: ${APP_NAME}.app + 使用说明.txt"
+    echo ""
+    echo "  macOS 用户使用方式："
+    echo "  1. 解压 tar.gz"
+    echo "  2. 将 ${APP_NAME}.app 拖到「应用程序」文件夹"
+    echo "  3. 首次打开：右键 → 打开（绕过 Gatekeeper）"
+    echo "  4. 双击即可启动"
+    echo ""
+    echo "  ⚠️  在 macOS 上运行此脚本可生成 .dmg 格式"
     echo "============================================"
 else
     # macOS 环境：生成 DMG
     DMG_PATH="${OUTPUT_DIR}/${DMG_NAME}"
-
-    # 删除旧 DMG
     rm -f "${DMG_PATH}"
 
     echo "💿 创建 DMG: ${DMG_NAME}..."
 
-    # 计算所需空间（文件大小 + 10MB 余量）
-    SIZE_KB=$(du -sk "${STAGE_DIR}" | cut -f1)
+    # 创建 DMG 内容目录（包含 .app 和 Applications 快捷方式）
+    DMG_CONTENT="${BUILD_DIR}/dmg_content"
+    mkdir -p "${DMG_CONTENT}"
+    cp -r "${APP_BUNDLE}" "${DMG_CONTENT}/"
+    cp "${BUILD_DIR}/使用说明.txt" "${DMG_CONTENT}/"
+
+    # 创建 Applications 文件夹的符号链接（方便用户拖拽安装）
+    ln -s /Applications "${DMG_CONTENT}/Applications"
+
+    # 计算所需空间
+    SIZE_KB=$(du -sk "${DMG_CONTENT}" | cut -f1)
     SIZE_MB=$(( (SIZE_KB / 1024) + 10 ))
 
     # 创建临时 DMG
     TEMP_DMG="${BUILD_DIR}/temp.dmg"
     hdiutil create \
-        -srcfolder "${STAGE_DIR}" \
+        -srcfolder "${DMG_CONTENT}" \
         -volname "${APP_NAME}" \
         -fs HFS+ \
         -fsargs "-c c=64,a=16,e=16" \
@@ -163,7 +274,7 @@ else
     MOUNT_DIR=$(hdiutil attach -readwrite -noverify -noautoopen "${TEMP_DMG}" | \
         grep "/Volumes/" | sed 's/.*\/Volumes/\/Volumes/')
 
-    # 设置 DMG 窗口样式（AppleScript）
+    # 设置 DMG 窗口样式
     echo "🎨 设置 DMG 窗口样式..."
     osascript << EOF
 tell application "Finder"
@@ -172,10 +283,13 @@ tell application "Finder"
         set current view of container window to icon view
         set toolbar visible of container window to false
         set statusbar visible of container window to false
-        set the bounds of container window to {200, 120, 760, 500}
+        set the bounds of container window to {200, 120, 800, 460}
         set viewOptions to the icon view options of container window
         set arrangement of viewOptions to not arranged
-        set icon size of viewOptions to 80
+        set icon size of viewOptions to 100
+        -- 排列图标位置：左边 app，右边 Applications
+        set position of item "${APP_NAME}.app" of container window to {180, 160}
+        set position of item "Applications" of container window to {420, 160}
         close
     end tell
 end tell
@@ -190,7 +304,6 @@ EOF
         -imagekey zlib-level=9 \
         -o "${DMG_PATH}"
 
-    # 清理临时文件
     rm -f "${TEMP_DMG}"
 
     echo ""
@@ -201,12 +314,13 @@ EOF
     echo ""
     echo "  用户使用方式："
     echo "  1. 双击 .dmg 挂载"
-    echo "  2. 将 ${APP_NAME} 文件夹拖到任意位置"
-    echo "  3. 打开终端，cd 到文件夹，运行 bash run.sh"
+    echo "  2. 将 ${APP_NAME}.app 拖到 Applications"
+    echo "  3. 首次打开：右键 → 打开"
+    echo "  4. 之后双击图标即可启动"
     echo "============================================"
 fi
 
-# ---- 6. 清理暂存目录 ----
+# ---- 5. 清理暂存目录 ----
 echo ""
 echo "🧹 清理暂存文件..."
 rm -rf "${BUILD_DIR}"
