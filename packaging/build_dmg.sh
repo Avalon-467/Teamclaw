@@ -155,23 +155,56 @@ mkdir -p "${RESOURCES}/data/user_files"
 
 echo "  ✅ 项目文件复制完成"
 
-# ---- 3d. 生成应用图标（如果有 icon.png 则转换，否则用默认）----
+# ---- 3d. 生成应用图标 ----
 ICON_SRC="${ROOT}/packaging/icon.png"
-if [ -f "$ICON_SRC" ] && [[ "$(uname)" == "Darwin" ]]; then
-    echo "  🎨 生成应用图标..."
-    ICONSET="${BUILD_DIR}/AppIcon.iconset"
-    mkdir -p "$ICONSET"
-    for size in 16 32 64 128 256 512; do
-        sips -z $size $size "$ICON_SRC" --out "${ICONSET}/icon_${size}x${size}.png" &>/dev/null
-        double=$((size * 2))
-        sips -z $double $double "$ICON_SRC" --out "${ICONSET}/icon_${size}x${size}@2x.png" &>/dev/null
-    done
-    iconutil -c icns "$ICONSET" -o "${RESOURCES}/AppIcon.icns"
-    rm -rf "$ICONSET"
-    echo "  ✅ 应用图标已生成"
+if [ -f "$ICON_SRC" ]; then
+    if [[ "$(uname)" == "Darwin" ]]; then
+        # macOS: 用 sips + iconutil 生成标准 .icns
+        echo "  🎨 生成应用图标 (.icns)..."
+        ICONSET="${BUILD_DIR}/AppIcon.iconset"
+        mkdir -p "$ICONSET"
+        for size in 16 32 64 128 256 512; do
+            sips -z $size $size "$ICON_SRC" --out "${ICONSET}/icon_${size}x${size}.png" &>/dev/null
+            double=$((size * 2))
+            sips -z $double $double "$ICON_SRC" --out "${ICONSET}/icon_${size}x${size}@2x.png" &>/dev/null
+        done
+        iconutil -c icns "$ICONSET" -o "${RESOURCES}/AppIcon.icns"
+        rm -rf "$ICONSET"
+        echo "  ✅ 应用图标已生成 (icns)"
+    else
+        # Linux: 尝试用 Pillow 生成 .icns，回退则直接复制 PNG
+        echo "  🎨 处理应用图标..."
+        if python3 -c "
+from PIL import Image
+import struct, io
+
+img = Image.open('${ICON_SRC}').convert('RGBA')
+sizes = [(16,'icp4'), (32,'icp5'), (64,'icp6'), (128,'ic07'), (256,'ic08'), (512,'ic09')]
+entries = []
+for sz, ostype in sizes:
+    resized = img.resize((sz, sz), Image.LANCZOS)
+    buf = io.BytesIO()
+    resized.save(buf, format='PNG')
+    data = buf.getvalue()
+    entry = ostype.encode('ascii') + struct.pack('>I', len(data) + 8) + data
+    entries.append(entry)
+
+body = b''.join(entries)
+header = b'icns' + struct.pack('>I', len(body) + 8)
+with open('${RESOURCES}/AppIcon.icns', 'wb') as f:
+    f.write(header + body)
+print('ok')
+" 2>/dev/null; then
+            echo "  ✅ 应用图标已生成 (icns via Pillow)"
+        else
+            # 最后回退：直接复制 PNG 作为图标
+            cp "$ICON_SRC" "${RESOURCES}/AppIcon.png"
+            echo "  ✅ 应用图标已复制 (png fallback)"
+        fi
+    fi
 else
     echo "  ℹ️  未找到 packaging/icon.png，使用默认图标"
-    echo "     提示：放一张 1024x1024 的 PNG 到 packaging/icon.png 可自定义图标"
+    echo "     提示：放一张正方形 PNG 到 packaging/icon.png 可自定义图标"
 fi
 
 # ---- 3e. 生成使用说明 ----
