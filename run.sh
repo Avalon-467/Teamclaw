@@ -29,6 +29,5 @@ fi
 
 echo ""
 echo "========== 4/4 启动服务 =========="
-# 使用 exec 可以在启动服务时接管进程，释放当前 shell
-# 或者保持 bash 运行以便观察日志
-bash scripts/start.sh
+# exec 替换当前进程，确保信号（Ctrl+C、kill、终端关闭）直达 launcher.py
+exec python scripts/launcher.py
