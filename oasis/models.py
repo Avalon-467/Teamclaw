@@ -11,6 +11,7 @@ class DiscussionStatus(str, Enum):
     PENDING = "pending"
     DISCUSSING = "discussing"
     CONCLUDED = "concluded"
+    CANCELLED = "cancelled"
     ERROR = "error"
 
 
@@ -24,6 +25,7 @@ class CreateTopicRequest(BaseModel):
     schedule_file: Optional[str] = None  # Path to YAML schedule file
     use_bot_session: bool = False  # True = experts use bot sessions (stateful, with tools)
     bot_enabled_tools: Optional[list[str]] = None  # Tool whitelist for bot session experts
+    bot_timeout: Optional[float] = None  # Per-expert timeout (seconds); None = no limit (for detach/long-running)
     # Override expert list: if provided, use these configs instead of loading from file
     # Each item: {"name": "...", "persona": "...", "tag": "...", "temperature": 0.7}
     expert_configs: Optional[list[dict]] = None
@@ -47,6 +49,7 @@ class TopicDetail(BaseModel):
     """Full detail of a discussion topic."""
     topic_id: str
     question: str
+    user_id: str = "anonymous"
     status: DiscussionStatus
     current_round: int
     max_rounds: int
@@ -58,6 +61,7 @@ class TopicSummary(BaseModel):
     """Brief summary of a discussion topic (for listing)."""
     topic_id: str
     question: str
+    user_id: str = "anonymous"
     status: DiscussionStatus
     post_count: int
     current_round: int

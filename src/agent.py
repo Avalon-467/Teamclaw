@@ -32,7 +32,8 @@ USER_INJECTED_TOOLS = {
     # Telegram push notification tools
     "set_telegram_chat_id", "send_telegram_message", "get_telegram_status",
     # OASIS forum tools
-    "post_to_oasis", "list_oasis_topics", "dispatch_subagent",
+    "post_to_oasis", "check_oasis_discussion", "cancel_oasis_discussion",
+    "list_oasis_topics", "dispatch_subagent",
     "list_oasis_experts", "add_oasis_expert", "update_oasis_expert", "delete_oasis_expert",
     # Session management tools
     "list_sessions", "get_current_session",

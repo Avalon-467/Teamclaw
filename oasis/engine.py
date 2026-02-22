@@ -61,11 +61,13 @@ class DiscussionEngine:
         use_bot_session: bool = False,
         bot_base_url: str | None = None,
         bot_enabled_tools: list[str] | None = None,
+        bot_timeout: float | None = None,
         user_id: str = "anonymous",
         expert_configs: list[dict] | None = None,
     ):
         self.forum = forum
         self.use_bot_session = use_bot_session
+        self._cancelled = False
 
         # Determine expert configs: override > tag-filter > all
         if expert_configs:
@@ -91,6 +93,7 @@ class DiscussionEngine:
                     temperature=c["temperature"],
                     bot_base_url=bot_base_url,
                     enabled_tools=bot_enabled_tools,
+                    timeout=bot_timeout,
                 )
                 for c in configs
             ]
@@ -132,6 +135,14 @@ class DiscussionEngine:
                 print(f"  [OASIS] ⚠️ Schedule references unknown expert: '{name}', skipping")
         return resolved
 
+    def cancel(self):
+        """Request graceful cancellation. Takes effect before the next round."""
+        self._cancelled = True
+
+    def _check_cancelled(self):
+        if self._cancelled:
+            raise asyncio.CancelledError("Discussion cancelled by user")
+
     async def run(self):
         """Run the full discussion loop (called as a background task)."""
         self.forum.status = "discussing"
@@ -155,6 +166,11 @@ class DiscussionEngine:
             self.forum.status = "concluded"
             print(f"[OASIS] ✅ Discussion concluded: {self.forum.topic_id}")
 
+        except asyncio.CancelledError:
+            print(f"[OASIS] 🛑 Discussion cancelled: {self.forum.topic_id}")
+            self.forum.status = "error"
+            self.forum.conclusion = "讨论已被用户强制终止"
+
         except Exception as e:
             print(f"[OASIS] ❌ Discussion error: {e}")
             self.forum.status = "error"
@@ -163,6 +179,7 @@ class DiscussionEngine:
     async def _run_parallel(self):
         """Original behavior: all experts in parallel each round."""
         for round_num in range(self.forum.max_rounds):
+            self._check_cancelled()
             self.forum.current_round = round_num + 1
             print(f"[OASIS] 📢 Round {self.forum.current_round}/{self.forum.max_rounds}")
 
@@ -188,10 +205,12 @@ class DiscussionEngine:
         if self.schedule.repeat:
             # ── repeat mode: plan 每轮重复 ──
             for round_num in range(self.forum.max_rounds):
+                self._check_cancelled()
                 self.forum.current_round = round_num + 1
                 print(f"[OASIS] 📢 Round {self.forum.current_round}/{self.forum.max_rounds}")
 
                 for step in steps:
+                    self._check_cancelled()
                     await self._execute_step(step)
 
                 if round_num >= 1 and await self._consensus_reached():
@@ -200,6 +219,7 @@ class DiscussionEngine:
         else:
             # ── once mode: 步骤顺序执行一次，每步算一轮 ──
             for step_idx, step in enumerate(steps):
+                self._check_cancelled()
                 self.forum.current_round = step_idx + 1
                 self.forum.max_rounds = len(steps)  # 让前端显示正确的总轮数
                 print(f"[OASIS] 📢 Step {step_idx + 1}/{len(steps)}")
