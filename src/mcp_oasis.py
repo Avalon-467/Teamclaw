@@ -308,6 +308,9 @@ async def post_to_oasis(
                 body["schedule_file"] = schedule_file
             if use_bot_session:
                 body["use_bot_session"] = True
+                if not detach:
+                    body["bot_timeout"] = 120.0
+                # detach 模式不设 bot_timeout → 服务端使用 None（无限制）
 
             resp = await client.post(
                 f"{OASIS_BASE_URL}/topics",
@@ -328,7 +331,7 @@ async def post_to_oasis(
 
             result = await client.get(
                 f"{OASIS_BASE_URL}/topics/{topic_id}/conclusion",
-                params={"timeout": 280},
+                params={"timeout": 280, "user_id": effective_user},
             )
 
             if result.status_code == 200:
@@ -353,21 +356,28 @@ async def post_to_oasis(
 
 
 @mcp.tool()
-async def check_oasis_discussion(topic_id: str) -> str:
+async def check_oasis_discussion(topic_id: str, username: str = "") -> str:
     """
     Check the current status of a discussion on the OASIS forum.
     Shows the discussion progress, recent posts, and conclusion if available.
 
     Args:
         topic_id: The topic ID returned by post_to_oasis
+        username: (auto-injected) current user identity; do NOT set manually
 
     Returns:
         Formatted discussion status and recent posts
     """
+    effective_user = username or _FALLBACK_USER
     try:
         async with httpx.AsyncClient(timeout=30) as client:
-            resp = await client.get(f"{OASIS_BASE_URL}/topics/{topic_id}")
+            resp = await client.get(
+                f"{OASIS_BASE_URL}/topics/{topic_id}",
+                params={"user_id": effective_user},
+            )
 
+            if resp.status_code == 403:
+                return f"❌ 无权查看此讨论: {topic_id}"
             if resp.status_code == 404:
                 return f"❌ 未找到讨论主题: {topic_id}"
             if resp.status_code != 200:
@@ -405,6 +415,43 @@ async def check_oasis_discussion(topic_id: str) -> str:
         return _CONN_ERR
     except Exception as e:
         return f"❌ 查询异常: {str(e)}"
+
+
+@mcp.tool()
+async def cancel_oasis_discussion(topic_id: str, username: str = "") -> str:
+    """
+    Force-cancel a running OASIS discussion. Use this to stop a runaway or
+    no-longer-needed discussion.
+
+    Args:
+        topic_id: The topic ID to cancel
+        username: (auto-injected) current user identity; do NOT set manually
+
+    Returns:
+        Cancellation result
+    """
+    effective_user = username or _FALLBACK_USER
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            resp = await client.delete(
+                f"{OASIS_BASE_URL}/topics/{topic_id}",
+                params={"user_id": effective_user},
+            )
+
+            if resp.status_code == 403:
+                return f"❌ 无权取消此讨论: {topic_id}"
+            if resp.status_code == 404:
+                return f"❌ 未找到讨论主题: {topic_id}"
+            if resp.status_code != 200:
+                return f"❌ 取消失败: {resp.text}"
+
+            data = resp.json()
+            return f"🛑 讨论已终止\nTopic ID: {topic_id}\n状态: {data.get('status')}\n{data.get('message', '')}"
+
+    except httpx.ConnectError:
+        return _CONN_ERR
+    except Exception as e:
+        return f"❌ 取消异常: {str(e)}"
 
 
 @mcp.tool()
@@ -505,10 +552,11 @@ async def list_oasis_topics(username: str = "") -> str:
     """
     try:
         async with httpx.AsyncClient(timeout=30) as client:
-            params = {}
-            if username:
-                params["user_id"] = username
-            resp = await client.get(f"{OASIS_BASE_URL}/topics", params=params)
+            effective_user = username or _FALLBACK_USER
+            resp = await client.get(
+                f"{OASIS_BASE_URL}/topics",
+                params={"user_id": effective_user},
+            )
 
             if resp.status_code != 200:
                 return f"❌ 查询失败: {resp.text}"

@@ -337,11 +337,13 @@ class BotSessionExpert:
         temperature: float = 0.7,
         bot_base_url: str | None = None,
         enabled_tools: list[str] | None = None,
+        timeout: float | None = None,
     ):
         self.name = name
         self.persona = persona
         self.topic_id = topic_id
         self.temperature = temperature
+        self.timeout = timeout
 
         port = os.getenv("PORT_AGENT", "51200")
         self._bot_url = (bot_base_url or f"http://127.0.0.1:{port}") + "/v1/chat/completions"
@@ -425,7 +427,7 @@ class BotSessionExpert:
             body["enabled_tools"] = self.enabled_tools
 
         try:
-            async with httpx.AsyncClient(timeout=httpx.Timeout(timeout=120.0)) as client:
+            async with httpx.AsyncClient(timeout=httpx.Timeout(timeout=self.timeout)) as client:
                 resp = await client.post(
                     self._bot_url,
                     json=body,

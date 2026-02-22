@@ -196,6 +196,17 @@ HTML_TEMPLATE = """
         .oasis-status-pending { background: #fef3c7; color: #92400e; }
         .oasis-status-discussing { background: #dbeafe; color: #1e40af; animation: pulse-bg 2s infinite; }
         .oasis-status-concluded { background: #d1fae5; color: #065f46; }
+        .oasis-action-btn { font-size: 12px; padding: 2px 4px; border-radius: 4px; border: none; cursor: pointer; opacity: 0; transition: opacity 0.2s; background: transparent; line-height: 1; }
+        .oasis-topic-item:hover .oasis-action-btn { opacity: 0.7; }
+        .oasis-action-btn:hover { opacity: 1 !important; }
+        .oasis-btn-cancel:hover { background: #fef3c7; }
+        .oasis-btn-delete:hover { background: #fee2e2; }
+        .oasis-detail-action-btn { font-size: 11px; padding: 3px 8px; border-radius: 6px; border: 1px solid #e5e7eb; cursor: pointer; background: white; transition: all 0.15s; }
+        .oasis-detail-action-btn:hover { background: #f3f4f6; }
+        .oasis-detail-action-btn.cancel { color: #d97706; border-color: #fbbf24; }
+        .oasis-detail-action-btn.cancel:hover { background: #fffbeb; }
+        .oasis-detail-action-btn.delete { color: #dc2626; border-color: #fca5a5; }
+        .oasis-detail-action-btn.delete:hover { background: #fef2f2; }
         .oasis-status-error { background: #fee2e2; color: #991b1b; }
         @keyframes pulse-bg { 0%, 100% { opacity: 1; } 50% { opacity: 0.7; } }
         .oasis-expert-avatar { width: 28px; height: 28px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; font-size: 12px; font-weight: bold; color: white; flex-shrink: 0; }
@@ -529,10 +540,14 @@ HTML_TEMPLATE = """
                 <div id="oasis-detail-view" class="flex flex-col flex-1 overflow-hidden" style="display:none;">
                     <!-- Detail header -->
                     <div class="p-3 border-b flex-shrink-0">
-                        <div class="flex items-center space-x-2">
-                            <button onclick="showOasisTopicList()" class="text-gray-400 hover:text-blue-600 text-sm" data-i18n="oasis_back">← 返回</button>
-                            <span id="oasis-detail-status" class="oasis-status-badge"></span>
-                            <span id="oasis-detail-round" class="text-[10px] text-gray-400"></span>
+                        <div class="flex items-center justify-between">
+                            <div class="flex items-center space-x-2">
+                                <button onclick="showOasisTopicList()" class="text-gray-400 hover:text-blue-600 text-sm" data-i18n="oasis_back">← 返回</button>
+                                <span id="oasis-detail-status" class="oasis-status-badge"></span>
+                                <span id="oasis-detail-round" class="text-[10px] text-gray-400"></span>
+                            </div>
+                            <div id="oasis-detail-actions" class="flex items-center space-x-1">
+                            </div>
                         </div>
                         <p id="oasis-detail-question" class="text-sm font-semibold text-gray-800 mt-1 line-clamp-2"></p>
                     </div>
@@ -669,12 +684,20 @@ HTML_TEMPLATE = """
                 oasis_status_discussing: '讨论中',
                 oasis_status_concluded: '已完成',
                 oasis_status_error: '出错',
+                oasis_status_cancelled: '已终止',
                 oasis_round: '轮',
                 oasis_posts: '帖',
                 oasis_expert_creative: '创意专家',
                 oasis_expert_critical: '批判专家',
                 oasis_expert_data: '数据分析师',
                 oasis_expert_synthesis: '综合顾问',
+                oasis_cancel: '终止讨论',
+                oasis_cancel_confirm: '确定要强制终止此讨论？',
+                oasis_cancel_success: '讨论已终止',
+                oasis_delete: '删除记录',
+                oasis_delete_confirm: '确定要永久删除此讨论记录？删除后不可恢复。',
+                oasis_delete_success: '记录已删除',
+                oasis_action_fail: '操作失败',
                 
                 // 离线提示
                 offline_banner: '⚠️ 网络已断开，请检查连接',
@@ -794,12 +817,20 @@ HTML_TEMPLATE = """
                 oasis_status_discussing: 'Discussing',
                 oasis_status_concluded: 'Completed',
                 oasis_status_error: 'Error',
+                oasis_status_cancelled: 'Cancelled',
                 oasis_round: 'rounds',
                 oasis_posts: 'posts',
                 oasis_expert_creative: 'Creative Expert',
                 oasis_expert_critical: 'Critical Expert',
                 oasis_expert_data: 'Data Analyst',
                 oasis_expert_synthesis: 'Synthesis Advisor',
+                oasis_cancel: 'Stop Discussion',
+                oasis_cancel_confirm: 'Force stop this discussion?',
+                oasis_cancel_success: 'Discussion stopped',
+                oasis_delete: 'Delete',
+                oasis_delete_confirm: 'Permanently delete this discussion? This cannot be undone.',
+                oasis_delete_success: 'Record deleted',
+                oasis_action_fail: 'Action failed',
                 
                 // Offline
                 offline_banner: '⚠️ Network disconnected, please check connection',
@@ -1973,6 +2004,7 @@ HTML_TEMPLATE = """
                 'discussing': { cls: 'oasis-status-discussing', text: t('oasis_status_discussing') },
                 'concluded': { cls: 'oasis-status-concluded', text: t('oasis_status_concluded') },
                 'error': { cls: 'oasis-status-error', text: t('oasis_status_error') },
+                'cancelled': { cls: 'oasis-status-error', text: t('oasis_status_cancelled') },
             };
             return map[status] || { cls: 'oasis-status-pending', text: status };
         }
@@ -2078,11 +2110,16 @@ HTML_TEMPLATE = """
             container.innerHTML = topics.map(topic => {
                 const badge = getStatusBadge(topic.status);
                 const isActive = topic.topic_id === oasisCurrentTopicId;
+                const isRunning = topic.status === 'discussing' || topic.status === 'pending';
                 return `
                     <div class="oasis-topic-item p-3 border-b ${isActive ? 'active' : ''}" onclick="openOasisTopic('${topic.topic_id}')">
                         <div class="flex items-center justify-between mb-1">
                             <span class="oasis-status-badge ${badge.cls}">${badge.text}</span>
-                            <span class="text-[10px] text-gray-400">${topic.created_at ? formatTime(topic.created_at) : ''}</span>
+                            <div class="flex items-center space-x-1">
+                                ${isRunning ? `<button onclick="event.stopPropagation(); cancelOasisTopic('${topic.topic_id}')" class="oasis-action-btn oasis-btn-cancel" title="${t('oasis_cancel')}">⏹</button>` : ''}
+                                <button onclick="event.stopPropagation(); deleteOasisTopic('${topic.topic_id}')" class="oasis-action-btn oasis-btn-delete" title="${t('oasis_delete')}">🗑</button>
+                                <span class="text-[10px] text-gray-400">${topic.created_at ? formatTime(topic.created_at) : ''}</span>
+                            </div>
                         </div>
                         <p class="text-sm text-gray-800 font-medium line-clamp-2">${escapeHtml(topic.question)}</p>
                         <div class="flex items-center space-x-3 mt-1 text-[10px] text-gray-400">
@@ -2148,6 +2185,16 @@ HTML_TEMPLATE = """
             const roundText = currentLang === 'zh-CN' ? `第 ${detail.current_round}/${detail.max_rounds} ${t('oasis_round')}` : `Round ${detail.current_round}/${detail.max_rounds}`;
             document.getElementById('oasis-detail-round').textContent = roundText;
             document.getElementById('oasis-detail-question').textContent = detail.question;
+
+            // Render action buttons in detail header
+            const actionsEl = document.getElementById('oasis-detail-actions');
+            const isRunning = detail.status === 'discussing' || detail.status === 'pending';
+            let btns = '';
+            if (isRunning) {
+                btns += `<button onclick="cancelOasisTopic('${detail.topic_id}')" class="oasis-detail-action-btn cancel">⏹ ${t('oasis_cancel')}</button>`;
+            }
+            btns += `<button onclick="deleteOasisTopic('${detail.topic_id}')" class="oasis-detail-action-btn delete">🗑 ${t('oasis_delete')}</button>`;
+            actionsEl.innerHTML = btns;
 
             renderPosts(detail.posts || []);
 
@@ -2252,6 +2299,45 @@ HTML_TEMPLATE = """
                     console.warn('OASIS polling error:', e);
                 }
             }, 1500); // Poll every 1.5 seconds for faster updates
+        }
+
+        async function cancelOasisTopic(topicId) {
+            if (!confirm(t('oasis_cancel_confirm'))) return;
+            try {
+                const resp = await fetch(`/proxy_oasis/topics/${topicId}/cancel`, { method: 'POST' });
+                const data = await resp.json();
+                if (resp.ok) {
+                    stopOasisPolling();
+                    if (oasisCurrentTopicId === topicId) {
+                        await loadTopicDetail(topicId);
+                    }
+                    refreshOasisTopics();
+                } else {
+                    alert(t('oasis_action_fail') + ': ' + (data.error || data.detail || data.message || ''));
+                }
+            } catch (e) {
+                alert(t('oasis_action_fail') + ': ' + e.message);
+            }
+        }
+
+        async function deleteOasisTopic(topicId) {
+            if (!confirm(t('oasis_delete_confirm'))) return;
+            try {
+                const resp = await fetch(`/proxy_oasis/topics/${topicId}/purge`, { method: 'POST' });
+                const data = await resp.json();
+                if (resp.ok) {
+                    stopOasisPolling();
+                    if (oasisCurrentTopicId === topicId) {
+                        showOasisTopicList();
+                    } else {
+                        refreshOasisTopics();
+                    }
+                } else {
+                    alert(t('oasis_action_fail') + ': ' + (data.error || data.detail || data.message || ''));
+                }
+            } catch (e) {
+                alert(t('oasis_action_fail') + ': ' + e.message);
+            }
         }
 
         // Auto-refresh topic list periodically when panel is open
@@ -2910,11 +2996,13 @@ def proxy_delete_session():
 
 @app.route("/proxy_oasis/topics")
 def proxy_oasis_topics():
-    """Proxy: list all OASIS discussion topics."""
-    # Note: OASIS is a public forum, don't filter by user_id
+    """Proxy: list OASIS discussion topics for the logged-in user."""
+    user_id = session.get("user_id")
+    if not user_id:
+        return jsonify([]), 200
     try:
-        print(f"[OASIS Proxy] Fetching topics from {OASIS_BASE_URL}/topics")
-        r = requests.get(f"{OASIS_BASE_URL}/topics", timeout=10)
+        print(f"[OASIS Proxy] Fetching topics from {OASIS_BASE_URL}/topics for user={user_id}")
+        r = requests.get(f"{OASIS_BASE_URL}/topics", params={"user_id": user_id}, timeout=10)
         print(f"[OASIS Proxy] Response status: {r.status_code}, count: {len(r.json()) if r.text else 0}")
         return jsonify(r.json()), r.status_code
     except Exception as e:
@@ -2925,10 +3013,13 @@ def proxy_oasis_topics():
 @app.route("/proxy_oasis/topics/<topic_id>")
 def proxy_oasis_topic_detail(topic_id):
     """Proxy: get full detail of a specific OASIS discussion."""
+    user_id = session.get("user_id")
+    if not user_id:
+        return jsonify({"error": "未登录"}), 401
     try:
         url = f"{OASIS_BASE_URL}/topics/{topic_id}"
-        print(f"[OASIS Proxy] Fetching topic detail from {url}")
-        r = requests.get(url, timeout=10)
+        print(f"[OASIS Proxy] Fetching topic detail from {url} for user={user_id}")
+        r = requests.get(url, params={"user_id": user_id}, timeout=10)
         print(f"[OASIS Proxy] Detail response status: {r.status_code}")
         return jsonify(r.json()), r.status_code
     except Exception as e:
@@ -2939,8 +3030,15 @@ def proxy_oasis_topic_detail(topic_id):
 @app.route("/proxy_oasis/topics/<topic_id>/stream")
 def proxy_oasis_topic_stream(topic_id):
     """Proxy: SSE stream for real-time OASIS discussion updates."""
+    user_id = session.get("user_id")
+    if not user_id:
+        return jsonify({"error": "未登录"}), 401
     try:
-        r = requests.get(f"{OASIS_BASE_URL}/topics/{topic_id}/stream", stream=True, timeout=300)
+        r = requests.get(
+            f"{OASIS_BASE_URL}/topics/{topic_id}/stream",
+            params={"user_id": user_id},
+            stream=True, timeout=300,
+        )
         if r.status_code != 200:
             return jsonify({"error": f"OASIS returned {r.status_code}"}), r.status_code
 
@@ -2965,8 +3063,35 @@ def proxy_oasis_topic_stream(topic_id):
 @app.route("/proxy_oasis/experts")
 def proxy_oasis_experts():
     """Proxy: list all OASIS expert agents."""
+    user_id = session.get("user_id", "")
     try:
-        r = requests.get(f"{OASIS_BASE_URL}/experts", timeout=10)
+        r = requests.get(f"{OASIS_BASE_URL}/experts", params={"user_id": user_id}, timeout=10)
+        return jsonify(r.json()), r.status_code
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/proxy_oasis/topics/<topic_id>/cancel", methods=["POST"])
+def proxy_oasis_cancel_topic(topic_id):
+    """Proxy: force-cancel a running OASIS discussion."""
+    user_id = session.get("user_id")
+    if not user_id:
+        return jsonify({"error": "未登录"}), 401
+    try:
+        r = requests.delete(f"{OASIS_BASE_URL}/topics/{topic_id}", params={"user_id": user_id}, timeout=10)
+        return jsonify(r.json()), r.status_code
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/proxy_oasis/topics/<topic_id>/purge", methods=["POST"])
+def proxy_oasis_purge_topic(topic_id):
+    """Proxy: permanently delete an OASIS discussion record."""
+    user_id = session.get("user_id")
+    if not user_id:
+        return jsonify({"error": "未登录"}), 401
+    try:
+        r = requests.post(f"{OASIS_BASE_URL}/topics/{topic_id}/purge", params={"user_id": user_id}, timeout=10)
         return jsonify(r.json()), r.status_code
     except Exception as e:
         return jsonify({"error": str(e)}), 500

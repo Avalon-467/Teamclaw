@@ -1,10 +1,17 @@
 """
-OASIS Forum - Thread-safe discussion board
+OASIS Forum - Thread-safe discussion board with persistence
 """
 
 import asyncio
+import json
+import os
 import time
 from dataclasses import dataclass, field
+
+# Persistence directory (relative to project root)
+_this_dir = os.path.dirname(os.path.abspath(__file__))
+_project_root = os.path.dirname(_this_dir)
+DISCUSSIONS_DIR = os.path.join(_project_root, "data", "oasis_discussions")
 
 
 @dataclass
@@ -18,6 +25,18 @@ class Post:
     downvotes: int = 0
     timestamp: float = field(default_factory=time.time)
     voters: dict[str, str] = field(default_factory=dict)  # voter_name -> "up"/"down"
+
+    def to_dict(self) -> dict:
+        return {
+            "id": self.id, "author": self.author, "content": self.content,
+            "reply_to": self.reply_to, "upvotes": self.upvotes,
+            "downvotes": self.downvotes, "timestamp": self.timestamp,
+            "voters": self.voters,
+        }
+
+    @classmethod
+    def from_dict(cls, d: dict) -> "Post":
+        return cls(**d)
 
 
 class DiscussionForum:
@@ -38,6 +57,72 @@ class DiscussionForum:
         self.created_at = time.time()
         self._lock = asyncio.Lock()
         self._counter = 0
+
+    # ── Serialisation ──
+
+    def to_dict(self) -> dict:
+        return {
+            "topic_id": self.topic_id,
+            "question": self.question,
+            "user_id": self.user_id,
+            "max_rounds": self.max_rounds,
+            "current_round": self.current_round,
+            "posts": [p.to_dict() for p in self.posts],
+            "conclusion": self.conclusion,
+            "status": self.status,
+            "created_at": self.created_at,
+        }
+
+    @classmethod
+    def from_dict(cls, d: dict) -> "DiscussionForum":
+        forum = cls(
+            topic_id=d["topic_id"],
+            question=d["question"],
+            user_id=d.get("user_id", "anonymous"),
+            max_rounds=d.get("max_rounds", 5),
+        )
+        forum.current_round = d.get("current_round", 0)
+        forum.conclusion = d.get("conclusion")
+        forum.status = d.get("status", "concluded")
+        forum.created_at = d.get("created_at", 0)
+        forum.posts = [Post.from_dict(p) for p in d.get("posts", [])]
+        forum._counter = max((p.id for p in forum.posts), default=0)
+        return forum
+
+    # ── Persistence ──
+
+    def _storage_path(self) -> str:
+        user_dir = os.path.join(DISCUSSIONS_DIR, self.user_id)
+        os.makedirs(user_dir, exist_ok=True)
+        return os.path.join(user_dir, f"{self.topic_id}.json")
+
+    def save(self):
+        """Persist current state to disk."""
+        path = self._storage_path()
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(self.to_dict(), f, ensure_ascii=False, indent=2)
+
+    @classmethod
+    def load_all(cls) -> dict[str, "DiscussionForum"]:
+        """Load all persisted discussions from disk. Returns {topic_id: forum}."""
+        result: dict[str, DiscussionForum] = {}
+        if not os.path.isdir(DISCUSSIONS_DIR):
+            return result
+        for user_dir_name in os.listdir(DISCUSSIONS_DIR):
+            user_dir = os.path.join(DISCUSSIONS_DIR, user_dir_name)
+            if not os.path.isdir(user_dir):
+                continue
+            for fname in os.listdir(user_dir):
+                if not fname.endswith(".json"):
+                    continue
+                try:
+                    with open(os.path.join(user_dir, fname), "r", encoding="utf-8") as f:
+                        data = json.load(f)
+                    forum = cls.from_dict(data)
+                    result[forum.topic_id] = forum
+                except Exception as e:
+                    print(f"[OASIS] ⚠️ Failed to load {fname}: {e}")
+        return result
 
     async def publish(self, author: str, content: str, reply_to: int | None = None) -> Post:
         """Publish a new post to the forum (thread-safe)."""

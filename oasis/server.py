@@ -17,7 +17,7 @@ import uuid
 import time
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Query
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 import httpx
@@ -48,19 +48,39 @@ from oasis.engine import DiscussionEngine
 # --- In-memory storage ---
 discussions: dict[str, DiscussionForum] = {}
 engines: dict[str, DiscussionEngine] = {}
+tasks: dict[str, asyncio.Task] = {}
+
+
+# --- Helpers ---
+
+def _get_forum_or_404(topic_id: str) -> DiscussionForum:
+    forum = discussions.get(topic_id)
+    if not forum:
+        raise HTTPException(404, "Topic not found")
+    return forum
+
+
+def _check_owner(forum: DiscussionForum, user_id: str):
+    """Verify the requester owns this discussion."""
+    if forum.user_id != user_id:
+        raise HTTPException(403, "You do not own this discussion")
 
 
 # --- Lifespan ---
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    print("[OASIS] 🏛️ Forum server started")
+    # Load persisted discussions from disk
+    loaded = DiscussionForum.load_all()
+    discussions.update(loaded)
+    print(f"[OASIS] 🏛️ Forum server started (loaded {len(loaded)} historical discussions)")
     yield
-    # Cancel any running discussions on shutdown
+    # Save running discussions and cancel them
     for tid, forum in discussions.items():
         if forum.status == "discussing":
             forum.status = "error"
             forum.conclusion = "服务关闭，讨论被终止"
-    print("[OASIS] 🏛️ Forum server stopped")
+        forum.save()
+    print("[OASIS] 🏛️ Forum server stopped (all discussions saved)")
 
 
 app = FastAPI(
@@ -75,19 +95,22 @@ app = FastAPI(
 # ------------------------------------------------------------------
 async def _run_discussion(topic_id: str, engine: DiscussionEngine):
     """Run a discussion engine in the background, then fire callback if configured."""
+    forum = discussions.get(topic_id)
     try:
         await engine.run()
     except Exception as e:
         print(f"[OASIS] ❌ Topic {topic_id} background error: {e}")
-        forum = discussions.get(topic_id)
         if forum:
             forum.status = "error"
             forum.conclusion = f"讨论出错: {str(e)}"
 
+    # Persist final state
+    if forum:
+        forum.save()
+
     # Fire callback notification to main agent if configured
     cb_url = getattr(engine, "callback_url", None)
     if cb_url:
-        forum = discussions.get(topic_id)
         conclusion = forum.conclusion if forum else "（无结论）"
         status = forum.status if forum else "error"
         cb_session = getattr(engine, "callback_session_id", "default") or "default"
@@ -133,6 +156,7 @@ async def create_topic(req: CreateTopicRequest):
         max_rounds=req.max_rounds,
     )
     discussions[topic_id] = forum
+    forum.save()  # persist initial state
 
     engine = DiscussionEngine(
         forum=forum,
@@ -141,6 +165,7 @@ async def create_topic(req: CreateTopicRequest):
         schedule_file=req.schedule_file,
         use_bot_session=req.use_bot_session,
         bot_enabled_tools=req.bot_enabled_tools,
+        bot_timeout=req.bot_timeout,
         user_id=req.user_id,
         expert_configs=req.expert_configs,
     )
@@ -150,7 +175,8 @@ async def create_topic(req: CreateTopicRequest):
     engines[topic_id] = engine
 
     # Launch discussion as a background task (non-blocking)
-    asyncio.create_task(_run_discussion(topic_id, engine))
+    task = asyncio.create_task(_run_discussion(topic_id, engine))
+    tasks[topic_id] = task
 
     return {
         "topic_id": topic_id,
@@ -159,20 +185,69 @@ async def create_topic(req: CreateTopicRequest):
     }
 
 
+@app.delete("/topics/{topic_id}")
+async def cancel_topic(topic_id: str, user_id: str = Query(...)):
+    """Force-cancel a running discussion. Requires user_id of the owner."""
+    forum = _get_forum_or_404(topic_id)
+    _check_owner(forum, user_id)
+
+    if forum.status != "discussing":
+        return {"topic_id": topic_id, "status": forum.status, "message": "Discussion already finished"}
+
+    # Set cancel flag (takes effect at next round boundary)
+    engine = engines.get(topic_id)
+    if engine:
+        engine.cancel()
+
+    # Also cancel the asyncio task to interrupt any ongoing await
+    task = tasks.get(topic_id)
+    if task and not task.done():
+        task.cancel()
+
+    forum.save()
+    return {"topic_id": topic_id, "status": "cancelled", "message": "Discussion cancelled"}
+
+
+@app.post("/topics/{topic_id}/purge")
+async def purge_topic(topic_id: str, user_id: str = Query(...)):
+    """Permanently delete a discussion record (memory + disk). Requires owner.
+    If still running, cancels first."""
+    forum = _get_forum_or_404(topic_id)
+    _check_owner(forum, user_id)
+
+    # Cancel if still running
+    if forum.status in ("pending", "discussing"):
+        engine = engines.get(topic_id)
+        if engine:
+            engine.cancel()
+        task = tasks.get(topic_id)
+        if task and not task.done():
+            task.cancel()
+
+    # Remove disk file
+    storage_path = forum._storage_path()
+    if os.path.exists(storage_path):
+        os.remove(storage_path)
+
+    # Clean up in-memory references
+    discussions.pop(topic_id, None)
+    engines.pop(topic_id, None)
+    tasks.pop(topic_id, None)
+
+    return {"topic_id": topic_id, "message": "Discussion permanently deleted"}
+
+
 @app.get("/topics/{topic_id}", response_model=TopicDetail)
-async def get_topic(topic_id: str):
-    """
-    Get full discussion detail.
-    Users can call this anytime to see the current state of a discussion.
-    """
-    forum = discussions.get(topic_id)
-    if not forum:
-        raise HTTPException(404, "Topic not found")
+async def get_topic(topic_id: str, user_id: str = Query(...)):
+    """Get full discussion detail. Requires user_id of the owner."""
+    forum = _get_forum_or_404(topic_id)
+    _check_owner(forum, user_id)
 
     posts = await forum.browse()
     return TopicDetail(
         topic_id=forum.topic_id,
         question=forum.question,
+        user_id=forum.user_id,
         status=DiscussionStatus(forum.status),
         current_round=forum.current_round,
         max_rounds=forum.max_rounds,
@@ -193,14 +268,10 @@ async def get_topic(topic_id: str):
 
 
 @app.get("/topics/{topic_id}/stream")
-async def stream_topic(topic_id: str):
-    """
-    SSE stream for real-time discussion updates.
-    Pushes new posts as they appear, ends with conclusion.
-    """
-    forum = discussions.get(topic_id)
-    if not forum:
-        raise HTTPException(404, "Topic not found")
+async def stream_topic(topic_id: str, user_id: str = Query(...)):
+    """SSE stream for real-time discussion updates. Requires user_id of the owner."""
+    forum = _get_forum_or_404(topic_id)
+    _check_owner(forum, user_id)
 
     async def event_generator():
         last_count = 0
@@ -243,16 +314,17 @@ async def stream_topic(topic_id: str):
 
 
 @app.get("/topics", response_model=list[TopicSummary])
-async def list_topics(user_id: str | None = None):
-    """List all discussion topics, optionally filtered by user_id."""
+async def list_topics(user_id: str = Query(...)):
+    """List discussion topics for a specific user."""
     items = []
     for f in discussions.values():
-        if user_id and f.user_id != user_id:
+        if f.user_id != user_id:
             continue
         items.append(
             TopicSummary(
                 topic_id=f.topic_id,
                 question=f.question,
+                user_id=f.user_id,
                 status=DiscussionStatus(f.status),
                 post_count=len(f.posts),
                 current_round=f.current_round,
@@ -260,21 +332,22 @@ async def list_topics(user_id: str | None = None):
                 created_at=f.created_at,
             )
         )
+    # Most recent first
+    items.sort(key=lambda x: x.created_at, reverse=True)
     return items
 
 
 @app.get("/topics/{topic_id}/conclusion")
-async def get_conclusion(topic_id: str, timeout: int = 300):
+async def get_conclusion(topic_id: str, user_id: str = Query(...), timeout: int = 300):
     """
     Get the final conclusion (blocks until discussion finishes).
-    This is the endpoint the MCP tool calls to get the answer.
+    Requires user_id of the owner.
 
     Args:
         timeout: Maximum seconds to wait (default 300 = 5 min)
     """
-    forum = discussions.get(topic_id)
-    if not forum:
-        raise HTTPException(404, "Topic not found")
+    forum = _get_forum_or_404(topic_id)
+    _check_owner(forum, user_id)
 
     # Poll until concluded or error
     elapsed = 0
@@ -349,7 +422,7 @@ async def update_user_expert_route(tag: str, req: UserExpertRequest):
 
 
 @app.delete("/experts/user/{tag}")
-async def delete_user_expert_route(tag: str, user_id: str):
+async def delete_user_expert_route(tag: str, user_id: str = Query(...)):
     """Delete a custom expert by tag."""
     from oasis.experts import delete_user_expert
     try:
