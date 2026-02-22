@@ -100,7 +100,101 @@ Engine auto-executes:
 | **Stateless** (default) | `False` | Lightweight & fast, independent LLM call per round, no memory, no tools |
 | **Stateful** | `True` | Each expert gets a persistent session with memory, can invoke search/file/code tools, sessions visible in frontend |
 
-### 3. One-Click Public Deployment
+### 3. Multi-Platform Bot Integration (Telegram & QQ)
+
+Mini TimeBot integrates with popular messaging platforms, allowing users to interact with the Agent through Telegram or QQ:
+
+#### Telegram Bot
+
+**Features:**
+- Multimodal input: text, images, voice messages
+- User isolation: each Telegram user maps to a system account
+- Whitelist security: only authorized users can interact with the bot
+- 30-second hot-reload whitelist (no restart needed)
+- Push notifications: Agent can proactively send messages to users
+
+**Setup:**
+1. Create a Telegram bot via [@BotFather](https://t.me/botfather) and get the token
+2. Set `TELEGRAM_BOT_TOKEN` in `config/.env`
+3. Start the bot: `python chatbot/telegrambot.py`
+4. Tell Agent your Telegram chat_id: "Set my Telegram chat_id to 123456789"
+
+**User commands:**
+- Send any message/image/voice to the bot → Agent responds
+- Agent can push notifications to your Telegram proactively
+
+#### QQ Bot
+
+**Features:**
+- Private chat (C2C) and group chat (@mention)
+- Image and voice support (SILK format auto-transcoding)
+- OpenAI-compatible multimodal input
+
+**Setup:**
+1. Register a QQ bot at [QQ Open Platform](https://bot.q.qq.com/)
+2. Set `QQ_APP_ID` and `QQ_BOT_SECRET` in `config/.env`
+3. Start the bot: `python chatbot/QQbot.py`
+
+### 4. Advanced Agent Interaction
+
+Mini TimeBot provides sophisticated user-Agent interaction features:
+
+#### User Profile System
+
+Each user can maintain a personalized profile that the Agent references:
+
+```
+data/user_files/{username}/user_profile.txt
+```
+
+Tell Agent: "Remember that I'm a Python developer interested in AI" → Profile saved and injected into future conversations.
+
+#### Skill System
+
+Users can define custom skills (reusable prompt templates):
+
+```json
+// data/user_files/{username}/skills_manifest.json
+[
+  {
+    "name": "Code Reviewer",
+    "description": "Review code for best practices",
+    "file": "code_reviewer.md"
+  }
+]
+```
+
+Agent shows available skills in each session and can execute them on demand.
+
+#### Dynamic Tool Management
+
+- Tools can be enabled/disabled per-session
+- Agent notifies user when tool status changes
+- Security-critical tools protected by default
+
+#### External Tool Injection
+
+External systems can inject custom tools via OpenAI-compatible API:
+
+```python
+# Caller sends tool definitions
+response = client.chat.completions.create(
+    model="mini-timebot",
+    messages=[...],
+    tools=[{
+        "type": "function",
+        "function": {
+            "name": "get_weather",
+            "description": "Get current weather",
+            "parameters": {...}
+        }
+    }]
+)
+# Agent may call the tool → returns tool_calls to caller
+# Caller executes tool and sends result back
+```
+
+### 5. One-Click Public Deployment
 
 Run a single command to expose the entire service to the internet — **zero configuration, no account needed**:
 
@@ -149,7 +243,18 @@ mainagent.py (FastAPI + LangGraph)  ── OpenAI-compatible API + Core Agent
     │       ▼
     │   oasis/server.py    ── OASIS forum service (engine + expert pool)
     ├── mcp_bark.py        ── Bark mobile push notifications
+    ├── mcp_telegram.py    ── Telegram push + whitelist sync
     └── mcp_commander.py   ── Sandboxed command/code execution
+
+┌─────────────────────────────────────────────────────────────────┐
+│                    External Bot Services                         │
+├─────────────────────────────────────────────────────────────────┤
+│  telegrambot.py         ── Telegram Bot (text/image/voice)       │
+│  QQbot.py               ── QQ Bot (C2C/Group, SILK transcoding)  │
+│                                                                  │
+│  Both bots call mainagent.py via OpenAI-compatible API           │
+│  with user-isolated sessions (INTERNAL_TOKEN:user:BOT)           │
+└─────────────────────────────────────────────────────────────────┘
 ```
 
 ### Ports
@@ -165,7 +270,7 @@ mainagent.py (FastAPI + LangGraph)  ── OpenAI-compatible API + Core Agent
 
 ### MCP Toolset
 
-6 tool services integrated via MCP protocol. All `username` parameters are auto-injected, fully isolated between users:
+7 tool services integrated via MCP protocol. All `username` parameters are auto-injected, fully isolated between users:
 
 | Tool Service | Capability |
 |-------------|------------|
@@ -175,6 +280,7 @@ mainagent.py (FastAPI + LangGraph)  ── OpenAI-compatible API + Core Agent
 | **Commander** | Shell commands and Python code in secure sandbox |
 | **OASIS Forum** | Start discussions, check progress, manage custom experts |
 | **Bark Push** | Push notifications to iOS/macOS devices |
+| **Telegram** | Push messages to Telegram, whitelist management |
 
 ---
 
@@ -292,12 +398,17 @@ mini_timebot/
 ├── run.sh / run.bat               # One-click run
 ├── scripts/                       # Env setup, start, tunnel, user management
 ├── packaging/                     # Windows exe / macOS DMG packaging
+├── chatbot/                       # External bot services
+│   ├── telegrambot.py             # Telegram Bot (text/image/voice)
+│   ├── QQbot.py                   # QQ Bot (C2C/Group, SILK transcoding)
+│   └── setup.py                   # Bot configuration helper
 ├── config/
 │   ├── .env                       # API keys and env vars
 │   ├── requirements.txt           # Python dependencies
 │   └── users.json                 # Username-password hash
 ├── data/
 │   ├── agent_memory.db            # Conversation memory (SQLite)
+│   ├── telegram_whitelist.json    # Telegram bot whitelist
 │   ├── prompts/                   # System prompts + expert configs
 │   │   ├── oasis_experts.json     # 10 public expert definitions
 │   │   ├── oasis_expert_discuss.txt  # Expert discussion prompt template
@@ -306,12 +417,16 @@ mini_timebot/
 │   ├── oasis_user_experts/        # User custom experts (per-user JSON)
 │   ├── timeset/                   # Scheduled task persistence
 │   └── user_files/                # User files (isolated per user)
+│       └── {username}/
+│           ├── user_profile.txt   # User profile
+│           ├── skills_manifest.json  # User skills
+│           └── tg_chat_id.txt     # Telegram chat ID
 ├── src/
 │   ├── mainagent.py               # OpenAI-compatible API + Agent core
 │   ├── agent.py                   # LangGraph workflow + tool orchestration
 │   ├── front.py                   # Flask Web UI
 │   ├── time.py                    # Scheduling center
-│   └── mcp_*.py                   # 6 MCP tool services
+│   └── mcp_*.py                   # 7 MCP tool services
 ├── oasis/
 │   ├── server.py                  # OASIS FastAPI service
 │   ├── engine.py                  # Discussion engine (rounds + consensus + conclusion)
@@ -445,7 +560,101 @@ plan:
 | **无状态**（默认） | `False` | 轻量快速，每轮独立调 LLM，无记忆无工具 |
 | **有状态** | `True` | 每位专家创建持久 session，有记忆、能调用搜索/文件/代码执行等全部工具，session 可在前端查看和继续对话 |
 
-### 3. 一键部署到公网
+### 3. 多平台 Bot 接入（Telegram & QQ）
+
+Mini TimeBot 集成主流即时通讯平台，用户可通过 Telegram 或 QQ 与 Agent 交互：
+
+#### Telegram Bot
+
+**功能特性：**
+- 多模态输入：文字、图片、语音消息
+- 用户隔离：每个 Telegram 用户映射到独立系统账户
+- 白名单安全：仅授权用户可与机器人交互
+- 30 秒热重载白名单（无需重启）
+- 主动推送：Agent 可主动向用户发送 Telegram 消息
+
+**配置步骤：**
+1. 通过 [@BotFather](https://t.me/botfather) 创建 Telegram Bot 并获取 Token
+2. 在 `config/.env` 中设置 `TELEGRAM_BOT_TOKEN`
+3. 启动机器人：`python chatbot/telegrambot.py`
+4. 告诉 Agent 你的 Telegram chat_id："设置我的 Telegram chat_id 为 123456789"
+
+**用户使用：**
+- 向机器人发送任意消息/图片/语音 → Agent 回复
+- Agent 可主动推送通知到你的 Telegram
+
+#### QQ Bot
+
+**功能特性：**
+- 私聊（C2C）和群聊（@机器人）
+- 图片和语音支持（SILK 格式自动转码）
+- OpenAI 兼容多模态输入
+
+**配置步骤：**
+1. 在 [QQ 开放平台](https://bot.q.qq.com/) 注册机器人
+2. 在 `config/.env` 中设置 `QQ_APP_ID` 和 `QQ_BOT_SECRET`
+3. 启动机器人：`python chatbot/QQbot.py`
+
+### 4. 高级 Agent 互动
+
+Mini TimeBot 提供丰富的用户-Agent 互动功能：
+
+#### 用户画像系统
+
+每个用户可维护专属画像，Agent 在对话中自动参考：
+
+```
+data/user_files/{用户名}/user_profile.txt
+```
+
+告诉 Agent："记住我是 Python 开发者，关注 AI 领域" → 画像保存并在后续对话中注入。
+
+#### 技能系统
+
+用户可定义自定义技能（可复用的提示词模板）：
+
+```json
+// data/user_files/{用户名}/skills_manifest.json
+[
+  {
+    "name": "代码审查员",
+    "description": "审查代码并提出最佳实践建议",
+    "file": "code_reviewer.md"
+  }
+]
+```
+
+Agent 在每个会话中显示可用技能，并按需执行。
+
+#### 动态工具管理
+
+- 工具可按会话启用/禁用
+- 工具状态变更时 Agent 通知用户
+- 安全敏感工具默认受保护
+
+#### 外部工具注入
+
+外部系统可通过 OpenAI 兼容 API 注入自定义工具：
+
+```python
+# 调用方发送工具定义
+response = client.chat.completions.create(
+    model="mini-timebot",
+    messages=[...],
+    tools=[{
+        "type": "function",
+        "function": {
+            "name": "get_weather",
+            "description": "获取当前天气",
+            "parameters": {...}
+        }
+    }]
+)
+# Agent 可能调用工具 → 返回 tool_calls 给调用方
+# 调用方执行工具并发送结果回去
+```
+
+### 5. 一键部署到公网
 
 一条命令将整个服务暴露到互联网——**零配置、无需账户**：
 
@@ -494,7 +703,18 @@ mainagent.py (FastAPI + LangGraph)  ── OpenAI 兼容 API + 核心 Agent
     │       ▼
     │   oasis/server.py    ── OASIS 论坛服务（调度引擎 + 专家池）
     ├── mcp_bark.py        ── Bark 手机推送通知
+    ├── mcp_telegram.py    ── Telegram 推送 + 白名单同步
     └── mcp_commander.py   ── 安全沙箱命令/代码执行
+
+┌─────────────────────────────────────────────────────────────────┐
+│                      外部 Bot 服务                               │
+├─────────────────────────────────────────────────────────────────┤
+│  telegrambot.py         ── Telegram Bot（文字/图片/语音）         │
+│  QQbot.py               ── QQ Bot（私聊/群聊，SILK 转码）         │
+│                                                                  │
+│  两个 Bot 均通过 OpenAI 兼容 API 调用 mainagent.py               │
+│  使用用户隔离会话（INTERNAL_TOKEN:用户名:BOT）                    │
+└─────────────────────────────────────────────────────────────────┘
 ```
 
 ### 服务端口
@@ -510,7 +730,7 @@ mainagent.py (FastAPI + LangGraph)  ── OpenAI 兼容 API + 核心 Agent
 
 ### MCP 工具集
 
-Agent 通过 MCP 协议集成 6 个工具服务，所有工具的 `username` 参数由系统自动注入，用户间完全隔离：
+Agent 通过 MCP 协议集成 7 个工具服务，所有工具的 `username` 参数由系统自动注入，用户间完全隔离：
 
 | 工具服务 | 能力 |
 |----------|------|
@@ -520,6 +740,7 @@ Agent 通过 MCP 协议集成 6 个工具服务，所有工具的 `username` 参
 | **命令执行** | 安全沙箱中运行 Shell 命令和 Python 代码 |
 | **OASIS 论坛** | 发起讨论、查看进展、管理自定义专家 |
 | **Bark 推送** | 向 iOS/macOS 设备发送推送通知 |
+| **Telegram** | 向 Telegram 发送消息、白名单管理 |
 
 ---
 
@@ -639,12 +860,17 @@ mini_timebot/
 ├── run.sh / run.bat               # 一键运行
 ├── scripts/                       # 环境配置、启动、隧道、用户管理脚本
 ├── packaging/                     # Windows exe / macOS DMG 打包
+├── chatbot/                       # 外部 Bot 服务
+│   ├── telegrambot.py             # Telegram Bot（文字/图片/语音）
+│   ├── QQbot.py                   # QQ Bot（私聊/群聊，SILK 转码）
+│   └── setup.py                   # Bot 配置助手
 ├── config/
 │   ├── .env                       # API Key 等环境变量
 │   ├── requirements.txt           # Python 依赖
 │   └── users.json                 # 用户名-密码哈希
 ├── data/
 │   ├── agent_memory.db            # 对话记忆（SQLite）
+│   ├── telegram_whitelist.json    # Telegram 机器人白名单
 │   ├── prompts/                   # 系统提示词 + 专家配置
 │   │   ├── oasis_experts.json     # 10 位公共专家定义
 │   │   ├── oasis_expert_discuss.txt  # 专家讨论 prompt 模板
@@ -653,12 +879,16 @@ mini_timebot/
 │   ├── oasis_user_experts/        # 用户自定义专家（per-user JSON）
 │   ├── timeset/                   # 定时任务持久化
 │   └── user_files/                # 用户文件（按用户隔离）
+│       └── {用户名}/
+│           ├── user_profile.txt   # 用户画像
+│           ├── skills_manifest.json  # 用户技能
+│           └── tg_chat_id.txt     # Telegram chat ID
 ├── src/
 │   ├── mainagent.py               # OpenAI 兼容 API + Agent 核心
 │   ├── agent.py                   # LangGraph 工作流 + 工具编排
 │   ├── front.py                   # Flask Web UI
 │   ├── time.py                    # 定时调度中心
-│   └── mcp_*.py                   # 6 个 MCP 工具服务
+│   └── mcp_*.py                   # 7 个 MCP 工具服务
 ├── oasis/
 │   ├── server.py                  # OASIS FastAPI 服务
 │   ├── engine.py                  # 讨论引擎（轮次 + 共识 + 结论）
