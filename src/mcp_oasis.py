@@ -235,6 +235,7 @@ async def post_to_oasis(
     schedule_file: str = "",
     use_bot_session: bool = False,
     detach: bool = False,
+    notify_session: str = "",
 ) -> str:
     """
     Submit a question or work task to the OASIS forum for multi-expert collaboration.
@@ -287,12 +288,17 @@ async def post_to_oasis(
         The final conclusion summarizing the expert discussion, or (if detach=True) the topic_id for later retrieval
     """
     effective_user = username or _FALLBACK_USER
+    port = os.getenv("PORT_AGENT", "51200")
+    callback_url = f"http://127.0.0.1:{port}/system_trigger"
+
     try:
         async with httpx.AsyncClient(timeout=httpx.Timeout(timeout=300.0)) as client:
             body = {
                 "question": question,
                 "user_id": effective_user,
                 "max_rounds": max_rounds,
+                "callback_url": callback_url,
+                "callback_session_id": notify_session or "default",
             }
             if expert_tags:
                 body["expert_tags"] = expert_tags
@@ -406,7 +412,7 @@ async def dispatch_subagent(
     task: str,
     username: str = "",
     enabled_tools: list[str] = [],
-    notify_session: str = "default",
+    notify_session: str = "",
 ) -> str:
     """
     Quickly dispatch a single sub-agent to complete a task in the background.

@@ -42,6 +42,7 @@ USER_INJECTED_TOOLS = {
 SESSION_INJECTED_TOOLS = {
     "add_alarm": "session_id",
     "dispatch_subagent": "notify_session",
+    "post_to_oasis": "notify_session",
     "get_current_session": "current_session_id",
     "send_telegram_message": "source_session",
 }
