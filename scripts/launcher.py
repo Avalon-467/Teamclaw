@@ -238,7 +238,7 @@ else:
 if not os.getenv("INTERNAL_TOKEN"):
     import secrets, re
     _token = secrets.token_hex(32)
-    with open(ENV_PATH, "r") as f:
+    with open(ENV_PATH, "r",encoding="utf-8") as f:
         content = f.read()
     if re.search(r"^INTERNAL_TOKEN=", content, re.MULTILINE):
         content = re.sub(r"^INTERNAL_TOKEN=.*$", f"INTERNAL_TOKEN={_token}", content, flags=re.MULTILINE)
