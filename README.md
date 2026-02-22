@@ -1,5 +1,7 @@
 **[English](#english) | [中文](#中文)**
 
+> **🌐 Multilingual Versions:** This project maintains an English-only branch `i18n-en` for international users. Switch via: `git checkout i18n-en`
+
 ---
 
 <a id="english"></a>
