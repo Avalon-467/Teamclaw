@@ -233,6 +233,22 @@ if bark_available:
 else:
     print("⚠️  跳过 Bark Server 启动（二进制不可用），推送功能不可用")
 
+# 确保 INTERNAL_TOKEN 在所有服务启动前已存在
+# （mainagent 首次启动会自动生成，但 OASIS 比 mainagent 先启动，会读到空值）
+if not os.getenv("INTERNAL_TOKEN"):
+    import secrets, re
+    _token = secrets.token_hex(32)
+    with open(ENV_PATH, "r") as f:
+        content = f.read()
+    if re.search(r"^INTERNAL_TOKEN=", content, re.MULTILINE):
+        content = re.sub(r"^INTERNAL_TOKEN=.*$", f"INTERNAL_TOKEN={_token}", content, flags=re.MULTILINE)
+    else:
+        content += f"\nINTERNAL_TOKEN={_token}\n"
+    with open(ENV_PATH, "w") as f:
+        f.write(content)
+    os.environ["INTERNAL_TOKEN"] = _token
+    print(f"🔑 已自动生成 INTERNAL_TOKEN 并写入 .env")
+
 # 服务配置：(提示信息, 脚本路径, 启动后等待秒数)
 services = [
     (f"⏰ [1/5] 启动定时调度中心 (port {PORT_SCHEDULER})...", "src/time.py", 2),
