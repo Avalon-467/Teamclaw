@@ -208,16 +208,44 @@ def _extract_pdf_text(data_uri: str) -> str:
 
 
 
+def _is_vision_model() -> bool:
+    """根据 LLM_VISION_SUPPORT 环境变量或模型名自动判断是否支持视觉。
+
+    优先级：
+    1. LLM_VISION_SUPPORT 显式设置 → 以用户配置为准
+    2. 未设置 → 根据模型名自动推断
+       - gpt-4o / gpt-4-vision / gpt-5 / o1 / o3 / o4 / gemini / claude → True
+       - deepseek / qwen / glm / moonshot / yi- / minimax / ernie 等 → False
+    """
+    explicit = os.getenv("LLM_VISION_SUPPORT", "").strip().lower()
+    if explicit:
+        return explicit == "true"
+
+    # 自动推断
+    model = os.getenv("LLM_MODEL", "").lower()
+    # 已知支持视觉的模型关键词
+    vision_patterns = (
+        "gpt-4o", "gpt-4-vision", "gpt-5", "gpt-o",
+        "o1", "o3", "o4",
+        "gemini",
+        "claude",
+    )
+    for pat in vision_patterns:
+        if pat in model:
+            return True
+    return False
+
+
 def _build_human_message(text: str, images: list[str] | None = None, files: list[dict] | None = None, audios: list[dict] | None = None) -> HumanMessage:
     """构造 HumanMessage，支持图片、文件附件（文本/PDF）和音频。
-    - 图片：当 LLM_VISION_SUPPORT=true 时构造 OpenAI vision 格式；否则降级提示。
+    - 图片：当模型支持视觉时构造 OpenAI vision 格式；否则降级提示。
     - 文本文件：将文件内容以 markdown 代码块形式拼接到消息文本中。
     - PDF 文件：
         * 视觉模式：以 file content part 直传原始 PDF + 提取文本
         * 非视觉模式：pymupdf 提取纯文本
     - 音频：以 file content part 格式传入（data URI，兼容 OpenAI 代理）
     """
-    vision_supported = os.getenv("LLM_VISION_SUPPORT", "true").lower() == "true"
+    vision_supported = _is_vision_model()
 
     # 收集需要以 file content part 传入的 PDF（视觉模式下）
     pdf_file_parts: list[dict] = []
@@ -273,13 +301,18 @@ def _build_human_message(text: str, images: list[str] | None = None, files: list
     if not has_multimodal:
         return HumanMessage(content=combined_text or "(空消息)")
 
-    if not vision_supported and all_images:
-        hint = f"\n\n[系统提示：你发送了{len(images or [])}张图片，但当前模型不支持图片识别，图片已忽略。请切换到支持视觉的模型（如 gemini-2.0-flash、gpt-4o）后重试。]"
-        combined_text = combined_text + hint
-        # 如果没有音频和 PDF file，直接返回纯文本
-        if not audios and not pdf_file_parts:
+    if not vision_supported and (all_images or audios):
+        hints = []
+        if all_images:
+            hints.append(f"你发送了{len(images or [])}张图片，但当前模型不支持图片识别，图片已忽略。")
+            all_images = []
+        if audios:
+            hints.append(f"你发送了{len(audios)}条语音，但当前模型不支持音频输入，语音已忽略。")
+            audios = None
+        combined_text += f"\n\n[系统提示：{'；'.join(hints)}请切换到支持多模态的模型（如 gemini-2.0-flash、gpt-4o）后重试。]"
+        # 如果没有 PDF file part，直接返回纯文本
+        if not pdf_file_parts:
             return HumanMessage(content=combined_text)
-        all_images = []  # 清空图片，但继续处理音频/PDF
 
     # 多模态：构造 content list
     content_parts = []
@@ -716,8 +749,25 @@ async def system_trigger(req: SystemTriggerRequest, x_internal_token: str | None
         "user_id": req.user_id,
         "session_id": req.session_id,
     }
+
+    async def _wait_and_invoke():
+        # 等待当前会话中未完成的 tool_call 处理完毕，避免 checkpoint 竞争
+        while True:
+            try:
+                snapshot = await agent.agent_app.aget_state(config)
+                msgs = snapshot.values.get("messages", [])
+                if msgs:
+                    last = msgs[-1]
+                    if isinstance(last, AIMessage) and getattr(last, "tool_calls", None):
+                        await asyncio.sleep(1)
+                        continue
+            except Exception:
+                pass
+            break
+        await agent.agent_app.ainvoke(system_input, config)
+
     # fire-and-forget：立刻返回，graph 在后台异步执行
-    asyncio.create_task(agent.agent_app.ainvoke(system_input, config))
+    asyncio.create_task(_wait_and_invoke())
     return {"status": "received", "message": f"系统触发已收到，用户 {req.user_id}"}
 
 
