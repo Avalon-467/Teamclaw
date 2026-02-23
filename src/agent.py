@@ -48,6 +48,7 @@ SESSION_INJECTED_TOOLS = {
     "post_to_oasis": "notify_session",
     "get_current_session": "current_session_id",
     "send_telegram_message": "source_session",
+    "send_internal_message": "source_session",
 }
 
 
