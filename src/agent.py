@@ -154,6 +154,13 @@ class MiniTimeAgent:
         self._task_lock = asyncio.Lock()
         self._user_last_tool_state: dict[str, frozenset[str]] = {}
 
+        # Per-thread lock: 防止 system_trigger 和用户对话并发操作同一 checkpoint
+        self._thread_locks: dict[str, asyncio.Lock] = {}
+        self._thread_locks_guard = asyncio.Lock()
+
+        # 系统触发产生的新消息计数（thread_id → count），前端可轮询
+        self._pending_system_messages: dict[str, int] = {}
+
         # 启动时一次性加载 prompt 模板
         self._prompts = self._load_prompts()
 
@@ -494,7 +501,62 @@ class MiniTimeAgent:
         else:
             input_messages = [SystemMessage(content=base_prompt)] + history_messages
 
+        # # === DEBUG: dump full raw input to file for diagnosis ===
+        # try:
+        #     import json, datetime, os as _os
+        #     _dump_dir = _os.path.join(_os.path.dirname(_os.path.dirname(_os.path.abspath(__file__))), "test")
+        #     _dump_path = _os.path.join(_dump_dir, "llm_input_dump.txt")
+        #     with open(_dump_path, "w", encoding="utf-8") as _f:
+        #         _f.write(f"=== LLM INPUT DUMP @ {datetime.datetime.now().isoformat()} ===\n")
+        #         _f.write(f"Thread: {state.get('user_id','?')}#{state.get('session_id','?')}\n")
+        #         _f.write(f"Total messages: {len(input_messages)}\n")
+        #         _f.write(f"LLM model: {llm.model_name if hasattr(llm, 'model_name') else '?'}\n")
+        #         _f.write(f"LLM base_url: {llm.openai_api_base if hasattr(llm, 'openai_api_base') else '?'}\n\n")
+        #         # Dump each message as full dict via langchain serialization
+        #         from langchain_openai.chat_models.base import _convert_message_to_dict
+        #         for _i, _m in enumerate(input_messages):
+        #             _f.write(f"--- [{_i}] {type(_m).__name__} ---\n")
+        #             try:
+        #                 _d = _convert_message_to_dict(_m)
+        #                 _f.write(json.dumps(_d, ensure_ascii=False, indent=2))
+        #             except Exception as _e:
+        #                 _f.write(f"(serialization error: {_e})\n")
+        #                 _f.write(f"raw __dict__: {_m.__dict__}")
+        #             _f.write("\n\n")
+        # except Exception:
+        #     pass
+        # # === END DEBUG ===
+
         response = await llm.ainvoke(input_messages)
+
+        # --- 检测 tool_calls arguments 是否为合法 JSON（截断/超长会导致不完整）---
+        import json as _json
+        for _tc_list_name in ("tool_calls", "invalid_tool_calls"):
+            for _tc in getattr(response, _tc_list_name, None) or []:
+                _args = _tc.get("args") if _tc_list_name == "tool_calls" else _tc.get("args", "")
+                # tool_calls 的 args 已被 LangChain 解析为 dict；如果仍是 str 说明解析失败
+                # invalid_tool_calls 的 args 是原始 str
+                if isinstance(_args, str):
+                    try:
+                        _json.loads(_args)
+                    except (ValueError, TypeError):
+                        import logging
+                        logging.getLogger("agent.call_model").warning(
+                            "LLM 返回的 tool_call arguments 不是合法 JSON (可能被截断), "
+                            "name=%s, id=%s, args_len=%d, 剥离 tool_calls 改为纯文本回复",
+                            _tc.get("name", "?"), _tc.get("id", "?"), len(_args) if _args else 0,
+                        )
+                        # 将无效的 tool_call 替换为错误 ToolMessage，保持消息序列合法
+                        _tc_id = _tc.get("id", "unknown")
+                        _tc_name = _tc.get("name", "unknown")
+                        from langchain_core.messages import ToolMessage
+                        error_tool_msg = ToolMessage(
+                            content=f"无效tool格式: {_tc_name} 的参数被截断，不是合法JSON",
+                            tool_call_id=_tc_id,
+                        )
+                        # 保留原始 AIMessage（带 tool_calls），后跟错误 ToolMessage
+                        return {"messages": [response, error_tool_msg]}
+
         return {"messages": [response]}
 
     # ------------------------------------------------------------------
@@ -504,13 +566,25 @@ class MiniTimeAgent:
     def _sanitize_messages(messages: list, external_tool_names: set[str] | None = None) -> list:
         """
         清理消息列表，确保每条带 tool_calls 的 AI 消息后面都有对应的 ToolMessage。
-        如果末尾有不完整的 tool_calls 序列，直接截断丢弃。
 
-        但如果 external_tool_names 非空，则保留末尾 AIMessage 中属于外部工具的
-        未回复 tool_calls（它们正等待调用方回传结果）。
+        两轮扫描：
+        1. 末尾截断：从后往前移除悬空的 tool_calls AIMessage（保留外部工具等待回传）
+        2. 全序列扫描：中间的悬空 tool_calls AIMessage → 去掉 tool_calls 只保留 content
+
+        同时检查 invalid_tool_calls（如截断的 arguments），因为序列化时也会变成 tool_calls 发给 API。
         """
+        import logging
+        _log = logging.getLogger("agent.sanitize")
+
         if not external_tool_names:
             external_tool_names = set()
+
+        def _get_all_tc(msg):
+            """获取 AIMessage 上所有 tool_calls + invalid_tool_calls"""
+            tc_list = list(getattr(msg, "tool_calls", None) or [])
+            for itc in (getattr(msg, "invalid_tool_calls", None) or []):
+                tc_list.append({"id": itc.get("id", ""), "name": itc.get("name", ""), **itc})
+            return tc_list
 
         # 收集所有已存在的 tool_call_id 回复
         answered_ids = set()
@@ -518,29 +592,45 @@ class MiniTimeAgent:
             if isinstance(msg, ToolMessage) and hasattr(msg, "tool_call_id"):
                 answered_ids.add(msg.tool_call_id)
 
-        # 从后往前找到第一个"完整"的位置
+        # --- 第一轮：从末尾截断悬空的 tool_calls ---
         clean = list(messages)
         while clean:
             last = clean[-1]
-            # 如果最后一条是带 tool_calls 的 AI 消息，检查是否全部有回复
-            if isinstance(last, AIMessage) and hasattr(last, "tool_calls") and last.tool_calls:
-                pending_ids = {tc["id"] for tc in last.tool_calls}
-                if not pending_ids.issubset(answered_ids):
-                    # 检查未回复的 tool_calls 是否全部属于外部工具
-                    unanswered_calls = [
-                        tc for tc in last.tool_calls if tc["id"] not in answered_ids
-                    ]
-                    all_external = all(
-                        tc["name"] in external_tool_names for tc in unanswered_calls
-                    )
-                    if all_external and external_tool_names:
-                        # 外部工具等待回传，保留此消息
-                        break
-                    # 内部工具未完成 → 截断
-                    clean.pop()
-                    continue
-            break
-        return clean
+            if not isinstance(last, AIMessage):
+                break
+            all_tc = _get_all_tc(last)
+            if not all_tc:
+                break
+            pending_ids = {tc["id"] for tc in all_tc if tc.get("id")}
+            if pending_ids.issubset(answered_ids):
+                break
+            # 检查未回复的是否全属于外部工具
+            unanswered = [tc for tc in all_tc if tc.get("id") not in answered_ids]
+            if external_tool_names and all(tc["name"] in external_tool_names for tc in unanswered):
+                break
+            _log.warning("sanitize: 截断末尾悬空 AIMessage, tool_calls=%s",
+                         [tc.get("name") for tc in all_tc])
+            clean.pop()
+
+        # --- 第二轮：全序列扫描，修复中间的悬空 tool_calls ---
+        result = []
+        for msg in clean:
+            if isinstance(msg, AIMessage):
+                all_tc = _get_all_tc(msg)
+                if all_tc:
+                    pending_ids = {tc["id"] for tc in all_tc if tc.get("id")}
+                    if not pending_ids.issubset(answered_ids):
+                        # 中间出现悬空 tool_calls → 去掉 tool_calls，只保留 content
+                        _log.warning(
+                            "sanitize: 中间悬空 AIMessage, 剥离 tool_calls=%s, content=%s",
+                            [tc.get("name") for tc in all_tc],
+                            str(msg.content)[:100],
+                        )
+                        result.append(AIMessage(content=msg.content or "（工具调用异常，已清理）"))
+                        continue
+            result.append(msg)
+
+        return result
 
     @staticmethod
     def _strip_multimodal_parts(messages: list) -> list:
@@ -599,3 +689,32 @@ class MiniTimeAgent:
     def unregister_task(self, user_id: str):
         """Remove a finished task from the registry."""
         self._active_tasks.pop(user_id, None)
+
+    # ------------------------------------------------------------------
+    # Thread lock: 防止同一 thread 的并发 checkpoint 操作
+    # ------------------------------------------------------------------
+    async def get_thread_lock(self, thread_id: str) -> asyncio.Lock:
+        """获取指定 thread 的锁（懒创建）。"""
+        async with self._thread_locks_guard:
+            if thread_id not in self._thread_locks:
+                self._thread_locks[thread_id] = asyncio.Lock()
+            return self._thread_locks[thread_id]
+
+    def add_pending_system_message(self, thread_id: str):
+        """标记该 thread 有新的系统触发消息。"""
+        self._pending_system_messages[thread_id] = \
+            self._pending_system_messages.get(thread_id, 0) + 1
+
+    def consume_pending_system_messages(self, thread_id: str) -> int:
+        """消费并返回待处理的系统消息计数，归零。"""
+        count = self._pending_system_messages.pop(thread_id, 0)
+        return count
+
+    def has_pending_system_messages(self, thread_id: str) -> bool:
+        """检查是否有未读的系统触发消息。"""
+        return self._pending_system_messages.get(thread_id, 0) > 0
+
+    def is_thread_busy(self, thread_id: str) -> bool:
+        """检查该 thread 的锁是否被占用（有操作进行中）。"""
+        lock = self._thread_locks.get(thread_id)
+        return lock is not None and lock.locked()

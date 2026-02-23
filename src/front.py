@@ -23,6 +23,7 @@ LOCAL_SESSIONS_URL = f"http://127.0.0.1:{PORT_AGENT}/sessions"
 LOCAL_SESSION_HISTORY_URL = f"http://127.0.0.1:{PORT_AGENT}/session_history"
 LOCAL_DELETE_SESSION_URL = f"http://127.0.0.1:{PORT_AGENT}/delete_session"
 LOCAL_TTS_URL = f"http://127.0.0.1:{PORT_AGENT}/tts"
+LOCAL_SESSION_STATUS_URL = f"http://127.0.0.1:{PORT_AGENT}/session_status"
 # OpenAI 兼容端点
 LOCAL_OPENAI_COMPLETIONS_URL = f"http://127.0.0.1:{PORT_AGENT}/v1/chat/completions"
 INTERNAL_TOKEN = os.getenv("INTERNAL_TOKEN", "")
@@ -2376,6 +2377,53 @@ HTML_TEMPLATE = """
                 refreshOasisTopics();
             }
         }, 10000); // Every 10 seconds
+
+        // === System trigger polling: 检测后台系统触发产生的新消息 ===
+        let _sessionStatusTimer = null;
+
+        function startSessionStatusPolling() {
+            stopSessionStatusPolling();
+            _sessionStatusTimer = setInterval(async () => {
+                if (!currentUserId || !currentSessionId) return;
+                // 用户正在流式对话中，跳过轮询
+                if (cancelBtn.style.display !== 'none') return;
+                try {
+                    const resp = await fetch('/proxy_session_status', {
+                        method: 'POST',
+                        headers: {'Content-Type': 'application/json'},
+                        body: JSON.stringify({ session_id: currentSessionId })
+                    });
+                    const data = await resp.json();
+                    if (data.has_new_messages) {
+                        // 有系统触发的新消息，自动刷新历史
+                        console.log('[SessionStatus] New system messages detected, refreshing...');
+                        switchToSession(currentSessionId);
+                    }
+                } catch(e) {
+                    // 静默忽略
+                }
+            }, 5000); // 每 5 秒轮询一次
+        }
+
+        function stopSessionStatusPolling() {
+            if (_sessionStatusTimer) {
+                clearInterval(_sessionStatusTimer);
+                _sessionStatusTimer = null;
+            }
+        }
+
+        // 登录成功后启动轮询
+        const _origLogin = typeof handleLogin === 'function' ? null : null;
+        // 监听 chat-container 可见性来启动/停止轮询
+        const _chatObserver = new MutationObserver(() => {
+            const chatContainer = document.getElementById('chat-container');
+            if (chatContainer && chatContainer.style.display !== 'none') {
+                startSessionStatusPolling();
+            } else {
+                stopSessionStatusPolling();
+            }
+        });
+        _chatObserver.observe(document.body, { childList: true, subtree: true, attributes: true });
     </script>
 
     <script>
@@ -3003,6 +3051,23 @@ def proxy_session_history():
         return jsonify(r.json()), r.status_code
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+
+
+@app.route("/proxy_session_status", methods=["POST"])
+def proxy_session_status():
+    """代理检查会话是否有系统触发的新消息"""
+    user_id = session.get("user_id")
+    password = session.get("password")
+    if not user_id or not password:
+        return jsonify({"has_new_messages": False}), 200
+    sid = request.json.get("session_id", "") if request.is_json else ""
+    try:
+        r = requests.post(LOCAL_SESSION_STATUS_URL, json={
+            "user_id": user_id, "password": password, "session_id": sid
+        }, timeout=5)
+        return jsonify(r.json()), r.status_code
+    except Exception:
+        return jsonify({"has_new_messages": False}), 200
 
 
 @app.route("/proxy_delete_session", methods=["POST"])

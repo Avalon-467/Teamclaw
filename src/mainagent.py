@@ -737,6 +737,31 @@ async def delete_session(
         raise HTTPException(status_code=500, detail=f"删除失败: {e}")
 
 
+# ------------------------------------------------------------------
+# Session status: 前端轮询是否有系统触发的新消息
+# ------------------------------------------------------------------
+
+class SessionStatusRequest(BaseModel):
+    user_id: str
+    password: str
+    session_id: str = "default"
+
+@app.post("/session_status")
+async def session_status(req: SessionStatusRequest):
+    """前端轮询接口：检查是否有系统触发产生的新消息。"""
+    if not verify_password(req.user_id, req.password):
+        raise HTTPException(status_code=401, detail="用户名或密码错误")
+    thread_id = f"{req.user_id}#{req.session_id}"
+    has_new = agent.has_pending_system_messages(thread_id)
+    busy = agent.is_thread_busy(thread_id)
+    pending_count = agent.consume_pending_system_messages(thread_id) if has_new else 0
+    return {
+        "has_new_messages": has_new,
+        "pending_count": pending_count,
+        "busy": busy,
+    }
+
+
 @app.post("/system_trigger")
 async def system_trigger(req: SystemTriggerRequest, x_internal_token: str | None = Header(None)):
     verify_internal_token(x_internal_token)
@@ -751,20 +776,16 @@ async def system_trigger(req: SystemTriggerRequest, x_internal_token: str | None
     }
 
     async def _wait_and_invoke():
-        # 等待当前会话中未完成的 tool_call 处理完毕，避免 checkpoint 竞争
-        while True:
+        lock = await agent.get_thread_lock(thread_id)
+        print(f"[SystemTrigger] ⏳ Waiting for lock on {thread_id} ...")
+        async with lock:
+            print(f"[SystemTrigger] 🔒 Acquired lock on {thread_id}, invoking graph ...")
             try:
-                snapshot = await agent.agent_app.aget_state(config)
-                msgs = snapshot.values.get("messages", [])
-                if msgs:
-                    last = msgs[-1]
-                    if isinstance(last, AIMessage) and getattr(last, "tool_calls", None):
-                        await asyncio.sleep(1)
-                        continue
-            except Exception:
-                pass
-            break
-        await agent.agent_app.ainvoke(system_input, config)
+                await agent.agent_app.ainvoke(system_input, config)
+                agent.add_pending_system_message(thread_id)
+                print(f"[SystemTrigger] ✅ Done for {thread_id}")
+            except Exception as e:
+                print(f"[SystemTrigger] ❌ Error for {thread_id}: {e}")
 
     # fire-and-forget：立刻返回，graph 在后台异步执行
     asyncio.create_task(_wait_and_invoke())
@@ -1066,10 +1087,12 @@ async def openai_chat_completions(
     }
 
     model_name = req.model or "mini-timebot"
+    thread_lock = await agent.get_thread_lock(thread_id)
 
     # --- 非流式 ---
     if not req.stream:
-        result = await agent.agent_app.ainvoke(user_input, config)
+        async with thread_lock:
+            result = await agent.agent_app.ainvoke(user_input, config)
         last_msg = result["messages"][-1]
 
         # 检测是否有外部工具调用需要返回
@@ -1090,98 +1113,99 @@ async def openai_chat_completions(
 
     async def _stream_worker():
         collected_tokens = []
-        try:
-            # 发送 role chunk
-            await queue.put(_make_openai_chunk("", model=model_name, completion_id=completion_id))
-
-            async for event in agent.agent_app.astream_events(user_input, config, version="v2"):
-                kind = event.get("event", "")
-                if kind == "on_chat_model_stream":
-                    chunk = event.get("data", {}).get("chunk")
-                    if chunk and hasattr(chunk, "content") and chunk.content:
-                        text = _extract_text(chunk.content)
-                        if text:
-                            collected_tokens.append(text)
-                            await queue.put(_make_openai_chunk(
-                            text, model=model_name, completion_id=completion_id))
-                elif kind == "on_tool_start":
-                    tool_name = event.get("name", "")
-                    if tool_name not in external_tool_names:
-                        await queue.put(_make_openai_chunk(
-                            f"\n🔧 调用工具: {tool_name}...\n",
-                            model=model_name, completion_id=completion_id))
-                elif kind == "on_tool_end":
-                    tool_name = event.get("name", "")
-                    if tool_name not in external_tool_names:
-                        await queue.put(_make_openai_chunk(
-                            f"\n✅ 工具执行完成\n",
-                            model=model_name, completion_id=completion_id))
-
-            # 流式结束后，检查是否有外部工具调用
-            snapshot = await agent.agent_app.aget_state(config)
-            last_msgs = snapshot.values.get("messages", [])
-            if last_msgs:
-                last_msg_item = last_msgs[-1]
-                ext_tool_calls = _format_tool_calls_for_openai(last_msg_item, external_tool_names)
-                if ext_tool_calls:
-                    # 以非流式格式发送 tool_calls（流式 tool_calls 较复杂，这里用简单方案）
-                    tc_response = {
-                        "id": completion_id,
-                        "object": "chat.completion.chunk",
-                        "created": int(time.time()),
-                        "model": model_name,
-                        "choices": [{
-                            "index": 0,
-                            "delta": {
-                                "tool_calls": ext_tool_calls,
-                            },
-                            "finish_reason": "tool_calls",
-                        }],
-                    }
-                    await queue.put(f"data: {json.dumps(tc_response, ensure_ascii=False)}\n\n")
-                    await queue.put("data: [DONE]\n\n")
-                    return
-
-            # 正常结束
-            await queue.put(_make_openai_chunk(
-                "", model=model_name, finish_reason="stop", completion_id=completion_id))
-            await queue.put("data: [DONE]\n\n")
-        except asyncio.CancelledError:
+        async with thread_lock:
             try:
+                # 发送 role chunk
+                await queue.put(_make_openai_chunk("", model=model_name, completion_id=completion_id))
+
+                async for event in agent.agent_app.astream_events(user_input, config, version="v2"):
+                    kind = event.get("event", "")
+                    if kind == "on_chat_model_stream":
+                        chunk = event.get("data", {}).get("chunk")
+                        if chunk and hasattr(chunk, "content") and chunk.content:
+                            text = _extract_text(chunk.content)
+                            if text:
+                                collected_tokens.append(text)
+                                await queue.put(_make_openai_chunk(
+                                text, model=model_name, completion_id=completion_id))
+                    elif kind == "on_tool_start":
+                        tool_name = event.get("name", "")
+                        if tool_name not in external_tool_names:
+                            await queue.put(_make_openai_chunk(
+                                f"\n🔧 调用工具: {tool_name}...\n",
+                                model=model_name, completion_id=completion_id))
+                    elif kind == "on_tool_end":
+                        tool_name = event.get("name", "")
+                        if tool_name not in external_tool_names:
+                            await queue.put(_make_openai_chunk(
+                                f"\n✅ 工具执行完成\n",
+                                model=model_name, completion_id=completion_id))
+
+                # 流式结束后，检查是否有外部工具调用
                 snapshot = await agent.agent_app.aget_state(config)
                 last_msgs = snapshot.values.get("messages", [])
                 if last_msgs:
                     last_msg_item = last_msgs[-1]
-                    if hasattr(last_msg_item, "tool_calls") and last_msg_item.tool_calls:
-                        tool_messages = [
-                            ToolMessage(
-                                content="⚠️ 工具调用被用户终止",
-                                tool_call_id=tc["id"],
-                            )
-                            for tc in last_msg_item.tool_calls
-                        ]
-                        await agent.agent_app.aupdate_state(config, {"messages": tool_messages})
-            except Exception:
-                pass
-            partial_text = "".join(collected_tokens)
-            if partial_text:
-                partial_text += "\n\n⚠️ （回复被用户终止）"
-                partial_msg = AIMessage(content=partial_text)
-                await agent.agent_app.aupdate_state(config, {"messages": [partial_msg]})
-            await queue.put(_make_openai_chunk(
-                "\n\n⚠️ 已终止思考", model=model_name, completion_id=completion_id))
-            await queue.put(_make_openai_chunk(
-                "", model=model_name, finish_reason="stop", completion_id=completion_id))
-            await queue.put("data: [DONE]\n\n")
-        except Exception as e:
-            await queue.put(_make_openai_chunk(
-                f"\n❌ 响应异常: {str(e)}", model=model_name, completion_id=completion_id))
-            await queue.put(_make_openai_chunk(
-                "", model=model_name, finish_reason="stop", completion_id=completion_id))
-            await queue.put("data: [DONE]\n\n")
-        finally:
-            await queue.put(None)
-            agent.unregister_task(task_key)
+                    ext_tool_calls = _format_tool_calls_for_openai(last_msg_item, external_tool_names)
+                    if ext_tool_calls:
+                        # 以非流式格式发送 tool_calls（流式 tool_calls 较复杂，这里用简单方案）
+                        tc_response = {
+                            "id": completion_id,
+                            "object": "chat.completion.chunk",
+                            "created": int(time.time()),
+                            "model": model_name,
+                            "choices": [{
+                                "index": 0,
+                                "delta": {
+                                    "tool_calls": ext_tool_calls,
+                                },
+                                "finish_reason": "tool_calls",
+                            }],
+                        }
+                        await queue.put(f"data: {json.dumps(tc_response, ensure_ascii=False)}\n\n")
+                        await queue.put("data: [DONE]\n\n")
+                        return
+
+                # 正常结束
+                await queue.put(_make_openai_chunk(
+                    "", model=model_name, finish_reason="stop", completion_id=completion_id))
+                await queue.put("data: [DONE]\n\n")
+            except asyncio.CancelledError:
+                try:
+                    snapshot = await agent.agent_app.aget_state(config)
+                    last_msgs = snapshot.values.get("messages", [])
+                    if last_msgs:
+                        last_msg_item = last_msgs[-1]
+                        if hasattr(last_msg_item, "tool_calls") and last_msg_item.tool_calls:
+                            tool_messages = [
+                                ToolMessage(
+                                    content="⚠️ 工具调用被用户终止",
+                                    tool_call_id=tc["id"],
+                                )
+                                for tc in last_msg_item.tool_calls
+                            ]
+                            await agent.agent_app.aupdate_state(config, {"messages": tool_messages})
+                except Exception:
+                    pass
+                partial_text = "".join(collected_tokens)
+                if partial_text:
+                    partial_text += "\n\n⚠️ （回复被用户终止）"
+                    partial_msg = AIMessage(content=partial_text)
+                    await agent.agent_app.aupdate_state(config, {"messages": [partial_msg]})
+                await queue.put(_make_openai_chunk(
+                    "\n\n⚠️ 已终止思考", model=model_name, completion_id=completion_id))
+                await queue.put(_make_openai_chunk(
+                    "", model=model_name, finish_reason="stop", completion_id=completion_id))
+                await queue.put("data: [DONE]\n\n")
+            except Exception as e:
+                await queue.put(_make_openai_chunk(
+                    f"\n❌ 响应异常: {str(e)}", model=model_name, completion_id=completion_id))
+                await queue.put(_make_openai_chunk(
+                    "", model=model_name, finish_reason="stop", completion_id=completion_id))
+                await queue.put("data: [DONE]\n\n")
+            finally:
+                await queue.put(None)
+                agent.unregister_task(task_key)
 
     task = asyncio.create_task(_stream_worker())
     agent.register_task(task_key, task)
