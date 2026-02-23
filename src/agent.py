@@ -534,6 +534,11 @@ class MiniTimeAgent:
         for _tc_list_name in ("tool_calls", "invalid_tool_calls"):
             for _tc in getattr(response, _tc_list_name, None) or []:
                 _args = _tc.get("args") if _tc_list_name == "tool_calls" else _tc.get("args", "")
+                # 兜底：args 缺失(None) 或空字符串 → 视为空参数 {}，不报错
+                if _args is None or _args == "" or _args == {}:
+                    if _tc_list_name == "tool_calls":
+                        _tc["args"] = {}
+                    continue
                 # tool_calls 的 args 已被 LangChain 解析为 dict；如果仍是 str 说明解析失败
                 # invalid_tool_calls 的 args 是原始 str
                 if isinstance(_args, str):
