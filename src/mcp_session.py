@@ -13,6 +13,7 @@ import os
 import json
 import aiosqlite
 from mcp.server.fastmcp import FastMCP
+from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer
 
 mcp = FastMCP("Session Management")
 
@@ -21,6 +22,9 @@ _DB_PATH = os.path.join(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
     "data", "agent_memory.db",
 )
+
+# LangGraph checkpoint serde (msgpack-based, not plain JSON)
+_serde = JsonPlusSerializer()
 
 
 @mcp.tool()
@@ -92,7 +96,7 @@ async def list_sessions(
 
                 # Get latest checkpoint data to extract summary
                 ckpt_cursor = await db.execute(
-                    "SELECT checkpoint FROM checkpoints "
+                    "SELECT type, checkpoint FROM checkpoints "
                     "WHERE thread_id = ? ORDER BY ROWID DESC LIMIT 1",
                     (thread_id,),
                 )
@@ -100,10 +104,10 @@ async def list_sessions(
                 if not ckpt_row:
                     continue
 
-                # Parse checkpoint to extract message summaries
+                # Parse checkpoint using LangGraph serde (msgpack format)
                 try:
-                    ckpt_data = json.loads(ckpt_row[0])
-                except (json.JSONDecodeError, TypeError):
+                    ckpt_data = _serde.loads_typed((ckpt_row[0], ckpt_row[1]))
+                except Exception:
                     continue
 
                 # Extract channel_values -> messages from checkpoint
@@ -115,28 +119,15 @@ async def list_sessions(
                 msg_count = 0
 
                 for m in messages:
-                    # LangGraph serialized messages have different formats
-                    msg_type = ""
-                    content = ""
+                    # After proper deserialization, messages are LangChain objects
+                    # Check type by class name (HumanMessage, AIMessage, etc.)
+                    type_name = type(m).__name__
 
-                    if isinstance(m, dict):
-                        msg_type = m.get("type", "") or m.get("id", [""])[0] if isinstance(m.get("id"), list) else ""
-                        content = m.get("content", "")
-                        # Also check kwargs for serialized format
-                        kwargs = m.get("kwargs", {})
-                        if kwargs:
-                            content = kwargs.get("content", content)
-                            msg_type = m.get("id", [""])[0] if isinstance(m.get("id"), list) else msg_type
-
-                    if not content:
+                    if type_name != "HumanMessage":
                         continue
 
-                    # Check if it's a HumanMessage
-                    is_human = (
-                        msg_type in ("human", "HumanMessage")
-                        or (isinstance(m, dict) and "HumanMessage" in str(m.get("id", "")))
-                    )
-                    if not is_human:
+                    content = getattr(m, "content", "")
+                    if not content:
                         continue
 
                     # Handle multimodal content (list of parts)

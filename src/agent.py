@@ -37,6 +37,8 @@ USER_INJECTED_TOOLS = {
     "list_oasis_experts", "add_oasis_expert", "update_oasis_expert", "delete_oasis_expert",
     # Session management tools
     "list_sessions", "get_current_session",
+    # LLM API access tools
+    "call_llm_api", "send_internal_message",
 }
 
 # Tools that need session_id auto-injected (in addition to username)
@@ -303,6 +305,11 @@ class MiniTimeAgent:
             "telegram_service": {
                 "command": "python",
                 "args": [os.path.join(self._src_dir, "mcp_telegram.py")],
+                "transport": "stdio",
+            },
+            "llmapi_service": {
+                "command": "python",
+                "args": [os.path.join(self._src_dir, "mcp_llmapi.py")],
                 "transport": "stdio",
             },
         })
