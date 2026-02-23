@@ -3,17 +3,24 @@ from dotenv import load_dotenv
 import static_ffmpeg
 static_ffmpeg.add_paths()
 # 加载 .env 文件
-load_dotenv()
+_chatbot_dir = os.path.dirname(os.path.abspath(__file__))
+_project_root = os.path.dirname(_chatbot_dir)
+load_dotenv(dotenv_path=os.path.join(_project_root, "config", ".env"))
 
 QQ_CONF = {
     "appid": os.getenv("QQ_APP_ID"),
     "secret": os.getenv("QQ_BOT_SECRET"),
 }
 
+# QQ Bot 认证格式: INTERNAL_TOKEN:用户名:QQ
+# QQ_BOT_USERNAME 指定该 Bot 以哪个系统用户身份调用 Agent
+INTERNAL_TOKEN = os.getenv("INTERNAL_TOKEN", "")
+QQ_BOT_USERNAME = os.getenv("QQ_BOT_USERNAME", "qquser")
+
 AI_CONF = {
-    "api_key": os.getenv("AI_API_KEY")+":QQ",
-    "url": os.getenv("AI_API_URL"),
-    "model": os.getenv("AI_MODEL_QQ")
+    "api_key": f"{INTERNAL_TOKEN}:{QQ_BOT_USERNAME}:QQ",
+    "url": os.getenv("AI_API_URL", "http://127.0.0.1:51200/v1/chat/completions"),
+    "model": os.getenv("AI_MODEL_QQ", "gemini-3-flash-preview"),
 }
 
 # 外部手动开启的 SSH 隧道地址
