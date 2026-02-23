@@ -136,6 +136,7 @@ async def send_internal_message(
     wait: bool = True,
     system_prompt: str = "",
     timeout: int = _INTERNAL_SYNC_TIMEOUT,
+    source_session: str = "",
 ) -> str:
     """
     Send a message to another internal Agent session via the local OpenAI-compatible API.
@@ -147,6 +148,9 @@ async def send_internal_message(
     - wait=False: Fire-and-forget. The message is delivered and the target session's
       Agent will process it asynchronously (via system_trigger). You'll get "已送达"
       immediately. The target Agent's response will appear in that session's chat history.
+
+    IMPORTANT: Do NOT use wait=True to send to your own current session — this will
+    cause a deadlock. Use wait=False for same-session messaging, or target a different session.
 
     Typical use cases:
     - Cross-session coordination: "Hey session-B, please run this analysis"
@@ -162,12 +166,20 @@ async def send_internal_message(
         wait: If True, wait for response synchronously; if False, fire-and-forget
         system_prompt: Optional system context to include (sent as system message)
         timeout: Response timeout in seconds (only for wait=True), default 180
+        source_session: (auto-injected) current session ID; do NOT set manually
 
     Returns:
         The target Agent's response (wait=True), or delivery confirmation (wait=False)
     """
     if not _INTERNAL_TOKEN:
         return "❌ 系统未配置 INTERNAL_TOKEN，无法进行内部通信。"
+
+    # 死锁保护：wait=True 且目标是自己当前 session → 强制降级为 wait=False
+    if wait and target_user == username and target_session == source_session:
+        return (
+            "❌ 不能以 wait=True 模式向自己当前 session 发送消息（会导致死锁）。\n"
+            "请改用 wait=False（异步投递），或发送到不同的 session。"
+        )
 
     # Build API key: INTERNAL_TOKEN:target_user:target_session
     api_key = f"{_INTERNAL_TOKEN}:{target_user}:{target_session}"
