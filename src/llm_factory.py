@@ -137,6 +137,7 @@ def create_chat_model(
             max_tokens=max_tokens,
             timeout=timeout,
             max_retries=max_retries,
+            use_responses_api=False,
         )
 
     # 默认: OpenAI 兼容格式
