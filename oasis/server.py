@@ -237,6 +237,44 @@ async def purge_topic(topic_id: str, user_id: str = Query(...)):
     return {"topic_id": topic_id, "message": "Discussion permanently deleted"}
 
 
+@app.delete("/topics")
+async def purge_all_topics(user_id: str = Query(...)):
+    """Delete all topics for a specific user. Returns count of deleted topics."""
+    global discussions, engines, tasks
+
+    # Find all topics owned by this user
+    to_delete = [
+        tid for tid, forum in discussions.items()
+        if forum.user_id == user_id
+    ]
+
+    deleted_count = 0
+    for tid in to_delete:
+        forum = discussions.get(tid)
+        if forum:
+            # Cancel if still running
+            if forum.status in ("pending", "discussing"):
+                engine = engines.get(tid)
+                if engine:
+                    engine.cancel()
+                task = tasks.get(tid)
+                if task and not task.done():
+                    task.cancel()
+
+            # Remove disk file
+            storage_path = forum._storage_path()
+            if os.path.exists(storage_path):
+                os.remove(storage_path)
+
+            # Clean up in-memory references
+            discussions.pop(tid, None)
+            engines.pop(tid, None)
+            tasks.pop(tid, None)
+            deleted_count += 1
+
+    return {"deleted_count": deleted_count, "message": f"Deleted {deleted_count} topics"}
+
+
 @app.get("/topics/{topic_id}", response_model=TopicDetail)
 async def get_topic(topic_id: str, user_id: str = Query(...)):
     """Get full discussion detail. Requires user_id of the owner."""

@@ -524,7 +524,10 @@ HTML_TEMPLATE = """
                     <div class="p-3 border-b flex-shrink-0">
                         <div class="flex items-center justify-between">
                             <span class="text-xs font-semibold text-gray-600" data-i18n="oasis_topics">📋 讨论话题</span>
-                            <span id="oasis-topic-count" class="text-[10px] text-gray-400"></span>
+                            <div class="flex items-center space-x-2">
+                                <button onclick="deleteAllOasisTopics()" class="text-xs text-red-400 hover:text-red-600" data-i18n="delete_all">🗑️ 清空全部</button>
+                                <span id="oasis-topic-count" class="text-[10px] text-gray-400"></span>
+                            </div>
                         </div>
                     </div>
                     <div id="oasis-topic-list" class="flex-1 overflow-y-auto">
@@ -2340,6 +2343,33 @@ HTML_TEMPLATE = """
             }
         }
 
+        async function deleteAllOasisTopics() {
+            const countEl = document.getElementById('oasis-topic-count');
+            const count = parseInt(countEl.textContent) || 0;
+            if (count === 0) {
+                alert(t('oasis_no_topics') || '暂无讨论话题');
+                return;
+            }
+            const confirmMsg = (currentLang === 'zh-CN')
+                ? `确定要清空所有 ${count} 个讨论话题吗？此操作不可恢复！`
+                : `Delete all ${count} topics? This cannot be undone!`;
+            if (!confirm(confirmMsg)) return;
+
+            try {
+                const resp = await fetch('/proxy_oasis/topics', { method: 'DELETE' });
+                const data = await resp.json();
+                if (resp.ok) {
+                    stopOasisPolling();
+                    showOasisTopicList();
+                    alert((currentLang === 'zh-CN' ? '已删除 ' : 'Deleted ') + data.deleted_count + (currentLang === 'zh-CN' ? ' 个话题' : ' topics'));
+                } else {
+                    alert(t('oasis_action_fail') + ': ' + (data.error || data.detail || data.message || ''));
+                }
+            } catch (e) {
+                alert(t('oasis_action_fail') + ': ' + e.message);
+            }
+        }
+
         // Auto-refresh topic list periodically when panel is open
         setInterval(() => {
             if (oasisPanelOpen && !oasisCurrentTopicId && currentUserId) {
@@ -3092,6 +3122,19 @@ def proxy_oasis_purge_topic(topic_id):
         return jsonify({"error": "未登录"}), 401
     try:
         r = requests.post(f"{OASIS_BASE_URL}/topics/{topic_id}/purge", params={"user_id": user_id}, timeout=10)
+        return jsonify(r.json()), r.status_code
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/proxy_oasis/topics", methods=["DELETE"])
+def proxy_oasis_purge_all_topics():
+    """Proxy: delete all OASIS topics for the current user."""
+    user_id = session.get("user_id")
+    if not user_id:
+        return jsonify({"error": "未登录"}), 401
+    try:
+        r = requests.delete(f"{OASIS_BASE_URL}/topics", params={"user_id": user_id}, timeout=30)
         return jsonify(r.json()), r.status_code
     except Exception as e:
         return jsonify({"error": str(e)}), 500
