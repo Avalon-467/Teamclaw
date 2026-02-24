@@ -594,7 +594,7 @@ HTML_TEMPLATE = """
                         <div id="mobile-menu-dropdown" class="mobile-menu-dropdown" style="display:none;">
                             <button onclick="toggleSessionSidebar(); closeMobileMenu();" class="mobile-menu-item" data-i18n="menu_history">📋 历史对话</button>
                             <button onclick="handleNewSession(); closeMobileMenu();" class="mobile-menu-item" data-i18n="menu_new">➕ 新对话</button>
-                            <button onclick="toggleOasisMobile(); closeMobileMenu();" class="mobile-menu-item" data-i18n="menu_oasis">🏛️ OASIS</button>
+                            <button onclick="toggleOasisMobile(); closeMobileMenu();" class="mobile-menu-item" data-i18n="menu_oasis">🏛️ TeamsWork</button>
                             <button onclick="handleLogout(); closeMobileMenu();" class="mobile-menu-item text-red-500" data-i18n="menu_logout">🚪 退出</button>
                         </div>
                     </div>
@@ -720,11 +720,11 @@ HTML_TEMPLATE = """
         <!-- ===== 分割线 ===== -->
         <div class="oasis-divider" id="oasis-divider"></div>
 
-        <!-- ===== 右侧：OASIS 讨论面板 ===== -->
+        <!-- ===== 右侧：TeamsWork 讨论面板 ===== -->
         <div class="oasis-panel collapsed-panel bg-white border-l border-gray-200 flex flex-col h-screen" id="oasis-panel">
             <!-- Collapsed state expand button -->
             <div class="oasis-expand-btn items-center justify-center h-full text-gray-400 hover:text-blue-600 cursor-pointer text-sm font-bold" onclick="toggleOasisPanel()">
-                🏛️ O A S I S
+                🏛️ T E A M S
             </div>
 
             <!-- Panel content -->
@@ -734,7 +734,7 @@ HTML_TEMPLATE = """
                     <div class="flex items-center space-x-2">
                         <span class="text-lg">🏛️</span>
                         <div>
-                            <h2 class="text-sm font-bold text-gray-800" data-i18n="oasis_title">OASIS 讨论论坛</h2>
+                            <h2 class="text-sm font-bold text-gray-800" data-i18n="oasis_title">TeamsWork 讨论论坛</h2>
                             <p class="text-[10px] text-gray-500" data-i18n="oasis_subtitle">多专家并行讨论系统</p>
                         </div>
                     </div>
@@ -759,7 +759,7 @@ HTML_TEMPLATE = """
                         <div class="p-6 text-center text-gray-400 text-sm">
                             <div class="text-3xl mb-2">🏛️</div>
                             <p data-i18n="oasis_no_topics">暂无讨论话题</p>
-                            <p class="text-xs mt-1" data-i18n="oasis_start_hint">在聊天中让 Agent 发起 OASIS 讨论</p>
+                            <p class="text-xs mt-1" data-i18n="oasis_start_hint">在聊天中让 Agent 发起 TeamsWork 讨论</p>
                         </div>
                     </div>
                 </div>
@@ -836,7 +836,7 @@ HTML_TEMPLATE = """
                 // 移动端菜单
                 menu_history: '📋 历史对话',
                 menu_new: '➕ 新对话',
-                menu_oasis: '🏛️ OASIS',
+                menu_oasis: '🏛️ TeamsWork',
                 menu_logout: '🚪 退出',
                 
                 // 聊天区域
@@ -899,12 +899,12 @@ HTML_TEMPLATE = """
                 file_placeholder: '(文件)',
                 
                 // OASIS
-                oasis_title: 'OASIS 讨论论坛',
+                oasis_title: 'TeamsWork 讨论论坛',
                 oasis_subtitle: '多专家并行讨论系统',
                 oasis_topics: '📋 讨论话题',
                 oasis_topics_count: '个话题',
                 oasis_no_topics: '暂无讨论话题',
-                oasis_start_hint: '在聊天中让 Agent 发起 OASIS 讨论',
+                oasis_start_hint: '在聊天中让 Agent 发起 TeamsWork 讨论',
                 oasis_back: '← 返回',
                 oasis_conclusion: '讨论结论',
                 oasis_waiting: '等待专家发言...',
@@ -995,7 +995,7 @@ HTML_TEMPLATE = """
                 // Mobile menu
                 menu_history: '📋 History',
                 menu_new: '➕ New Chat',
-                menu_oasis: '🏛️ OASIS',
+                menu_oasis: '🏛️ TeamsWork',
                 menu_logout: '🚪 Logout',
                 
                 // Chat area
@@ -1058,12 +1058,12 @@ HTML_TEMPLATE = """
                 file_placeholder: '(file)',
                 
                 // OASIS
-                oasis_title: 'OASIS Discussion Forum',
+                oasis_title: 'TeamsWork Discussion Forum',
                 oasis_subtitle: 'Multi-Expert Parallel Discussion System',
                 oasis_topics: '📋 Discussion Topics',
                 oasis_topics_count: 'topics',
                 oasis_no_topics: 'No discussion topics',
-                oasis_start_hint: 'Ask Agent to start an OASIS discussion in chat',
+                oasis_start_hint: 'Ask Agent to start a TeamsWork discussion in chat',
                 oasis_back: '← Back',
                 oasis_conclusion: 'Conclusion',
                 oasis_waiting: 'Waiting for experts...',
