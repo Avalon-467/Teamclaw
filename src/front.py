@@ -660,6 +660,7 @@ HTML_TEMPLATE = """
                                 <span id="group-active-id" class="text-[10px] text-gray-400 ml-2"></span>
                             </div>
                             <div class="flex items-center gap-2">
+                                <button id="group-mute-btn" onclick="toggleGroupMute()" class="text-xs px-2 py-1 rounded border font-bold" style="background:#fef2f2;color:#dc2626;border-color:#fecaca;" data-i18n="group_mute">🔇 急停</button>
                                 <button onclick="toggleGroupMemberPanel()" class="text-xs bg-gray-50 hover:bg-gray-100 px-2 py-1 rounded border border-gray-200" data-i18n="group_members_btn">👤 成员</button>
                             </div>
                         </div>
@@ -912,6 +913,8 @@ HTML_TEMPLATE = """
                 group_no_groups: '暂无群聊',
                 group_select_hint: '选择或创建一个群聊',
                 group_members_btn: '👤 成员',
+                group_mute: '🔇 急停',
+                group_unmute: '🔊 恢复',
                 group_members: '成员管理',
                 group_current_members: '当前成员',
                 group_add_agents: '添加 Agent Session',
@@ -1069,6 +1072,8 @@ HTML_TEMPLATE = """
                 group_no_groups: 'No group chats',
                 group_select_hint: 'Select or create a group chat',
                 group_members_btn: '👤 Members',
+                group_mute: '🔇 Stop',
+                group_unmute: '🔊 Resume',
                 group_members: 'Member Management',
                 group_current_members: 'Current Members',
                 group_add_agents: 'Add Agent Session',
@@ -2717,6 +2722,14 @@ HTML_TEMPLATE = """
         let currentGroupId = null;
         let groupPollingTimer = null;
         let groupLastMsgId = 0;
+        let groupMuted = false;
+        const groupSenderTitles = {};  // sender -> display title mapping
+
+        function getGroupSenderTitle(sender) {
+            let name = groupSenderTitles[sender] || sender;
+            if (name.length > 7) name = name.slice(0, 7) + '…';
+            return name;
+        }
 
         function switchPage(page) {
             currentPage = page;
@@ -2731,16 +2744,35 @@ HTML_TEMPLATE = """
                 chatPage.style.display = 'flex';
                 groupPage.classList.remove('active');
                 stopGroupPolling();
+                stopGroupListPolling();
             } else {
                 chatPage.classList.add('hidden-page');
                 chatPage.style.display = 'none';
                 groupPage.classList.add('active');
                 loadGroupList();
+                startGroupListPolling();
+                // 如果已有打开的群，恢复消息轮询
+                if (currentGroupId) {
+                    startGroupPolling(currentGroupId);
+                }
             }
         }
 
         function stopGroupPolling() {
             if (groupPollingTimer) { clearInterval(groupPollingTimer); groupPollingTimer = null; }
+        }
+
+        let _groupListPollingTimer = null;
+        function startGroupListPolling() {
+            stopGroupListPolling();
+            _groupListPollingTimer = setInterval(() => {
+                if (currentPage === 'group' && currentUserId) {
+                    loadGroupList();
+                }
+            }, 8000);
+        }
+        function stopGroupListPolling() {
+            if (_groupListPollingTimer) { clearInterval(_groupListPollingTimer); _groupListPollingTimer = null; }
         }
 
         async function loadGroupList() {
@@ -2797,6 +2829,15 @@ HTML_TEMPLATE = """
                 document.getElementById('group-active-name').textContent = detail.name;
                 document.getElementById('group-active-id').textContent = '#' + groupId.slice(-8);
 
+                // Build sender -> title mapping from members
+                for (const key of Object.keys(groupSenderTitles)) delete groupSenderTitles[key];
+                for (const m of (detail.members || [])) {
+                    if (m.is_agent && m.title) {
+                        const senderKey = m.user_id + '#' + m.session_id;
+                        groupSenderTitles[senderKey] = m.title;
+                    }
+                }
+
                 renderGroupMessages(detail.messages || []);
                 renderGroupMembers(detail.members || []);
 
@@ -2807,6 +2848,9 @@ HTML_TEMPLATE = """
 
                 // Start polling for new messages
                 startGroupPolling(groupId);
+
+                // Load mute status
+                await loadGroupMuteStatus(groupId);
 
                 // Update group list selection
                 loadGroupList();
@@ -2825,10 +2869,11 @@ HTML_TEMPLATE = """
                 const isSelf = m.sender === currentUserId || m.sender === currentUserId;
                 const isAgent = !isSelf && m.sender_session;
                 const msgClass = isSelf ? 'self' : (isAgent ? 'agent' : 'other');
+                const displayName = isAgent ? getGroupSenderTitle(m.sender) : m.sender;
                 const timeStr = new Date(m.timestamp * 1000).toLocaleTimeString(currentLang === 'zh-CN' ? 'zh-CN' : 'en-US', {hour:'2-digit',minute:'2-digit'});
                 return `
                     <div class="group-msg ${msgClass}" ${isAgent ? 'data-agent-sender="'+escapeHtml(m.sender)+'"' : ''}>
-                        <div class="group-msg-sender">${escapeHtml(m.sender)}</div>
+                        <div class="group-msg-sender">${escapeHtml(displayName)}</div>
                         <div class="group-msg-content markdown-body">${marked.parse(m.content || '')}</div>
                         <div class="group-msg-time">${timeStr}</div>
                     </div>`;
@@ -2848,11 +2893,12 @@ HTML_TEMPLATE = """
                 const isSelf = m.sender === currentUserId || m.sender === currentUserId;
                 const isAgent = !isSelf && m.sender_session;
                 const msgClass = isSelf ? 'self' : (isAgent ? 'agent' : 'other');
+                const displayName = isAgent ? getGroupSenderTitle(m.sender) : m.sender;
                 const timeStr = new Date(m.timestamp * 1000).toLocaleTimeString(currentLang === 'zh-CN' ? 'zh-CN' : 'en-US', {hour:'2-digit',minute:'2-digit'});
                 const div = document.createElement('div');
                 div.className = `group-msg ${msgClass}`;
                 div.innerHTML = `
-                    <div class="group-msg-sender">${escapeHtml(m.sender)}</div>
+                    <div class="group-msg-sender">${escapeHtml(displayName)}</div>
                     <div class="group-msg-content markdown-body">${marked.parse(m.content || '')}</div>
                     <div class="group-msg-time">${timeStr}</div>`;
                 div.querySelectorAll('pre code').forEach((block) => hljs.highlightElement(block));
@@ -2878,11 +2924,13 @@ HTML_TEMPLATE = """
                     const data = await resp.json();
                     if (data.messages && data.messages.length > 0) {
                         appendGroupMessages(data.messages);
+                        // 有新消息时也刷新群列表（更新消息计数）
+                        loadGroupList();
                     }
                 } catch (e) {
                     // silent
                 }
-            }, 2000);
+            }, 5000);
         }
 
         async function sendGroupMessage() {
@@ -2919,9 +2967,11 @@ HTML_TEMPLATE = """
                 const badge = m.is_agent
                     ? `<span class="member-badge badge-agent">${t('group_agent')}</span>`
                     : `<span class="member-badge badge-owner">${t('group_owner')}</span>`;
+                let displayName = m.is_agent && m.title ? m.title : (m.user_id + (m.session_id !== 'default' ? '#' + m.session_id : ''));
+                if (displayName.length > 7) displayName = displayName.slice(0, 7) + '…';
                 return `
                     <div class="member-item">
-                        <span class="member-name">${escapeHtml(m.user_id)}${m.session_id !== 'default' ? '#' + m.session_id : ''}</span>
+                        <span class="member-name" title="${escapeHtml(m.user_id + '#' + m.session_id)}">${escapeHtml(displayName)}</span>
                         ${badge}
                     </div>`;
             }).join('');
@@ -3044,6 +3094,50 @@ HTML_TEMPLATE = """
             } catch (e) {
                 alert('删除失败: ' + e.message);
             }
+        }
+
+        function updateMuteButton() {
+            const btn = document.getElementById('group-mute-btn');
+            if (!btn) return;
+            if (groupMuted) {
+                btn.textContent = t('group_unmute');
+                btn.style.background = '#f0fdf4';
+                btn.style.color = '#16a34a';
+                btn.style.borderColor = '#bbf7d0';
+            } else {
+                btn.textContent = t('group_mute');
+                btn.style.background = '#fef2f2';
+                btn.style.color = '#dc2626';
+                btn.style.borderColor = '#fecaca';
+            }
+        }
+
+        async function loadGroupMuteStatus(groupId) {
+            try {
+                const resp = await fetch(`/proxy_groups/${groupId}/mute_status`, {
+                    headers: { 'Authorization': 'Bearer ' + getAuthToken() }
+                });
+                if (resp.ok) {
+                    const data = await resp.json();
+                    groupMuted = data.muted;
+                    updateMuteButton();
+                }
+            } catch (e) { console.error('Failed to load mute status:', e); }
+        }
+
+        async function toggleGroupMute() {
+            if (!currentGroupId) return;
+            const action = groupMuted ? 'unmute' : 'mute';
+            try {
+                const resp = await fetch(`/proxy_groups/${currentGroupId}/${action}`, {
+                    method: 'POST',
+                    headers: { 'Authorization': 'Bearer ' + getAuthToken() }
+                });
+                if (resp.ok) {
+                    groupMuted = !groupMuted;
+                    updateMuteButton();
+                }
+            } catch (e) { console.error('Failed to toggle mute:', e); }
         }
     </script>
 
@@ -3815,6 +3909,54 @@ def proxy_post_group_message(group_id):
         r = requests.post(
             f"http://127.0.0.1:{PORT_AGENT}/groups/{group_id}/messages",
             json=request.get_json(silent=True),
+            headers=headers, timeout=10,
+        )
+        return jsonify(r.json()), r.status_code
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/proxy_groups/<group_id>/mute", methods=["POST"])
+def proxy_mute_group(group_id):
+    """代理静音群聊"""
+    uid, headers = _group_auth_headers()
+    if not uid:
+        return jsonify({"error": "未登录"}), 401
+    try:
+        r = requests.post(
+            f"http://127.0.0.1:{PORT_AGENT}/groups/{group_id}/mute",
+            headers=headers, timeout=10,
+        )
+        return jsonify(r.json()), r.status_code
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/proxy_groups/<group_id>/unmute", methods=["POST"])
+def proxy_unmute_group(group_id):
+    """代理取消静音群聊"""
+    uid, headers = _group_auth_headers()
+    if not uid:
+        return jsonify({"error": "未登录"}), 401
+    try:
+        r = requests.post(
+            f"http://127.0.0.1:{PORT_AGENT}/groups/{group_id}/unmute",
+            headers=headers, timeout=10,
+        )
+        return jsonify(r.json()), r.status_code
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/proxy_groups/<group_id>/mute_status", methods=["GET"])
+def proxy_group_mute_status(group_id):
+    """代理查询群聊静音状态"""
+    uid, headers = _group_auth_headers()
+    if not uid:
+        return jsonify({"muted": False}), 200
+    try:
+        r = requests.get(
+            f"http://127.0.0.1:{PORT_AGENT}/groups/{group_id}/mute_status",
             headers=headers, timeout=10,
         )
         return jsonify(r.json()), r.status_code

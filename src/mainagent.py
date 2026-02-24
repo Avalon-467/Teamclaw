@@ -1307,6 +1307,8 @@ class GroupMessageRequest(BaseModel):
 
 # --- Helpers ---
 
+_group_muted: set[str] = set()  # 被静音的群 group_id 集合，广播时跳过
+
 def _parse_group_auth(authorization: str | None):
     """从 Bearer token 解析用户认证，返回 (user_id, password, session_id)"""
     if not authorization or not authorization.startswith("Bearer "):
@@ -1323,8 +1325,37 @@ def _parse_group_auth(authorization: str | None):
     return uid, pw, sid
 
 
+async def _get_agent_title(user_id: str, session_id: str) -> str:
+    """从 checkpoint 提取 agent 的 session title（第一条非系统触发 HumanMessage 前50字）"""
+    tid = f"{user_id}#{session_id}"
+    try:
+        config = {"configurable": {"thread_id": tid}}
+        snapshot = await agent.agent_app.aget_state(config)
+        msgs = snapshot.values.get("messages", []) if snapshot and snapshot.values else []
+        for m in msgs:
+            if hasattr(m, "content") and type(m).__name__ == "HumanMessage":
+                raw = m.content
+                if isinstance(raw, str):
+                    content = raw
+                elif isinstance(raw, list):
+                    content = " ".join(
+                        p.get("text", "") for p in raw if isinstance(p, dict) and p.get("type") == "text"
+                    ) or ""
+                else:
+                    content = str(raw)
+                if content.startswith("[系统触发]") or content.startswith("[外部学术会议邀请]") or content.startswith("[群聊"):
+                    continue
+                return content[:50]
+    except Exception:
+        pass
+    return session_id
+
+
 async def _broadcast_to_group(group_id: str, sender: str, content: str, exclude_user: str = "", exclude_session: str = ""):
     """向群内所有 agent 成员广播消息（异步 fire-and-forget）"""
+    if group_id in _group_muted:
+        print(f"[GroupChat] 群 {group_id} 已静音，跳过广播")
+        return
     async with aiosqlite.connect(_GROUP_DB_PATH) as db:
         cursor = await db.execute(
             "SELECT user_id, session_id, is_agent FROM group_members WHERE group_id = ?",
@@ -1333,13 +1364,18 @@ async def _broadcast_to_group(group_id: str, sender: str, content: str, exclude_
         members = await cursor.fetchall()
 
     for user_id, session_id, is_agent in members:
+        if group_id in _group_muted:
+            print(f"[GroupChat] 群 {group_id} 广播中途被静音，停止")
+            return
         if not is_agent:
             continue  # 人类成员不需要异步通知
         if user_id == exclude_user and session_id == exclude_session:
             continue  # 不通知发送者自己
+        # 获取目标 agent 的 title，让它知道自己的身份
+        my_title = await _get_agent_title(user_id, session_id)
         # 用 system_trigger 异步投递
         trigger_url = f"http://127.0.0.1:{os.getenv('PORT_AGENT', '51200')}/system_trigger"
-        msg_text = f"[群聊 {group_id}] {sender} 说:\n{content}\n\n(仅当消息与你直接相关、点名你、或向你提问时，才使用 send_to_group 工具回复，group_id={group_id}。其他情况请忽略，不要回应。)"
+        msg_text = f"[群聊 {group_id}] {sender} 说:\n{content}\n\n(你在群聊中的身份/角色是「{my_title}」，回复时请体现你的专业角色视角。仅当消息与你直接相关、点名你、或向你提问时，才使用 send_to_group 工具回复，group_id={group_id}。其他情况请忽略，不要回应。)"
         try:
             async with httpx.AsyncClient(timeout=10) as client:
                 await client.post(
@@ -1423,6 +1459,13 @@ async def get_group(group_id: str, authorization: str | None = Header(None)):
             (group_id,),
         )
         members = [dict(r) for r in await cursor.fetchall()]
+
+        # 为 agent 成员补充 session title
+        for member in members:
+            if not member.get("is_agent"):
+                continue
+            member["title"] = await _get_agent_title(member["user_id"], member["session_id"])
+
         # 最近 100 条消息
         cursor = await db.execute(
             "SELECT id, sender, sender_session, content, timestamp FROM group_messages WHERE group_id = ? ORDER BY id DESC LIMIT 100",
@@ -1536,6 +1579,29 @@ async def delete_group(group_id: str, authorization: str | None = Header(None)):
         await db.execute("DELETE FROM groups WHERE group_id = ?", (group_id,))
         await db.commit()
     return {"status": "deleted"}
+
+
+@app.post("/groups/{group_id}/mute")
+async def mute_group(group_id: str, authorization: str | None = Header(None)):
+    """静音群聊 — 立即停止广播"""
+    _parse_group_auth(authorization)
+    _group_muted.add(group_id)
+    return {"status": "muted", "group_id": group_id}
+
+
+@app.post("/groups/{group_id}/unmute")
+async def unmute_group(group_id: str, authorization: str | None = Header(None)):
+    """取消静音群聊 — 恢复广播"""
+    _parse_group_auth(authorization)
+    _group_muted.discard(group_id)
+    return {"status": "unmuted", "group_id": group_id}
+
+
+@app.get("/groups/{group_id}/mute_status")
+async def group_mute_status(group_id: str, authorization: str | None = Header(None)):
+    """查询群聊静音状态"""
+    _parse_group_auth(authorization)
+    return {"muted": group_id in _group_muted}
 
 
 @app.get("/groups/{group_id}/sessions")
