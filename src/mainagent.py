@@ -1417,7 +1417,7 @@ async def _broadcast_to_group(group_id: str, sender: str, content: str, exclude_
         my_title = await _get_agent_title(user_id, session_id)
         # 用 system_trigger 异步投递
         trigger_url = f"http://127.0.0.1:{os.getenv('PORT_AGENT', '51200')}/system_trigger"
-        msg_text = f"[群聊 {group_id}] {sender} 说:\n{content}\n\n(你在群聊中的身份/角色是「{my_title}」，回复时请体现你的专业角色视角。仅当消息与你直接相关、点名你、或向你提问时，才使用 send_to_group 工具回复，group_id={group_id}。其他情况请忽略，不要回应。)"
+        msg_text = f"[群聊 {group_id}] {sender} 说:\n{content}\n\n(你在群聊中的身份/角色是「{my_title}」，回复时请体现你的专业角色视角。仅当消息与你直接相关、点名你、向你提问、或面向所有人时，才使用 send_to_group 工具回复，group_id={group_id}。其他情况请忽略，不要回应。)"
         try:
             async with httpx.AsyncClient(timeout=10) as client:
                 await client.post(
@@ -1555,10 +1555,11 @@ async def post_group_message(group_id: str, req: GroupMessageRequest, authorizat
         cursor = await db.execute("SELECT group_id FROM groups WHERE group_id = ?", (group_id,))
         if not await cursor.fetchone():
             raise HTTPException(status_code=404, detail="群聊不存在")
-        await db.execute(
+        cursor2 = await db.execute(
             "INSERT INTO group_messages (group_id, sender, sender_session, content, timestamp) VALUES (?, ?, ?, ?, ?)",
             (group_id, sender, sender_session, req.content, now),
         )
+        msg_id = cursor2.lastrowid
         await db.commit()
 
     # 异步广播给群内所有 agent
@@ -1566,7 +1567,7 @@ async def post_group_message(group_id: str, req: GroupMessageRequest, authorizat
     exclude_uid = sender.split("#")[0] if "#" in sender else sender
     asyncio.create_task(_broadcast_to_group(group_id, sender, req.content, exclude_user=exclude_uid, exclude_session=sender_session))
 
-    return {"status": "sent", "sender": sender, "timestamp": now}
+    return {"status": "sent", "sender": sender, "timestamp": now, "id": msg_id}
 
 
 @app.put("/groups/{group_id}")
