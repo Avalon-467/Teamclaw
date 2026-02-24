@@ -1552,7 +1552,9 @@ async def post_group_message(group_id: str, req: GroupMessageRequest, authorizat
         await db.commit()
 
     # 异步广播给群内所有 agent
-    asyncio.create_task(_broadcast_to_group(group_id, sender, req.content, exclude_user=sender, exclude_session=sender_session))
+    # sender 可能是 "username#session_id" 格式，提取纯 user_id 用于排除
+    exclude_uid = sender.split("#")[0] if "#" in sender else sender
+    asyncio.create_task(_broadcast_to_group(group_id, sender, req.content, exclude_user=exclude_uid, exclude_session=sender_session))
 
     return {"status": "sent", "sender": sender, "timestamp": now}
 
