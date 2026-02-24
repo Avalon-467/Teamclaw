@@ -4,12 +4,24 @@ OASIS Forum - Discussion Scheduler
 Parses YAML schedule definitions and yields execution steps
 that control the order in which experts speak.
 
+schedule_yaml is required for all discussions. Even for simple
+all-parallel scenarios, a minimal YAML suffices:
+  version: 1
+  repeat: true
+  plan:
+    - all_experts: true
+
 Schedule YAML format:
   version: 1
   repeat: true          # true = 每轮重复整个 plan; false = plan 只执行一次
   plan:
     # 指定专家发言（按名称匹配）
-    - expert: "批判专家"
+    # 名称格式直接对应 engine 的专家类型（必须含 '#'）：
+    #   "tag#temp#N"          → ExpertAgent (tag 查预设获取 name/persona)
+    #   "tag#oasis#随机ID"    → SessionExpert (oasis, tag 查预设获取 name/persona)
+    #   "标题#session_id"     → SessionExpert (普通 agent, 不注入)
+    #   任何 session 名 + "#new" → 强制创建全新 session（ID 替换为随机 UUID）
+    - expert: "critical#temp#1"
 
     # 多个专家同时并行发言
     - parallel:
@@ -29,8 +41,7 @@ Execution modes:
   repeat: true  -> plan 在每轮重复执行，max_rounds 控制总轮数
   repeat: false -> plan 中的步骤顺序执行一次即结束（忽略 max_rounds）
 
-If no schedule is provided, the engine falls back to the default
-"all experts in parallel each round" behavior.
+If no schedule is provided, the engine will raise a ValueError.
 """
 
 from __future__ import annotations
@@ -134,3 +145,21 @@ def load_schedule_file(path: str) -> Schedule:
     """Load and parse a schedule from a YAML file path."""
     with open(path, "r", encoding="utf-8") as f:
         return parse_schedule(f.read())
+
+
+def extract_expert_names(schedule: Schedule) -> list[str]:
+    """Extract all unique expert names referenced in a schedule (preserving order).
+
+    Scans EXPERT and PARALLEL steps for expert_names.
+    ALL and MANUAL steps don't reference specific experts so are skipped.
+    Returns a deduplicated list in order of first appearance.
+    """
+    seen: set[str] = set()
+    result: list[str] = []
+    for step in schedule.steps:
+        if step.step_type in (StepType.EXPERT, StepType.PARALLEL):
+            for name in step.expert_names:
+                if name not in seen:
+                    seen.add(name)
+                    result.append(name)
+    return result
