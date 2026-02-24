@@ -544,7 +544,7 @@ HTML_TEMPLATE = """
         <!-- ===== 历史会话侧边栏 ===== -->
         <div id="session-sidebar" class="session-sidebar" style="display:none;">
             <div class="p-3 border-b bg-gray-50 flex justify-between items-center flex-shrink-0">
-                <span class="text-sm font-bold text-gray-700" data-i18n="history_title">💬 历史对话</span>
+                <span class="text-sm font-bold text-gray-700" data-i18n="history_title">🤖 Agents</span>
                 <div class="flex items-center gap-2">
                     <button onclick="deleteAllSessions()" class="text-xs text-red-400 hover:text-red-600" data-i18n="delete_all">🗑️ 清空全部</button>
                     <button onclick="closeSessionSidebar()" class="text-gray-400 hover:text-gray-600 text-lg leading-none">&times;</button>
@@ -577,9 +577,9 @@ HTML_TEMPLATE = """
                     <div id="uid-display" class="text-xs sm:text-sm font-mono bg-gray-100 px-2 sm:px-3 py-1 rounded border truncate max-w-[80px] sm:max-w-none"></div>
                     <div id="session-display" class="text-[10px] sm:text-xs font-mono bg-blue-50 text-blue-600 px-1.5 sm:px-2 py-1 rounded border border-blue-200 cursor-default" data-i18n-title="current_session" title="当前对话号"></div>
                     <!-- History Button -->
-                    <button onclick="toggleSessionSidebar()" class="desktop-only-btn text-[10px] sm:text-xs bg-gray-50 text-gray-600 hover:bg-gray-100 px-2 py-1 rounded border border-gray-200 transition-colors flex items-center justify-center" data-i18n-title="history_title" title="历史对话">
-                        <span class="hidden sm:inline" data-i18n="history">📋历史</span>
-                        <span class="sm:hidden text-base leading-none">📋</span>
+                    <button onclick="toggleSessionSidebar()" class="desktop-only-btn text-[10px] sm:text-xs bg-gray-50 text-gray-600 hover:bg-gray-100 px-2 py-1 rounded border border-gray-200 transition-colors flex items-center justify-center" data-i18n-title="history_title" title="Agents">
+                        <span class="hidden sm:inline" data-i18n="history">🤖Agents</span>
+                        <span class="sm:hidden text-base leading-none">🤖</span>
                     </button>
                     <!-- New Session Button: Visible on all devices -->
                     <button onclick="handleNewSession()" class="text-[10px] sm:text-xs bg-green-50 text-green-600 hover:bg-green-100 px-2 py-1 rounded border border-green-200 transition-colors mr-1 flex items-center justify-center" data-i18n-title="new_session_confirm" title="开启新对话">
@@ -592,7 +592,7 @@ HTML_TEMPLATE = """
                     <div class="mobile-menu-wrapper" style="position:relative;">
                         <button onclick="toggleMobileMenu()" class="mobile-menu-btn text-[10px] bg-gray-100 hover:bg-gray-200 px-2 py-1 rounded border border-gray-300 transition-colors" data-i18n-title="more_actions" title="更多操作">⋮</button>
                         <div id="mobile-menu-dropdown" class="mobile-menu-dropdown" style="display:none;">
-                            <button onclick="toggleSessionSidebar(); closeMobileMenu();" class="mobile-menu-item" data-i18n="menu_history">📋 历史对话</button>
+                            <button onclick="toggleSessionSidebar(); closeMobileMenu();" class="mobile-menu-item" data-i18n="menu_history">🤖 Agents</button>
                             <button onclick="handleNewSession(); closeMobileMenu();" class="mobile-menu-item" data-i18n="menu_new">➕ 新对话</button>
                             <button onclick="toggleOasisMobile(); closeMobileMenu();" class="mobile-menu-item" data-i18n="menu_oasis">🏛️ TeamsWork</button>
                             <button onclick="handleLogout(); closeMobileMenu();" class="mobile-menu-item text-red-500" data-i18n="menu_logout">🚪 退出</button>
@@ -660,7 +660,10 @@ HTML_TEMPLATE = """
                 <div class="group-list-sidebar">
                     <div class="p-3 border-b bg-gray-50 flex justify-between items-center flex-shrink-0">
                         <span class="text-sm font-bold text-gray-700" data-i18n="group_title">👥 群聊列表</span>
-                        <button onclick="showCreateGroupModal()" class="text-xs bg-blue-50 text-blue-600 hover:bg-blue-100 px-2 py-1 rounded border border-blue-200" data-i18n="group_new">+ 新建</button>
+                        <div class="flex items-center gap-2">
+                            <button onclick="toggleSessionSidebar()" class="text-[10px] bg-gray-50 text-gray-600 hover:bg-gray-100 px-2 py-1 rounded border border-gray-200" data-i18n-title="history_title" title="Agents">🤖</button>
+                            <button onclick="showCreateGroupModal()" class="text-xs bg-blue-50 text-blue-600 hover:bg-blue-100 px-2 py-1 rounded border border-blue-200" data-i18n="group_new">+ 新建</button>
+                        </div>
                     </div>
                     <div id="group-list" class="flex-1 overflow-y-auto">
                         <div class="group-empty-state" style="padding:40px 0;">
@@ -826,7 +829,7 @@ HTML_TEMPLATE = """
                 
                 // 头部
                 encrypted: '● 已加密',
-                history: '📋历史',
+                history: '🤖Agents',
                 new_chat: '+新',
                 new_chat_mobile: '+',
                 logout: '退出',
@@ -834,7 +837,7 @@ HTML_TEMPLATE = """
                 more_actions: '更多操作',
                 
                 // 移动端菜单
-                menu_history: '📋 历史对话',
+                menu_history: '🤖 Agents',
                 menu_new: '➕ 新对话',
                 menu_oasis: '🏛️ TeamsWork',
                 menu_logout: '🚪 退出',
@@ -872,7 +875,7 @@ HTML_TEMPLATE = """
                 recording_too_long: '录音过长，上限 25MB',
                 
                 // 历史会话
-                history_title: '💬 历史对话',
+                history_title: '🤖 Agents',
                 history_loading: '加载中...',
                 history_empty: '暂无历史对话',
                 history_error: '加载失败',
@@ -985,7 +988,7 @@ HTML_TEMPLATE = """
                 
                 // Header
                 encrypted: '● Encrypted',
-                history: '📋 History',
+                history: '🤖 Agents',
                 new_chat: '+New',
                 new_chat_mobile: '+',
                 logout: 'Logout',
@@ -993,7 +996,7 @@ HTML_TEMPLATE = """
                 more_actions: 'More actions',
                 
                 // Mobile menu
-                menu_history: '📋 History',
+                menu_history: '🤖 Agents',
                 menu_new: '➕ New Chat',
                 menu_oasis: '🏛️ TeamsWork',
                 menu_logout: '🚪 Logout',
@@ -1031,7 +1034,7 @@ HTML_TEMPLATE = """
                 recording_too_long: 'Recording too long, limit 25MB',
                 
                 // History sessions
-                history_title: '💬 History',
+                history_title: '🤖 Agents',
                 history_loading: 'Loading...',
                 history_empty: 'No history',
                 history_error: 'Failed to load',
@@ -3127,7 +3130,7 @@ HTML_TEMPLATE = """
             input.value = '';
 
             try {
-                await fetch(`/proxy_groups/${currentGroupId}/messages`, {
+                const resp = await fetch(`/proxy_groups/${currentGroupId}/messages`, {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',
@@ -3135,14 +3138,15 @@ HTML_TEMPLATE = """
                     },
                     body: JSON.stringify({ content: text })
                 });
-                // Immediately show in UI
+                const result = await resp.json();
+                const realId = result.id || (groupLastMsgId + 1);
+                // Immediately show in UI with real server ID
                 appendGroupMessages([{
-                    id: groupLastMsgId + 1,
+                    id: realId,
                     sender: currentUserId,
                     content: text,
                     timestamp: Date.now() / 1000
                 }]);
-                groupLastMsgId++;
             } catch (e) {
                 console.error('Failed to send group message:', e);
             }
