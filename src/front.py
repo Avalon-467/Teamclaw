@@ -370,6 +370,30 @@ HTML_TEMPLATE = """
         .session-item { position: relative; }
         .session-item:hover .session-delete { display: block; }
         .session-item .session-delete:hover { background: #fca5a5; }
+        @keyframes session-glow-user {
+            0%, 100% { box-shadow: 0 0 4px 1px rgba(59,130,246,0.3); }
+            50% { box-shadow: 0 0 10px 3px rgba(59,130,246,0.5); }
+        }
+        @keyframes session-glow-system {
+            0%, 100% { box-shadow: 0 0 4px 1px rgba(234,179,8,0.3); }
+            50% { box-shadow: 0 0 10px 3px rgba(234,179,8,0.5); }
+        }
+        .session-item.busy-user {
+            animation: session-glow-user 1.5s ease-in-out infinite;
+            border-color: #93c5fd;
+            background: rgba(59,130,246,0.08);
+        }
+        .session-item.busy-system {
+            animation: session-glow-system 1.5s ease-in-out infinite;
+            border-color: #fcd34d;
+            background: rgba(234,179,8,0.10);
+        }
+        .session-busy-badge {
+            display: inline-block; font-size: 10px; padding: 0 4px; border-radius: 3px;
+            margin-left: 4px; vertical-align: middle; line-height: 1.4;
+        }
+        .session-busy-badge.user { background: #dbeafe; color: #2563eb; }
+        .session-busy-badge.system { background: #fef3c7; color: #b45309; }
 
         /* === Mobile responsive === */
         @media (max-width: 768px) {
@@ -1473,6 +1497,22 @@ HTML_TEMPLATE = """
 
         // ===== 历史会话侧边栏 =====
         let sessionSidebarOpen = false;
+        let _historyPollingTimer = null;
+
+        function startHistoryPolling() {
+            stopHistoryPolling();
+            _historyPollingTimer = setInterval(() => {
+                if (sessionSidebarOpen) {
+                    refreshHistoryList();
+                } else {
+                    // sidebar 未打开也刷新状态（发光效果），以便打开时立即可见
+                    refreshSessionStatus();
+                }
+            }, 1000);
+        }
+        function stopHistoryPolling() {
+            if (_historyPollingTimer) { clearInterval(_historyPollingTimer); _historyPollingTimer = null; }
+        }
 
         function toggleSessionSidebar() {
             if (sessionSidebarOpen) { closeSessionSidebar(); } else { openSessionSidebar(); }
@@ -1494,7 +1534,13 @@ HTML_TEMPLATE = """
                 }
                 overlay.style.display = 'block';
             }
-            await loadSessionList();
+            // 已有列表内容则增量刷新，否则全量加载
+            const listEl = document.getElementById('session-list');
+            if (listEl.querySelector('.session-item')) {
+                refreshHistoryList();
+            } else {
+                await loadSessionList();
+            }
         }
 
         function closeSessionSidebar() {
@@ -1506,7 +1552,9 @@ HTML_TEMPLATE = """
 
         async function loadSessionList() {
             const listEl = document.getElementById('session-list');
-            listEl.innerHTML = `<div class="text-xs text-gray-400 text-center py-4">${t('loading')}</div>`;
+            if (!listEl.querySelector('.session-item')) {
+                listEl.innerHTML = `<div class="text-xs text-gray-400 text-center py-4">${t('loading')}</div>`;
+            }
             try {
                 const resp = await fetch('/proxy_sessions');
                 const data = await resp.json();
@@ -1515,12 +1563,12 @@ HTML_TEMPLATE = """
                     return;
                 }
                 listEl.innerHTML = '';
-                // 按 session_id 倒序（新的在前）
                 data.sessions.sort((a, b) => b.session_id.localeCompare(a.session_id));
                 for (const s of data.sessions) {
                     const isActive = s.session_id === currentSessionId;
                     const div = document.createElement('div');
                     div.className = 'session-item' + (isActive ? ' active' : '');
+                    div.dataset.sessionId = s.session_id;
                     div.innerHTML = `
                         <div class="session-title">${escapeHtml(s.title)}</div>
                         <div class="session-meta">#${s.session_id.slice(-6)} · ${s.message_count}${t('messages_count')}</div>
@@ -1529,9 +1577,145 @@ HTML_TEMPLATE = """
                     div.onclick = () => switchToSession(s.session_id);
                     listEl.appendChild(div);
                 }
+                refreshSessionStatus();
             } catch (e) {
                 listEl.innerHTML = `<div class="text-xs text-red-400 text-center py-4">${t('history_error')}</div>`;
             }
+        }
+
+        // 增量刷新：不重建DOM，只更新标题/计数 + 状态发光
+        async function refreshHistoryList() {
+            try {
+                const [sessResp, statusResp] = await Promise.all([
+                    fetch('/proxy_sessions'),
+                    fetch('/proxy_sessions_status')
+                ]);
+                const sessData = await sessResp.json();
+                const statusData = statusResp.ok ? await statusResp.json() : {};
+                const sessions = sessData.sessions || [];
+                const listEl = document.getElementById('session-list');
+                if (sessions.length === 0) {
+                    listEl.innerHTML = `<div class="text-xs text-gray-400 text-center py-4">${t('history_empty')}</div>`;
+                    return;
+                }
+                // 构建 session map
+                const sessMap = {};
+                for (const s of sessions) sessMap[s.session_id] = s;
+                const statusMap = {};
+                if (statusData.sessions) {
+                    for (const s of statusData.sessions) statusMap[s.session_id] = s;
+                }
+                // 现有 DOM 的 session id 集合
+                const existingEls = listEl.querySelectorAll('.session-item[data-session-id]');
+                const existingIds = new Set();
+                existingEls.forEach(el => existingIds.add(el.dataset.sessionId));
+                const newIds = new Set(sessions.map(s => s.session_id));
+                // 删除不存在的
+                existingEls.forEach(el => {
+                    if (!newIds.has(el.dataset.sessionId)) el.remove();
+                });
+                // 更新现有的 + 添加新的
+                sessions.sort((a, b) => b.session_id.localeCompare(a.session_id));
+                let prevEl = null;
+                for (const s of sessions) {
+                    let div = listEl.querySelector(`.session-item[data-session-id="${s.session_id}"]`);
+                    if (div) {
+                        // 更新标题和计数
+                        const titleEl = div.querySelector('.session-title');
+                        const newTitle = escapeHtml(s.title);
+                        if (titleEl && titleEl.innerHTML !== newTitle) titleEl.innerHTML = newTitle;
+                        const metaEl = div.querySelector('.session-meta');
+                        if (metaEl) {
+                            const badge = metaEl.querySelector('.session-busy-badge');
+                            const newMeta = `#${s.session_id.slice(-6)} · ${s.message_count}${t('messages_count')}`;
+                            // 只更新文本部分，保留badge
+                            const textNode = metaEl.firstChild;
+                            if (textNode && textNode.nodeType === 3) {
+                                if (textNode.textContent.trim() !== newMeta.trim()) textNode.textContent = newMeta;
+                            } else {
+                                // 重建meta但保留badge
+                                const savedBadge = badge;
+                                metaEl.textContent = newMeta;
+                                if (savedBadge) metaEl.appendChild(savedBadge);
+                            }
+                        }
+                        // active 状态
+                        div.classList.toggle('active', s.session_id === currentSessionId);
+                    } else {
+                        // 新增的 session
+                        div = document.createElement('div');
+                        div.className = 'session-item' + (s.session_id === currentSessionId ? ' active' : '');
+                        div.dataset.sessionId = s.session_id;
+                        div.innerHTML = `
+                            <div class="session-title">${escapeHtml(s.title)}</div>
+                            <div class="session-meta">#${s.session_id.slice(-6)} · ${s.message_count}${t('messages_count')}</div>
+                            <button class="session-delete" onclick="event.stopPropagation(); deleteSession('${s.session_id}')">${t('delete_session')}</button>
+                        `;
+                        div.onclick = () => switchToSession(s.session_id);
+                        if (prevEl && prevEl.nextSibling) {
+                            listEl.insertBefore(div, prevEl.nextSibling);
+                        } else if (!prevEl) {
+                            listEl.prepend(div);
+                        } else {
+                            listEl.appendChild(div);
+                        }
+                    }
+                    // 更新发光状态（不移除再添加class，避免动画重启）
+                    const info = statusMap[s.session_id];
+                    const wantUser = info && info.busy && info.source !== 'system';
+                    const wantSystem = info && info.busy && info.source === 'system';
+                    const hasUser = div.classList.contains('busy-user');
+                    const hasSystem = div.classList.contains('busy-system');
+                    if (wantUser && !hasUser) { div.classList.remove('busy-system'); div.classList.add('busy-user'); }
+                    else if (wantSystem && !hasSystem) { div.classList.remove('busy-user'); div.classList.add('busy-system'); }
+                    else if (!wantUser && !wantSystem) { div.classList.remove('busy-user', 'busy-system'); }
+                    // badge
+                    const existingBadge = div.querySelector('.session-busy-badge');
+                    if (info && info.busy) {
+                        const badgeCls = info.source === 'system' ? 'system' : 'user';
+                        const badgeText = info.source === 'system' ? '⚙️' : '💬';
+                        if (existingBadge) {
+                            if (!existingBadge.classList.contains(badgeCls)) {
+                                existingBadge.className = 'session-busy-badge ' + badgeCls;
+                                existingBadge.textContent = badgeText;
+                            }
+                        } else {
+                            const badge = document.createElement('span');
+                            badge.className = 'session-busy-badge ' + badgeCls;
+                            badge.textContent = badgeText;
+                            div.querySelector('.session-meta')?.appendChild(badge);
+                        }
+                    } else if (existingBadge) {
+                        existingBadge.remove();
+                    }
+                    prevEl = div;
+                }
+            } catch (e) { /* silent */ }
+        }
+
+        async function refreshSessionStatus() {
+            try {
+                const resp = await fetch('/proxy_sessions_status');
+                if (!resp.ok) return;
+                const data = await resp.json();
+                if (!data.sessions) return;
+                const statusMap = {};
+                for (const s of data.sessions) statusMap[s.session_id] = s;
+                document.querySelectorAll('.session-item[data-session-id]').forEach(el => {
+                    const sid = el.dataset.sessionId;
+                    const info = statusMap[sid];
+                    el.classList.remove('busy-user', 'busy-system');
+                    el.querySelector('.session-busy-badge')?.remove();
+                    if (info && info.busy) {
+                        const cls = info.source === 'system' ? 'busy-system' : 'busy-user';
+                        el.classList.add(cls);
+                        const badge = document.createElement('span');
+                        badge.className = 'session-busy-badge ' + (info.source === 'system' ? 'system' : 'user');
+                        badge.textContent = info.source === 'system' ? '⚙️' : '💬';
+                        el.querySelector('.session-meta')?.appendChild(badge);
+                    }
+                });
+            } catch (e) { /* silent */ }
         }
 
         async function deleteSession(sessionId) {
@@ -1732,6 +1916,7 @@ HTML_TEMPLATE = """
                 document.getElementById('user-input').focus();
                 loadTools();
                 refreshOasisTopics(); // Load OASIS topics after login
+                startHistoryPolling();
             } catch (e) {
                 errorDiv.textContent = t('login_error_network') + ': ' + e.message;
                 errorDiv.classList.remove('hidden');
@@ -1744,6 +1929,7 @@ HTML_TEMPLATE = """
         function handleLogout() {
             currentUserId = null;
             currentSessionId = null;
+            stopHistoryPolling();
             sessionStorage.removeItem('userId');
             sessionStorage.removeItem('authToken');
             sessionStorage.removeItem('sessionId');
@@ -1855,6 +2041,7 @@ HTML_TEMPLATE = """
                 document.getElementById('chat-screen').style.display = 'flex';
                 loadTools();
                 refreshOasisTopics();
+                startHistoryPolling();
             }
         })();
 
@@ -3746,6 +3933,24 @@ def proxy_sessions():
         return jsonify({"error": "未登录"}), 401
     try:
         r = requests.post(LOCAL_SESSIONS_URL, json={"user_id": user_id, "password": password}, timeout=15)
+        return jsonify(r.json()), r.status_code
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/proxy_sessions_status")
+def proxy_sessions_status():
+    """代理获取用户所有 session 的忙碌状态"""
+    user_id = session.get("user_id")
+    password = session.get("password")
+    if not user_id or not password:
+        return jsonify({"error": "未登录"}), 401
+    try:
+        r = requests.post(
+            f"http://127.0.0.1:{PORT_AGENT}/sessions_status",
+            json={"user_id": user_id, "password": password},
+            timeout=5,
+        )
         return jsonify(r.json()), r.status_code
     except Exception as e:
         return jsonify({"error": str(e)}), 500

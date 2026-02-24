@@ -653,6 +653,29 @@ async def list_sessions(req: SessionListRequest):
     return {"status": "success", "sessions": sessions}
 
 
+@app.post("/sessions_status")
+async def sessions_status(req: SessionListRequest):
+    """返回用户所有 session 的忙碌状态、来源和待处理系统消息数。"""
+    if not verify_password(req.user_id, req.password):
+        raise HTTPException(status_code=401, detail="用户名或密码错误")
+
+    prefix = f"{req.user_id}#"
+    # 从 agent 内存中获取所有已知 thread 的状态
+    all_status = agent.get_all_thread_status(prefix)
+
+    result = []
+    for thread_id, info in all_status.items():
+        sid = thread_id[len(prefix):]
+        result.append({
+            "session_id": sid,
+            "busy": info["busy"],
+            "source": info["source"],       # "user" | "system" | ""
+            "pending_system": info["pending_system"],
+        })
+
+    return {"status": "success", "sessions": result}
+
+
 @app.post("/session_history")
 async def get_session_history(req: SessionHistoryRequest):
     """获取指定会话的完整对话历史（仅返回 Human/AI 消息）。"""
@@ -780,6 +803,7 @@ async def system_trigger(req: SystemTriggerRequest, x_internal_token: str | None
         lock = await agent.get_thread_lock(thread_id)
         print(f"[SystemTrigger] ⏳ Waiting for lock on {thread_id} ...")
         async with lock:
+            agent.set_thread_busy_source(thread_id, "system")
             print(f"[SystemTrigger] 🔒 Acquired lock on {thread_id}, invoking graph ...")
             try:
                 await agent.agent_app.ainvoke(system_input, config)
@@ -787,6 +811,8 @@ async def system_trigger(req: SystemTriggerRequest, x_internal_token: str | None
                 print(f"[SystemTrigger] ✅ Done for {thread_id}")
             except Exception as e:
                 print(f"[SystemTrigger] ❌ Error for {thread_id}: {e}")
+            finally:
+                agent.clear_thread_busy_source(thread_id)
 
     # fire-and-forget：立刻返回，graph 在后台异步执行
     asyncio.create_task(_wait_and_invoke())
@@ -1093,7 +1119,11 @@ async def openai_chat_completions(
     # --- 非流式 ---
     if not req.stream:
         async with thread_lock:
-            result = await agent.agent_app.ainvoke(user_input, config)
+            agent.set_thread_busy_source(thread_id, "user")
+            try:
+                result = await agent.agent_app.ainvoke(user_input, config)
+            finally:
+                agent.clear_thread_busy_source(thread_id)
         last_msg = result["messages"][-1]
 
         # 检测是否有外部工具调用需要返回
@@ -1115,6 +1145,7 @@ async def openai_chat_completions(
     async def _stream_worker():
         collected_tokens = []
         async with thread_lock:
+            agent.set_thread_busy_source(thread_id, "user")
             try:
                 # 发送 role chunk
                 await queue.put(_make_openai_chunk("", model=model_name, completion_id=completion_id))
@@ -1205,6 +1236,7 @@ async def openai_chat_completions(
                     "", model=model_name, finish_reason="stop", completion_id=completion_id))
                 await queue.put("data: [DONE]\n\n")
             finally:
+                agent.clear_thread_busy_source(thread_id)
                 await queue.put(None)
                 agent.unregister_task(task_key)
 

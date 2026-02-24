@@ -163,6 +163,8 @@ class MiniTimeAgent:
         # Per-thread lock: 防止 system_trigger 和用户对话并发操作同一 checkpoint
         self._thread_locks: dict[str, asyncio.Lock] = {}
         self._thread_locks_guard = asyncio.Lock()
+        # 记录当前持有锁的来源: thread_id → "user" | "system"
+        self._thread_busy_source: dict[str, str] = {}
 
         # 系统触发产生的新消息计数（thread_id → count），前端可轮询
         self._pending_system_messages: dict[str, int] = {}
@@ -734,3 +736,31 @@ class MiniTimeAgent:
         """检查该 thread 的锁是否被占用（有操作进行中）。"""
         lock = self._thread_locks.get(thread_id)
         return lock is not None and lock.locked()
+
+    def set_thread_busy_source(self, thread_id: str, source: str):
+        """设置当前持有锁的来源（"user" 或 "system"）。"""
+        self._thread_busy_source[thread_id] = source
+
+    def clear_thread_busy_source(self, thread_id: str):
+        """清除锁来源记录。"""
+        self._thread_busy_source.pop(thread_id, None)
+
+    def get_thread_busy_source(self, thread_id: str) -> str:
+        """返回锁来源: "user"、"system"、或 "" (未占用)。"""
+        if not self.is_thread_busy(thread_id):
+            return ""
+        return self._thread_busy_source.get(thread_id, "unknown")
+
+    def get_all_thread_status(self, prefix: str) -> dict[str, dict]:
+        """返回指定前缀下所有已知 thread 的状态。"""
+        result = {}
+        for thread_id, lock in self._thread_locks.items():
+            if not thread_id.startswith(prefix):
+                continue
+            busy = lock.locked()
+            result[thread_id] = {
+                "busy": busy,
+                "source": self._thread_busy_source.get(thread_id, "") if busy else "",
+                "pending_system": self._pending_system_messages.get(thread_id, 0),
+            }
+        return result
