@@ -51,8 +51,8 @@ async def get_current_session(
         f"📍 当前会话信息:\n"
         f"  用户: {username}\n"
         f"  Session ID: {current_session_id}\n\n"
-        f"💡 如需将子任务完成通知发送到当前会话，"
-        f"请在 dispatch_subagent 中设置 notify_session=\"{current_session_id}\""
+        f"💡 如需将讨论完成通知发送到当前会话，"
+        f"请在 post_to_oasis 中设置 notify_session=\"{current_session_id}\""
     )
 
 

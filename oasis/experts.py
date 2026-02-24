@@ -2,13 +2,22 @@
 OASIS Forum - Expert Agent definitions
 
 Two expert backends:
-  1. ExpertAgent  — direct LLM call (stateless, single-shot, original behavior)
-  2. BotSessionExpert — calls mini_timebot's own /v1/chat/completions endpoint,
-     each expert gets an isolated temporary session with full tool-calling ability.
-     Sessions are created on demand and cleaned up after the discussion ends.
+  1. ExpertAgent  — direct LLM call (stateless, single-shot)
+     name = "display_name#temp#N" (display_name from preset by tag)
+  2. SessionExpert — calls mini_timebot's /v1/chat/completions endpoint
+     using an existing or auto-created session_id.
+     - session_id format "tag#oasis#id" → oasis-managed session, first-round
+       identity injection (tag → name/persona from preset configs)
+     - other session_id (e.g. "助手#default") → regular agent,
+       no identity injection, relies on session's own system prompt
 
-Each expert participates in forum discussions by reading others' posts,
-publishing their own views, and voting.
+Expert pool is always built from schedule_yaml (YAML-only mode).
+Session IDs can be freely chosen; new IDs auto-create sessions on first use.
+Append "#new" to any session name in YAML to force a fresh session (ID
+replaced with random UUID, guaranteeing no reuse).
+No separate expert-session storage: oasis sessions are identified by the
+"#oasis#" pattern in their session_id and live in the normal Agent
+checkpoint DB.
 """
 
 import json
@@ -46,7 +55,7 @@ except FileNotFoundError:
 
 
 # ======================================================================
-# Per-user custom expert storage
+# Per-user custom expert storage (persona definitions)
 # ======================================================================
 _USER_EXPERTS_DIR = os.path.join(_data_dir, "oasis_user_experts")
 os.makedirs(_USER_EXPERTS_DIR, exist_ok=True)
@@ -98,10 +107,8 @@ def add_user_expert(user_id: str, data: dict) -> dict:
     """Add a custom expert for a user. Returns the normalized expert dict."""
     expert = _validate_expert(data)
     experts = load_user_experts(user_id)
-    # Prevent duplicate tag within user's list
     if any(e["tag"] == expert["tag"] for e in experts):
         raise ValueError(f"用户已有 tag=\"{expert['tag']}\" 的专家，请换一个 tag 或使用更新功能")
-    # Prevent clash with global expert tags
     if any(e["tag"] == expert["tag"] for e in EXPERT_CONFIGS):
         raise ValueError(f"tag=\"{expert['tag']}\" 与公共专家冲突，请换一个 tag")
     experts.append(expert)
@@ -114,7 +121,7 @@ def update_user_expert(user_id: str, tag: str, data: dict) -> dict:
     experts = load_user_experts(user_id)
     for i, e in enumerate(experts):
         if e["tag"] == tag:
-            updated = _validate_expert({**e, **data, "tag": tag})  # tag immutable
+            updated = _validate_expert({**e, **data, "tag": tag})
             experts[i] = updated
             _save_user_experts(user_id, experts)
             return updated
@@ -143,6 +150,11 @@ def get_all_experts(user_id: str | None = None) -> list[dict]:
         )
     return result
 
+
+# ======================================================================
+# Prompt helpers (shared by both backends)
+# ======================================================================
+
 # 加载讨论 prompt 模板
 _discuss_tpl_path = os.path.join(_prompts_dir, "oasis_expert_discuss.txt")
 try:
@@ -159,10 +171,6 @@ def _get_llm(temperature: float = 0.7):
     return create_chat_model(temperature=temperature, max_tokens=1024)
 
 
-# ======================================================================
-# Helper: build discussion prompt (shared by both backends)
-# ======================================================================
-
 def _build_discuss_prompt(
     expert_name: str,
     persona: str,
@@ -173,7 +181,7 @@ def _build_discuss_prompt(
     """Build the prompt that asks the expert to respond with JSON.
 
     Args:
-        split: If True, return (system_prompt, user_prompt) tuple for bot session mode.
+        split: If True, return (system_prompt, user_prompt) tuple for session mode.
                If False, return a single combined string for direct LLM mode.
     """
     if _DISCUSS_PROMPT_TPL and not split:
@@ -215,7 +223,6 @@ def _build_discuss_prompt(
     if split:
         return system_prompt, user_prompt
     else:
-        # Combined for direct LLM mode
         return f"{system_prompt}\n\n{user_prompt}"
 
 
@@ -270,7 +277,8 @@ async def _apply_response(
 
 
 # ======================================================================
-# Backend 1: ExpertAgent — direct LLM call (original, stateless)
+# Backend 1: ExpertAgent — direct LLM call (stateless)
+#   name = "title#temp#1", "title#temp#2", ...
 # ======================================================================
 
 class ExpertAgent:
@@ -278,17 +286,30 @@ class ExpertAgent:
     A forum-resident expert agent (direct LLM backend).
 
     Each call is stateless: reads posts → single LLM call → publish + vote.
+    name is "title#temp#N" to ensure uniqueness.
     """
 
-    def __init__(self, name: str, persona: str, temperature: float = 0.7):
-        self.name = name
+    # Class-level counter for generating unique temp IDs (used when no explicit sid)
+    _counter: int = 0
+
+    def __init__(self, name: str, persona: str, temperature: float = 0.7, tag: str = "",
+                 temp_id: int | None = None):
+        if temp_id is not None:
+            # Explicit temp id from YAML (e.g. "创意专家#temp#1" → temp_id=1)
+            self.session_id = f"temp#{temp_id}"
+        else:
+            ExpertAgent._counter += 1
+            self.session_id = f"temp#{ExpertAgent._counter}"
+        self.title = name
+        self.name = f"{name}#{self.session_id}"
         self.persona = persona
+        self.tag = tag
         self.llm = _get_llm(temperature)
 
     async def participate(self, forum: DiscussionForum):
         others = await forum.browse(viewer=self.name, exclude_self=True)
         posts_text = _format_posts(others) if others else "(还没有其他人发言，你来开启讨论吧)"
-        prompt = _build_discuss_prompt(self.name, self.persona, forum.question, posts_text)
+        prompt = _build_discuss_prompt(self.title, self.persona, forum.question, posts_text)
 
         try:
             resp = await self.llm.ainvoke([HumanMessage(content=prompt)])
@@ -306,91 +327,111 @@ class ExpertAgent:
 
 
 # ======================================================================
-# Backend 2: BotSessionExpert — calls mini_timebot /v1/chat/completions
+# Backend 2: SessionExpert — calls mini_timebot /v1/chat/completions
+#   using an existing session_id.  name = "title#session_id"
 # ======================================================================
 
-class BotSessionExpert:
+class SessionExpert:
     """
     Expert backed by a mini_timebot session.
 
-    Each expert gets a unique session_id derived from the topic_id, **owned by
-    the requesting user** (thread_id = ``{user_id}#oasis_{topic_id}_{expert}``).
-    This means the expert's conversation history is visible in the user's
-    session list and is **not** auto-deleted after the discussion — the user
-    can revisit or continue chatting with any expert later.
+    Two sub-types determined by session_id format:
+      - "#oasis#" in session_id → oasis-managed session.
+        First round: inject persona as system prompt so the bot knows its
+        discussion identity.  Persona is looked up from preset configs by
+        title, or left empty if not found.
+      - Other session_id → regular agent session.
+        No identity injection; the session's own system prompt defines who
+        it is.  Just send the discussion invitation.
 
-    Authentication uses ``INTERNAL_TOKEN:<user_id>`` (admin-level), so no
-    user password is needed — OASIS acts as a trusted internal service.
+    Sessions are lazily created: first call to the bot API auto-creates the
+    thread in the checkpoint DB.  No separate record table needed.
 
-    **Incremental context**: To avoid O(N²) token blowup, only NEW posts
-    (since the last `participate` call) are sent each round.  The session's
-    own history already contains earlier posts, so the LLM still has the
-    full picture.
+    Incremental context: first call sends full discussion context; subsequent
+    calls only send new posts since last participation.
     """
 
     def __init__(
         self,
         name: str,
-        persona: str,
-        topic_id: str,
+        session_id: str,
         user_id: str,
-        temperature: float = 0.7,
+        persona: str = "",
         bot_base_url: str | None = None,
         enabled_tools: list[str] | None = None,
         timeout: float | None = None,
+        tag: str = "",
     ):
-        self.name = name
+        self.title = name
+        self.session_id = session_id
+        self.name = f"{name}#{session_id}"
         self.persona = persona
-        self.topic_id = topic_id
-        self.temperature = temperature
+        self.is_oasis = "#oasis#" in session_id
         self.timeout = timeout
+        self.tag = tag
 
         port = os.getenv("PORT_AGENT", "51200")
         self._bot_url = (bot_base_url or f"http://127.0.0.1:{port}") + "/v1/chat/completions"
 
-        # Auth: INTERNAL_TOKEN:<user_id> — admin-level, session owned by user
         self._user_id = user_id
         self._internal_token = os.getenv("INTERNAL_TOKEN", "")
 
-        # Unique session_id per expert per topic
-        safe_name = name.replace(" ", "_")
-        self.session_id = f"oasis_{topic_id}_{safe_name}"
-
         self.enabled_tools = enabled_tools
         self._initialized = False
-        self._seen_post_ids: set[int] = set()  # Track which posts we've already sent
+        self._seen_post_ids: set[int] = set()
 
     def _auth_header(self) -> dict:
-        """Build auth header as INTERNAL_TOKEN:user_id (admin-level, no password needed)."""
         return {"Authorization": f"Bearer {self._internal_token}:{self._user_id}"}
 
     async def participate(self, forum: DiscussionForum):
         """
-        Participate in one round of discussion via bot session.
+        Participate in one round of discussion using the session.
 
-        First call sends full context + persona instruction.
-        Subsequent calls send only NEW posts (incremental delta).
-        The bot session's checkpoint history retains earlier context.
+        - oasis session (#oasis# in sid): inject persona identity on first call
+        - regular session: no identity injection, just send discussion context
+        Subsequent calls only send incremental new posts.
         """
         others = await forum.browse(viewer=self.name, exclude_self=True)
 
-        # Split into already-seen vs new posts
         new_posts = [p for p in others if p.id not in self._seen_post_ids]
         self._seen_post_ids.update(p.id for p in others)
 
-        # Build OpenAI-compatible request
         messages = []
         if not self._initialized:
-            # ── First round: full context ──
             posts_text = _format_posts(others) if others else "(还没有其他人发言，你来开启讨论吧)"
-            system_prompt, user_prompt = _build_discuss_prompt(
-                self.name, self.persona, forum.question, posts_text, split=True,
-            )
-            messages.append({"role": "system", "content": system_prompt})
-            messages.append({"role": "user", "content": user_prompt})
+
+            if self.is_oasis:
+                # Oasis session → inject identity as system prompt
+                system_prompt, user_prompt = _build_discuss_prompt(
+                    self.title, self.persona, forum.question, posts_text, split=True,
+                )
+                messages.append({"role": "system", "content": system_prompt})
+                messages.append({"role": "user", "content": user_prompt})
+            else:
+                # Regular agent session → no identity injection
+                user_prompt = (
+                    f"你被邀请参加一场 OASIS 论坛多专家讨论。\n\n"
+                    f"讨论主题: {forum.question}\n\n"
+                    f"当前论坛内容:\n{posts_text}\n\n"
+                    "请以你自身的专业视角参与讨论。以严格的 JSON 格式回复（不要包含 markdown 代码块标记）:\n"
+                    "{\n"
+                    '  "reply_to": 2,\n'
+                    '  "content": "你的观点（200字以内，观点鲜明）",\n'
+                    '  "votes": [\n'
+                    '    {"post_id": 1, "direction": "up"}\n'
+                    "  ]\n"
+                    "}\n\n"
+                    "说明:\n"
+                    "- reply_to: 如果论坛中已有其他人的帖子，你**必须**选择一个帖子ID进行回复；只有在论坛为空时才填 null\n"
+                    "- content: 你的发言内容，要有独到见解\n"
+                    '- votes: 对其他帖子的投票列表，direction 只能是 "up" 或 "down"。如果没有要投票的帖子，填空列表 []\n'
+                    "- 你拥有工具调用能力，如需搜索资料、分析数据来支撑你的观点，可以使用可用的工具。\n"
+                    "- 后续轮次只会发送新增帖子，之前的帖子请参考你的对话记忆。"
+                )
+                messages.append({"role": "user", "content": user_prompt})
+
             self._initialized = True
         else:
-            # ── Subsequent rounds: incremental delta only ──
             if new_posts:
                 new_text = _format_posts(new_posts)
                 prompt = (
@@ -451,5 +492,3 @@ class BotSessionExpert:
                 pass
         except Exception as e:
             print(f"  [OASIS] ❌ {self.name} error: {e}")
-
-

@@ -33,7 +33,8 @@ USER_INJECTED_TOOLS = {
     "set_telegram_chat_id", "send_telegram_message", "get_telegram_status", "remove_telegram_config",
     # OASIS forum tools
     "post_to_oasis", "check_oasis_discussion", "cancel_oasis_discussion",
-    "list_oasis_topics", "dispatch_subagent",
+    "list_oasis_topics",
+    "list_oasis_sessions",
     "list_oasis_experts", "add_oasis_expert", "update_oasis_expert", "delete_oasis_expert",
     # Session management tools
     "list_sessions", "get_current_session",
@@ -46,7 +47,6 @@ USER_INJECTED_TOOLS = {
 # Tools that need session_id auto-injected (in addition to username)
 SESSION_INJECTED_TOOLS = {
     "add_alarm": "session_id",
-    "dispatch_subagent": "notify_session",
     "post_to_oasis": "notify_session",
     "get_current_session": "current_session_id",
     "send_telegram_message": "source_session",

@@ -69,12 +69,10 @@ def _check_owner(forum: DiscussionForum, user_id: str):
 # --- Lifespan ---
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Load persisted discussions from disk
     loaded = DiscussionForum.load_all()
     discussions.update(loaded)
     print(f"[OASIS] 🏛️ Forum server started (loaded {len(loaded)} historical discussions)")
     yield
-    # Save running discussions and cancel them
     for tid, forum in discussions.items():
         if forum.status == "discussing":
             forum.status = "error"
@@ -104,11 +102,10 @@ async def _run_discussion(topic_id: str, engine: DiscussionEngine):
             forum.status = "error"
             forum.conclusion = f"讨论出错: {str(e)}"
 
-    # Persist final state
     if forum:
         forum.save()
 
-    # Fire callback notification to main agent if configured
+    # Fire callback notification
     cb_url = getattr(engine, "callback_url", None)
     if cb_url:
         conclusion = forum.conclusion if forum else "（无结论）"
@@ -142,11 +139,7 @@ async def _run_discussion(topic_id: str, engine: DiscussionEngine):
 
 @app.post("/topics", response_model=dict)
 async def create_topic(req: CreateTopicRequest):
-    """
-    Create a new discussion topic.
-    Expert agents will start debating in the background immediately.
-    Returns topic_id for tracking.
-    """
+    """Create a new discussion topic. Returns topic_id for tracking."""
     topic_id = str(uuid.uuid4())[:8]
 
     forum = DiscussionForum(
@@ -156,25 +149,21 @@ async def create_topic(req: CreateTopicRequest):
         max_rounds=req.max_rounds,
     )
     discussions[topic_id] = forum
-    forum.save()  # persist initial state
+    forum.save()
 
     engine = DiscussionEngine(
         forum=forum,
-        expert_tags=req.expert_tags or None,
         schedule_yaml=req.schedule_yaml,
         schedule_file=req.schedule_file,
-        use_bot_session=req.use_bot_session,
         bot_enabled_tools=req.bot_enabled_tools,
         bot_timeout=req.bot_timeout,
         user_id=req.user_id,
-        expert_configs=req.expert_configs,
+        early_stop=req.early_stop,
     )
-    # Attach callback info (used by _run_discussion after completion)
     engine.callback_url = req.callback_url
     engine.callback_session_id = req.callback_session_id
     engines[topic_id] = engine
 
-    # Launch discussion as a background task (non-blocking)
     task = asyncio.create_task(_run_discussion(topic_id, engine))
     tasks[topic_id] = task
 
@@ -187,19 +176,17 @@ async def create_topic(req: CreateTopicRequest):
 
 @app.delete("/topics/{topic_id}")
 async def cancel_topic(topic_id: str, user_id: str = Query(...)):
-    """Force-cancel a running discussion. Requires user_id of the owner."""
+    """Force-cancel a running discussion."""
     forum = _get_forum_or_404(topic_id)
     _check_owner(forum, user_id)
 
     if forum.status != "discussing":
         return {"topic_id": topic_id, "status": forum.status, "message": "Discussion already finished"}
 
-    # Set cancel flag (takes effect at next round boundary)
     engine = engines.get(topic_id)
     if engine:
         engine.cancel()
 
-    # Also cancel the asyncio task to interrupt any ongoing await
     task = tasks.get(topic_id)
     if task and not task.done():
         task.cancel()
@@ -210,12 +197,10 @@ async def cancel_topic(topic_id: str, user_id: str = Query(...)):
 
 @app.post("/topics/{topic_id}/purge")
 async def purge_topic(topic_id: str, user_id: str = Query(...)):
-    """Permanently delete a discussion record (memory + disk). Requires owner.
-    If still running, cancels first."""
+    """Permanently delete a discussion record."""
     forum = _get_forum_or_404(topic_id)
     _check_owner(forum, user_id)
 
-    # Cancel if still running
     if forum.status in ("pending", "discussing"):
         engine = engines.get(topic_id)
         if engine:
@@ -224,12 +209,10 @@ async def purge_topic(topic_id: str, user_id: str = Query(...)):
         if task and not task.done():
             task.cancel()
 
-    # Remove disk file
     storage_path = forum._storage_path()
     if os.path.exists(storage_path):
         os.remove(storage_path)
 
-    # Clean up in-memory references
     discussions.pop(topic_id, None)
     engines.pop(topic_id, None)
     tasks.pop(topic_id, None)
@@ -239,10 +222,9 @@ async def purge_topic(topic_id: str, user_id: str = Query(...)):
 
 @app.delete("/topics")
 async def purge_all_topics(user_id: str = Query(...)):
-    """Delete all topics for a specific user. Returns count of deleted topics."""
+    """Delete all topics for a specific user."""
     global discussions, engines, tasks
 
-    # Find all topics owned by this user
     to_delete = [
         tid for tid, forum in discussions.items()
         if forum.user_id == user_id
@@ -252,7 +234,6 @@ async def purge_all_topics(user_id: str = Query(...)):
     for tid in to_delete:
         forum = discussions.get(tid)
         if forum:
-            # Cancel if still running
             if forum.status in ("pending", "discussing"):
                 engine = engines.get(tid)
                 if engine:
@@ -261,12 +242,10 @@ async def purge_all_topics(user_id: str = Query(...)):
                 if task and not task.done():
                     task.cancel()
 
-            # Remove disk file
             storage_path = forum._storage_path()
             if os.path.exists(storage_path):
                 os.remove(storage_path)
 
-            # Clean up in-memory references
             discussions.pop(tid, None)
             engines.pop(tid, None)
             tasks.pop(tid, None)
@@ -277,7 +256,7 @@ async def purge_all_topics(user_id: str = Query(...)):
 
 @app.get("/topics/{topic_id}", response_model=TopicDetail)
 async def get_topic(topic_id: str, user_id: str = Query(...)):
-    """Get full discussion detail. Requires user_id of the owner."""
+    """Get full discussion detail."""
     forum = _get_forum_or_404(topic_id)
     _check_owner(forum, user_id)
 
@@ -307,7 +286,7 @@ async def get_topic(topic_id: str, user_id: str = Query(...)):
 
 @app.get("/topics/{topic_id}/stream")
 async def stream_topic(topic_id: str, user_id: str = Query(...)):
-    """SSE stream for real-time discussion updates. Requires user_id of the owner."""
+    """SSE stream for real-time discussion updates."""
     forum = _get_forum_or_404(topic_id)
     _check_owner(forum, user_id)
 
@@ -318,12 +297,10 @@ async def stream_topic(topic_id: str, user_id: str = Query(...)):
         while forum.status in ("pending", "discussing"):
             posts = await forum.browse()
 
-            # Notify round changes
             if forum.current_round > last_round:
                 last_round = forum.current_round
                 yield f"data: 📢 === 第 {last_round} 轮讨论 ===\n\n"
 
-            # Push new posts
             if len(posts) > last_count:
                 for p in posts[last_count:]:
                     prefix = f"↳回复#{p.reply_to}" if p.reply_to else "📌"
@@ -335,7 +312,6 @@ async def stream_topic(topic_id: str, user_id: str = Query(...)):
 
             await asyncio.sleep(1)
 
-        # Final: send conclusion
         if forum.conclusion:
             yield f"data: \n🏆 === 讨论结论 ===\n{forum.conclusion}\n\n"
         yield "data: [DONE]\n\n"
@@ -370,24 +346,16 @@ async def list_topics(user_id: str = Query(...)):
                 created_at=f.created_at,
             )
         )
-    # Most recent first
     items.sort(key=lambda x: x.created_at, reverse=True)
     return items
 
 
 @app.get("/topics/{topic_id}/conclusion")
 async def get_conclusion(topic_id: str, user_id: str = Query(...), timeout: int = 300):
-    """
-    Get the final conclusion (blocks until discussion finishes).
-    Requires user_id of the owner.
-
-    Args:
-        timeout: Maximum seconds to wait (default 300 = 5 min)
-    """
+    """Get the final conclusion (blocks until discussion finishes)."""
     forum = _get_forum_or_404(topic_id)
     _check_owner(forum, user_id)
 
-    # Poll until concluded or error
     elapsed = 0
     while forum.status not in ("concluded", "error") and elapsed < timeout:
         await asyncio.sleep(1)
@@ -407,6 +375,10 @@ async def get_conclusion(topic_id: str, user_id: str = Query(...), timeout: int 
     }
 
 
+# ------------------------------------------------------------------
+# Expert persona CRUD
+# ------------------------------------------------------------------
+
 @app.get("/experts")
 async def list_experts(user_id: str = ""):
     """List all available expert agents (public + user custom)."""
@@ -425,10 +397,6 @@ async def list_experts(user_id: str = ""):
     }
 
 
-# ------------------------------------------------------------------
-# User custom expert CRUD
-# ------------------------------------------------------------------
-
 class UserExpertRequest(BaseModel):
     user_id: str
     name: str = ""
@@ -439,7 +407,6 @@ class UserExpertRequest(BaseModel):
 
 @app.post("/experts/user")
 async def add_user_expert_route(req: UserExpertRequest):
-    """Add a custom expert for a user."""
     from oasis.experts import add_user_expert
     try:
         expert = add_user_expert(req.user_id, req.model_dump())
@@ -450,7 +417,6 @@ async def add_user_expert_route(req: UserExpertRequest):
 
 @app.put("/experts/user/{tag}")
 async def update_user_expert_route(tag: str, req: UserExpertRequest):
-    """Update an existing custom expert by tag."""
     from oasis.experts import update_user_expert
     try:
         expert = update_user_expert(req.user_id, tag, req.model_dump())
@@ -461,7 +427,6 @@ async def update_user_expert_route(tag: str, req: UserExpertRequest):
 
 @app.delete("/experts/user/{tag}")
 async def delete_user_expert_route(tag: str, user_id: str = Query(...)):
-    """Delete a custom expert by tag."""
     from oasis.experts import delete_user_expert
     try:
         deleted = delete_user_expert(user_id, tag)

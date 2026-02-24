@@ -16,22 +16,29 @@ class DiscussionStatus(str, Enum):
 
 
 class CreateTopicRequest(BaseModel):
-    """Request body for creating a new discussion topic."""
+    """Request body for creating a new discussion topic.
+
+    Expert pool is built entirely from schedule_yaml (required).
+      "tag#temp#N" → ExpertAgent; "tag#oasis#id" → SessionExpert (oasis);
+      "title#sid" → SessionExpert (regular).  Tag used to lookup name/persona.
+
+    For simple all-parallel scenarios, use:
+      version: 1
+      repeat: true
+      plan:
+        - all_experts: true
+    """
     question: str
     user_id: str = "anonymous"
     max_rounds: int = Field(default=5, ge=1, le=20)
-    expert_tags: list[str] = []  # Empty = all experts participate
-    schedule_yaml: Optional[str] = None  # Inline YAML schedule string
-    schedule_file: Optional[str] = None  # Path to YAML schedule file
-    use_bot_session: bool = False  # True = experts use bot sessions (stateful, with tools)
-    bot_enabled_tools: Optional[list[str]] = None  # Tool whitelist for bot session experts
-    bot_timeout: Optional[float] = None  # Per-expert timeout (seconds); None = no limit (for detach/long-running)
-    # Override expert list: if provided, use these configs instead of loading from file
-    # Each item: {"name": "...", "persona": "...", "tag": "...", "temperature": 0.7}
-    expert_configs: Optional[list[dict]] = None
+    schedule_yaml: Optional[str] = None
+    schedule_file: Optional[str] = None
+    bot_enabled_tools: Optional[list[str]] = None
+    bot_timeout: Optional[float] = None
+    early_stop: bool = False
     # Callback: when discussion concludes, POST result to this URL via /system_trigger
-    callback_url: Optional[str] = None  # e.g. "http://127.0.0.1:51200/system_trigger"
-    callback_session_id: Optional[str] = None  # session to notify (default = "default")
+    callback_url: Optional[str] = None
+    callback_session_id: Optional[str] = None
 
 
 class PostInfo(BaseModel):

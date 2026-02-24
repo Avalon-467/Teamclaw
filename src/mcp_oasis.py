@@ -2,12 +2,12 @@
 MCP Tool Server: OASIS Forum
 
 Exposes tools for the user's Agent to interact with the OASIS discussion forum:
-  - list_oasis_experts: List all available expert agents (public + user custom)
-  - add_oasis_expert: Create a custom expert for the user
-  - update_oasis_expert: Update a custom expert
-  - delete_oasis_expert: Delete a custom expert
-  - post_to_oasis: Submit a question and wait for expert discussion conclusion
-  - check_oasis_discussion: Check the current state of a discussion
+  - list_oasis_experts: List all available expert personas (public + user custom)
+  - add_oasis_expert / update_oasis_expert / delete_oasis_expert: CRUD for expert personas
+  - list_oasis_sessions: List oasis-managed sessions (containing #oasis# in session_id)
+    by scanning the Agent checkpoint DB — no separate storage needed
+  - post_to_oasis: Submit a discussion — supports direct LLM experts and session-backed experts
+  - check_oasis_discussion / cancel_oasis_discussion: Monitor or cancel a discussion
   - list_oasis_topics: List all discussion topics
 
 Runs as a stdio MCP server, just like the other mcp_*.py tools.
@@ -15,7 +15,9 @@ Runs as a stdio MCP server, just like the other mcp_*.py tools.
 
 import os
 import httpx
+import aiosqlite
 from mcp.server.fastmcp import FastMCP
+from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer
 
 mcp = FastMCP("OASIS Forum")
 
@@ -24,15 +26,22 @@ _FALLBACK_USER = os.getenv("MCP_OASIS_USER", "agent_user")
 
 _CONN_ERR = "❌ 无法连接 OASIS 论坛服务器。请确认 OASIS 服务已启动 (端口 51202)。"
 
+# Checkpoint DB (same as agent.py / mcp_session.py)
+_DB_PATH = os.path.join(
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+    "data", "agent_memory.db",
+)
+_serde = JsonPlusSerializer()
+
 
 # ======================================================================
-# Expert management tools
+# Expert persona management tools
 # ======================================================================
 
 @mcp.tool()
 async def list_oasis_experts(username: str = "") -> str:
     """
-    List all available expert agents on the OASIS forum.
+    List all available expert personas on the OASIS forum.
     Shows both public (built-in) experts and the current user's custom experts.
     Call this BEFORE post_to_oasis to see which experts can participate.
 
@@ -74,8 +83,8 @@ async def list_oasis_experts(username: str = "") -> str:
                     lines.append(f"  • {e['name']} (tag: \"{e['tag']}\") — {persona_preview}")
 
             lines.append(
-                "\n💡 用 expert_tags 选专家参与讨论，用 schedule_yaml 控制发言顺序。"
-                "\n   用 add_oasis_expert 创建自定义专家。"
+                "\n💡 在 schedule_yaml 中使用 expert 的 tag 来指定参与者。"
+                "\n   格式: \"tag#temp#N\" (直连LLM)、\"tag#oasis#随机ID\" (有状态session)、\"标题#session_id\" (普通agent)。"
             )
             return "\n".join(lines)
 
@@ -94,16 +103,14 @@ async def add_oasis_expert(
     temperature: float = 0.7,
 ) -> str:
     """
-    Create a custom expert for the current user.
-    The expert will appear alongside public experts in list_oasis_experts
-    and can be selected via expert_tags in post_to_oasis.
+    Create a custom expert persona for the current user.
 
     Args:
         username: (auto-injected) current user identity; do NOT set manually
         name: Expert display name (e.g. "产品经理", "前端架构师")
-        tag: Unique identifier tag (e.g. "pm", "frontend_arch"). Must not conflict with existing tags.
-        persona: Expert persona description — defines how the expert thinks and speaks
-        temperature: LLM temperature (0.0-1.0, default 0.7). Lower = more deterministic.
+        tag: Unique identifier tag (e.g. "pm", "frontend_arch")
+        persona: Expert persona description
+        temperature: LLM temperature (0.0-1.0, default 0.7)
 
     Returns:
         Confirmation with the created expert info
@@ -147,11 +154,11 @@ async def update_oasis_expert(
     temperature: float = -1,
 ) -> str:
     """
-    Update an existing custom expert. Only user-created experts can be updated (not public ones).
+    Update an existing custom expert persona.
 
     Args:
         username: (auto-injected) current user identity; do NOT set manually
-        tag: The tag of the custom expert to update (immutable, used as identifier)
+        tag: The tag of the custom expert to update
         name: New display name (leave empty to keep current)
         persona: New persona description (leave empty to keep current)
         temperature: New temperature (-1 = keep current)
@@ -194,7 +201,7 @@ async def update_oasis_expert(
 @mcp.tool()
 async def delete_oasis_expert(username: str, tag: str) -> str:
     """
-    Delete a custom expert. Only user-created experts can be deleted (not public ones).
+    Delete a custom expert persona.
 
     Args:
         username: (auto-injected) current user identity; do NOT set manually
@@ -222,95 +229,184 @@ async def delete_oasis_expert(username: str, tag: str) -> str:
 
 
 # ======================================================================
+# Oasis session discovery (scans checkpoint DB for #oasis# sessions)
+# ======================================================================
+
+@mcp.tool()
+async def list_oasis_sessions(username: str = "") -> str:
+    """
+    List all oasis-managed expert sessions for the current user.
+
+    Oasis sessions are identified by "#oasis#" in their session_id
+    (e.g. "creative#oasis#ab12cd34", where "creative" is the expert tag).
+    They live in the normal Agent checkpoint DB and are auto-created
+    when first used in a discussion.
+
+    No separate storage or pre-creation is needed.  Just use session_ids
+    in "tag#oasis#<random>" format in your schedule_yaml expert names.
+    Append "#new" to force a brand-new session (ID replaced with random UUID).
+
+    Args:
+        username: (auto-injected) current user identity; do NOT set manually
+
+    Returns:
+        Formatted list of oasis sessions with tag, session_id and message count
+    """
+    effective_user = username or _FALLBACK_USER
+
+    if not os.path.exists(_DB_PATH):
+        return "📭 暂无 oasis 专家 session（数据库不存在）"
+
+    prefix = f"{effective_user}#"
+    sessions = []
+
+    try:
+        async with aiosqlite.connect(_DB_PATH) as db:
+            cursor = await db.execute(
+                "SELECT DISTINCT thread_id FROM checkpoints "
+                "WHERE thread_id LIKE ? ORDER BY thread_id",
+                (f"{prefix}%#oasis#%",),
+            )
+            rows = await cursor.fetchall()
+
+            for (thread_id,) in rows:
+                sid = thread_id[len(prefix):]  # strip "user#" prefix → session_id
+                tag = sid.split("#")[0] if "#" in sid else sid
+
+                # Get message count from latest checkpoint
+                ckpt_cursor = await db.execute(
+                    "SELECT type, checkpoint FROM checkpoints "
+                    "WHERE thread_id = ? ORDER BY ROWID DESC LIMIT 1",
+                    (thread_id,),
+                )
+                ckpt_row = await ckpt_cursor.fetchone()
+                msg_count = 0
+                if ckpt_row:
+                    try:
+                        ckpt_data = _serde.loads_typed((ckpt_row[0], ckpt_row[1]))
+                        messages = ckpt_data.get("channel_values", {}).get("messages", [])
+                        msg_count = len(messages)
+                    except Exception:
+                        pass
+
+                sessions.append({
+                    "session_id": sid,
+                    "tag": tag,
+                    "message_count": msg_count,
+                })
+
+    except Exception as e:
+        return f"❌ 查询失败: {str(e)}"
+
+    if not sessions:
+        return (
+            "📭 暂无 oasis 专家 session。\n\n"
+            "💡 无需预创建。在 schedule_yaml 中使用\n"
+            "   \"tag#oasis#随机ID\" 格式的名称即可，首次使用时自动创建。\n"
+            "   加 \"#new\" 后缀可确保创建全新 session。"
+        )
+
+    lines = [f"🏛️ OASIS 专家 Sessions — 共 {len(sessions)} 个\n"]
+    for s in sessions:
+        lines.append(
+            f"  • Tag: {s['tag']}\n"
+            f"    Session ID: {s['session_id']}\n"
+            f"    消息数: {s['message_count']}"
+        )
+
+    lines.append(
+        "\n💡 在 schedule_yaml 中使用 session_id 即可让这些专家参与讨论。"
+        "\n   也可在 schedule_yaml 中精确指定发言顺序。"
+    )
+    return "\n".join(lines)
+
+
+# ======================================================================
 # Discussion tools
 # ======================================================================
 
 @mcp.tool()
 async def post_to_oasis(
     question: str,
+    schedule_yaml: str,
     username: str = "",
-    expert_tags: list[str] = [],
     max_rounds: int = 5,
-    schedule_yaml: str = "",
     schedule_file: str = "",
-    use_bot_session: bool = False,
     detach: bool = False,
     notify_session: str = "",
 ) -> str:
     """
-    Submit a question or work task to the OASIS forum for multi-expert collaboration.
+    Submit a question or work task to the OASIS forum for multi-expert discussion.
 
-    Two modes of operation:
-    1. **Discussion mode** (default, use_bot_session=False): Expert agents debate the question
-       with lightweight stateless LLM calls, vote on each other's posts, and produce a conclusion.
-       Best for: strategy analysis, pros/cons evaluation, controversial topics.
-    2. **Bot sub-agent mode** (use_bot_session=True): Experts run as stateful sub-agents with
-       tool-calling ability and memory across rounds. The `question` field serves as the **work task**
-       assigned to the sub-agents. The `schedule_yaml` defines not only speaking order but also
-       the **work execution order**. Best for: complex task flows requiring multi-agent collaboration.
+    Expert pool is built entirely from schedule_yaml expert names (required).
 
-    **Workflow**: call list_oasis_experts first to see available experts (including custom ones),
-    then use expert_tags and schedule_yaml to control who participates and in what order.
+    Expert name formats (must contain '#', engine parses by tag):
+      "creative#temp#1"       → ExpertAgent (tag→name/persona from presets, direct LLM)
+      "creative#oasis#ab12"   → SessionExpert (oasis, tag→name/persona, stateful bot)
+      "助手#default"          → SessionExpert (regular, no identity injection)
+
+    Session IDs can be anything new — new IDs auto-create new sessions on first use.
+    To explicitly ensure a brand-new session (avoid reusing existing), append "#new":
+      "creative#oasis#ab12#new"  → "#new" stripped, ID replaced with random UUID
+      "助手#my_session#new"      → "#new" stripped, ID replaced with random UUID
+
+    For simple all-parallel with all preset experts, use:
+      version: 1
+      repeat: true
+      plan:
+        - all_experts: true
 
     Args:
-        question: The question/topic to discuss, or the work task to assign to sub-agents (in bot session mode)
-        username: (auto-injected) current user identity; do NOT set manually
-        expert_tags: List of expert tags to include (e.g. ["creative", "critical", "my_custom_tag"]).
-            Empty list = all experts (public + custom) participate.
-        max_rounds: Maximum number of discussion rounds (1-20, default 5)
-        schedule_yaml: Inline YAML to control speaking order per round.
-            If omitted, all selected experts speak in parallel each round.
-            Format:
+        question: The question/topic to discuss or work task to assign
+        schedule_yaml: YAML defining expert pool AND speaking order (required).
+
+            Example:
               version: 1
               repeat: true
               plan:
-                - expert: "创意专家"
-                - expert: "批判专家"
+                - expert: "creative#temp#1"
+                - expert: "creative#oasis#ab12cd34"
+                - expert: "creative#oasis#new#new"
                 - parallel:
-                    - "数据分析师"
-                    - "经济学家"
+                    - "critical#temp#2"
+                    - "data#temp#3"
                 - all_experts: true
-            Step types:
-              - expert: single expert speaks (use expert NAME, not tag)
-              - parallel: multiple experts speak simultaneously (use NAMEs)
-              - all_experts: all selected experts speak
-            repeat: true = repeat the plan each round; false = execute plan steps once across rounds
-            Note: in bot sub-agent mode, the plan defines the work execution order, not just speaking order
-        schedule_file: Path to a YAML schedule file (alternative to schedule_yaml)
-        use_bot_session: If True, experts run as full bot sub-agents (stateful, with tool-calling
-            ability and memory across rounds). The question becomes a work task assigned to sub-agents,
-            and schedule_yaml defines the work execution order. Default False uses lightweight stateless LLM calls.
-        detach: If True, submit the task and return immediately with the topic_id without waiting
-            for the discussion/task to complete. Use check_oasis_discussion later to check progress
-            and retrieve the conclusion. Default False waits for the full conclusion.
+                - manual:
+                    author: "主持人"
+                    content: "请聚焦可行性"
+        username: (auto-injected) current user identity; do NOT set manually
+        max_rounds: Maximum number of discussion rounds (1-20, default 5)
+        schedule_file: Filename or path to a saved YAML workflow. Short names (e.g. "review.yaml")
+            are resolved under data/user_files/{user}/oasis/yaml/. Prefer schedule_yaml inline.
+        detach: If True, return immediately with topic_id. Use check_oasis_discussion later.
+        notify_session: (auto-injected) Session ID for completion notification.
 
     Returns:
-        The final conclusion summarizing the expert discussion, or (if detach=True) the topic_id for later retrieval
+        The final conclusion, or (if detach=True) the topic_id for later retrieval
     """
     effective_user = username or _FALLBACK_USER
-    port = os.getenv("PORT_AGENT", "51200")
-    callback_url = f"http://127.0.0.1:{port}/system_trigger"
 
     try:
         async with httpx.AsyncClient(timeout=httpx.Timeout(timeout=300.0)) as client:
-            body = {
+            body: dict = {
                 "question": question,
                 "user_id": effective_user,
                 "max_rounds": max_rounds,
-                "callback_url": callback_url,
-                "callback_session_id": notify_session or "default",
             }
-            if expert_tags:
-                body["expert_tags"] = expert_tags
+            if detach:
+                port = os.getenv("PORT_AGENT", "51200")
+                body["callback_url"] = f"http://127.0.0.1:{port}/system_trigger"
+                body["callback_session_id"] = notify_session or "default"
             if schedule_yaml:
                 body["schedule_yaml"] = schedule_yaml
             if schedule_file:
+                if not os.path.isabs(schedule_file):
+                    yaml_dir = os.path.join(
+                        os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                        "data", "user_files", effective_user, "oasis", "yaml",
+                    )
+                    schedule_file = os.path.join(yaml_dir, schedule_file)
                 body["schedule_file"] = schedule_file
-            if use_bot_session:
-                body["use_bot_session"] = True
-                if not detach:
-                    body["bot_timeout"] = 120.0
-                # detach 模式不设 bot_timeout → 服务端使用 None（无限制）
 
             resp = await client.post(
                 f"{OASIS_BASE_URL}/topics",
@@ -326,7 +422,7 @@ async def post_to_oasis(
                     f"🏛️ OASIS 任务已提交（脱离模式）\n"
                     f"主题: {question[:80]}\n"
                     f"Topic ID: {topic_id}\n\n"
-                    f"💡 讨论/任务将在后台运行，稍后使用 check_oasis_discussion(topic_id=\"{topic_id}\") 查看进展和结论。"
+                    f"💡 使用 check_oasis_discussion(topic_id=\"{topic_id}\") 查看进展和结论。"
                 )
 
             result = await client.get(
@@ -359,7 +455,6 @@ async def post_to_oasis(
 async def check_oasis_discussion(topic_id: str, username: str = "") -> str:
     """
     Check the current status of a discussion on the OASIS forum.
-    Shows the discussion progress, recent posts, and conclusion if available.
 
     Args:
         topic_id: The topic ID returned by post_to_oasis
@@ -420,8 +515,7 @@ async def check_oasis_discussion(topic_id: str, username: str = "") -> str:
 @mcp.tool()
 async def cancel_oasis_discussion(topic_id: str, username: str = "") -> str:
     """
-    Force-cancel a running OASIS discussion. Use this to stop a runaway or
-    no-longer-needed discussion.
+    Force-cancel a running OASIS discussion.
 
     Args:
         topic_id: The topic ID to cancel
@@ -452,91 +546,6 @@ async def cancel_oasis_discussion(topic_id: str, username: str = "") -> str:
         return _CONN_ERR
     except Exception as e:
         return f"❌ 取消异常: {str(e)}"
-
-
-@mcp.tool()
-async def dispatch_subagent(
-    task: str,
-    username: str = "",
-    enabled_tools: list[str] = [],
-    notify_session: str = "",
-) -> str:
-    """
-    Quickly dispatch a single sub-agent to complete a task in the background.
-
-    This is a lightweight shortcut that creates a one-expert OASIS session running as
-    a bot sub-agent. The task is submitted in **detach mode** — it returns immediately
-    and the sub-agent works autonomously. When done, the main agent receives a
-    system_trigger notification in the specified session with the conclusion.
-
-    Use this when:
-      - You want to offload a time-consuming task (research, data processing, etc.)
-      - The task can be described in a single prompt
-      - You don't need multi-expert debate, just one capable agent with tools
-
-    Args:
-        task: The work task description for the sub-agent (be specific and detailed)
-        username: (auto-injected) current user identity; do NOT set manually
-        enabled_tools: Optional tool whitelist for the sub-agent. Empty = all tools available.
-        notify_session: (auto-injected) Session ID where the main agent should receive the
-            completion notification. Defaults to current session. Override to route
-            notifications to a different session (e.g. for cross-session workflows).
-
-    Returns:
-        Confirmation with topic_id for tracking progress
-    """
-    effective_user = username or _FALLBACK_USER
-    port = os.getenv("PORT_AGENT", "51200")
-    callback_url = f"http://127.0.0.1:{port}/system_trigger"
-
-    try:
-        async with httpx.AsyncClient(timeout=httpx.Timeout(timeout=30.0)) as client:
-            body = {
-                "question": task,
-                "user_id": effective_user,
-                "max_rounds": 1,
-                "expert_tags": [],
-                "use_bot_session": True,
-                "callback_url": callback_url,
-                "callback_session_id": notify_session,
-                # Single anonymous agent — no preset persona, identity comes from the task
-                "expert_configs": [
-                    {
-                        "name": "子Agent",
-                        "tag": "_dispatch",
-                        "persona": "",
-                        "temperature": 0.7,
-                    }
-                ],
-            }
-            if enabled_tools:
-                body["bot_enabled_tools"] = enabled_tools
-
-            # Use a minimal single-expert schedule: one "all_experts" step
-            # OASIS will use whatever experts are available; with max_rounds=1
-            # and a single round, it's effectively a single-shot sub-agent.
-
-            resp = await client.post(
-                f"{OASIS_BASE_URL}/topics",
-                json=body,
-            )
-            if resp.status_code != 200:
-                return f"❌ 子 Agent 创建失败: {resp.text}"
-
-            topic_id = resp.json()["topic_id"]
-
-            return (
-                f"🚀 子 Agent 已派遣（后台运行中）\n"
-                f"任务: {task[:100]}\n"
-                f"Topic ID: {topic_id}\n"
-                f"完成后将自动通知会话: {notify_session}\n\n"
-                f"💡 可用 check_oasis_discussion(topic_id=\"{topic_id}\") 查看进展。"
-            )
-
-    except httpx.ConnectError:
-        return _CONN_ERR
-    except Exception as e:
-        return f"❌ 派遣失败: {str(e)}"
 
 
 @mcp.tool()

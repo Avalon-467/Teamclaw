@@ -1080,7 +1080,7 @@ async def openai_chat_completions(
         input_messages = tool_result_messages
     else:
         # 正常模式：取最后一条 user message
-        # 同时收集请求中的 system messages（如 BotSessionExpert 的指令上下文）
+        # 同时收集请求中的 system messages（如 SessionExpert 的指令上下文）
         system_parts = []
         for msg in req.messages:
             if msg.role == "system" and msg.content:
