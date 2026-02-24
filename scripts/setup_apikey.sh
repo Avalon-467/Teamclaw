@@ -49,6 +49,20 @@ if [ -n "$tts_model" ]; then
     tts_voice=${tts_voice:-charon}
 fi
 
+read -p "该模型是否支持视觉/图片输入？(y/N，默认 N): " vision_input
+if [[ "$vision_input" =~ ^[Yy]$ ]]; then
+    vision_support="true"
+else
+    vision_support="false"
+fi
+
+read -p "是否使用 OpenAI 标准 API 模式？(Y/n，默认 Y): " standard_input
+if [[ "$standard_input" =~ ^[Nn]$ ]]; then
+    standard_mode="false"
+else
+    standard_mode="true"
+fi
+
 # 如果已有 .env，只替换/追加 Key 相关行，保留其余配置（端口等）
 if [ -f "$ENV_FILE" ]; then
     # 更新 LLM_API_KEY
@@ -85,6 +99,20 @@ if [ -f "$ENV_FILE" ]; then
             echo "TTS_VOICE=$tts_voice" >> "$ENV_FILE"
         fi
     fi
+    # 更新 LLM_VISION_SUPPORT
+    if grep -q '^LLM_VISION_SUPPORT=' "$ENV_FILE"; then
+        sed -i'' -e "s|^LLM_VISION_SUPPORT=.*|LLM_VISION_SUPPORT=$vision_support|" "$ENV_FILE"
+    elif grep -q '^# LLM_VISION_SUPPORT=' "$ENV_FILE"; then
+        sed -i'' -e "s|^# LLM_VISION_SUPPORT=.*|LLM_VISION_SUPPORT=$vision_support|" "$ENV_FILE"
+    else
+        echo "LLM_VISION_SUPPORT=$vision_support" >> "$ENV_FILE"
+    fi
+    # 更新 OPENAI_STANDARD_MODE
+    if grep -q '^OPENAI_STANDARD_MODE=' "$ENV_FILE"; then
+        sed -i'' -e "s|^OPENAI_STANDARD_MODE=.*|OPENAI_STANDARD_MODE=$standard_mode|" "$ENV_FILE"
+    else
+        echo "OPENAI_STANDARD_MODE=$standard_mode" >> "$ENV_FILE"
+    fi
 else
     # 首次创建：从模板复制再写入
     if [ -f "$EXAMPLE_FILE" ]; then
@@ -98,6 +126,18 @@ else
         if [ -n "$tts_voice" ]; then
             sed -i'' -e "s|^# TTS_VOICE=.*|TTS_VOICE=$tts_voice|" "$ENV_FILE"
         fi
+        # LLM_VISION_SUPPORT
+        if grep -q '^# LLM_VISION_SUPPORT=' "$ENV_FILE"; then
+            sed -i'' -e "s|^# LLM_VISION_SUPPORT=.*|LLM_VISION_SUPPORT=$vision_support|" "$ENV_FILE"
+        else
+            echo "LLM_VISION_SUPPORT=$vision_support" >> "$ENV_FILE"
+        fi
+        # OPENAI_STANDARD_MODE
+        if grep -q '^OPENAI_STANDARD_MODE=' "$ENV_FILE"; then
+            sed -i'' -e "s|^OPENAI_STANDARD_MODE=.*|OPENAI_STANDARD_MODE=$standard_mode|" "$ENV_FILE"
+        else
+            echo "OPENAI_STANDARD_MODE=$standard_mode" >> "$ENV_FILE"
+        fi
     else
         cat > "$ENV_FILE" << EOF
 LLM_API_KEY=$api_key
@@ -105,6 +145,8 @@ LLM_BASE_URL=$base_url
 LLM_MODEL=$model_name
 TTS_MODEL=$tts_model
 TTS_VOICE=$tts_voice
+LLM_VISION_SUPPORT=$vision_support
+OPENAI_STANDARD_MODE=$standard_mode
 EOF
     fi
 fi

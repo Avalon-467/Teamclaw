@@ -33,6 +33,7 @@ ENV_KEYS_TG = {
 ENV_KEYS_QQ = {
     "QQ_APP_ID": ("QQ Bot AppID（QQ 开放平台获取）", ""),
     "QQ_BOT_SECRET": ("QQ Bot Secret", ""),
+    "QQ_BOT_USERNAME": ("QQ Bot 以哪个系统用户身份调用 Agent", "qquser"),
     "AI_MODEL_QQ": ("QQ Bot 使用的 AI 模型", "gemini-3-flash-preview"),
 }
 
