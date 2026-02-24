@@ -277,9 +277,19 @@ HTML_TEMPLATE = """
             display: inline-block; padding: 8px 12px; border-radius: 12px;
             font-size: 13px; line-height: 1.5; max-width: 85%; word-break: break-word;
         }
+        .group-msg-content.markdown-body { text-align: left; }
+        .group-msg-content.markdown-body p { margin: 0 0 0.4em 0; }
+        .group-msg-content.markdown-body p:last-child { margin-bottom: 0; }
+        .group-msg-content.markdown-body pre { background: #1e1e1e; padding: 0.6rem; border-radius: 0.4rem; margin: 0.4rem 0; overflow-x: auto; }
+        .group-msg-content.markdown-body code { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; font-size: 0.85em; }
+        .group-msg-content.markdown-body ul, .group-msg-content.markdown-body ol { margin: 0.3em 0; padding-left: 1.5em; }
+        .group-msg.self .group-msg-content.markdown-body pre { background: #1e40af; }
+        .group-msg.self .group-msg-content.markdown-body code { color: #e0e7ff; }
         .group-msg.self .group-msg-content { background: #2563eb; color: white; }
         .group-msg.other .group-msg-content { background: white; border: 1px solid #e5e7eb; color: #374151; }
+        .group-msg.agent .group-msg-content { border-width: 1px; border-style: solid; }
         .group-msg.self { text-align: right; }
+        .group-msg.agent { text-align: left; }
         .group-msg-time { font-size: 10px; color: #9ca3af; margin-top: 2px; }
 
         .group-input-area {
@@ -2666,6 +2676,43 @@ HTML_TEMPLATE = """
         // ===== Group Chat (群聊) 逻辑 =====
         // ================================================================
 
+        // Agent 颜色方案：根据名字 hash 分配一致的颜色
+        const _agentColorPalette = [
+            { bg: '#f0fdf4', border: '#bbf7d0', text: '#166534', sender: '#15803d', pre: '#1a2e1a', code: '#d1fae5' },
+            { bg: '#eff6ff', border: '#bfdbfe', text: '#1e40af', sender: '#2563eb', pre: '#1e2a4a', code: '#dbeafe' },
+            { bg: '#fdf4ff', border: '#e9d5ff', text: '#6b21a8', sender: '#7c3aed', pre: '#2d1a3e', code: '#ede9fe' },
+            { bg: '#fff7ed', border: '#fed7aa', text: '#9a3412', sender: '#ea580c', pre: '#3b1a0a', code: '#ffedd5' },
+            { bg: '#fef2f2', border: '#fecaca', text: '#991b1b', sender: '#dc2626', pre: '#3b1212', code: '#fee2e2' },
+            { bg: '#f0fdfa', border: '#99f6e4', text: '#115e59', sender: '#0d9488', pre: '#0f2d2a', code: '#ccfbf1' },
+            { bg: '#fefce8', border: '#fde68a', text: '#854d0e', sender: '#ca8a04', pre: '#2d2305', code: '#fef9c3' },
+            { bg: '#fdf2f8', border: '#fbcfe8', text: '#9d174d', sender: '#db2777', pre: '#3b0d24', code: '#fce7f3' },
+        ];
+        const _agentColorCache = {};
+        function getAgentColor(sender) {
+            if (_agentColorCache[sender]) return _agentColorCache[sender];
+            let hash = 0;
+            for (let i = 0; i < sender.length; i++) {
+                hash = ((hash << 5) - hash) + sender.charCodeAt(i);
+                hash |= 0;
+            }
+            const color = _agentColorPalette[Math.abs(hash) % _agentColorPalette.length];
+            _agentColorCache[sender] = color;
+            return color;
+        }
+        function applyAgentColor(el, sender) {
+            const c = getAgentColor(sender);
+            const content = el.querySelector('.group-msg-content');
+            const senderEl = el.querySelector('.group-msg-sender');
+            if (content) {
+                content.style.background = c.bg;
+                content.style.borderColor = c.border;
+                content.style.color = c.text;
+            }
+            if (senderEl) senderEl.style.color = c.sender;
+            el.querySelectorAll('.group-msg-content pre').forEach(pre => { pre.style.background = c.pre; });
+            el.querySelectorAll('.group-msg-content code').forEach(code => { code.style.color = c.code; });
+        }
+
         let currentPage = 'chat'; // 'chat' or 'group'
         let currentGroupId = null;
         let groupPollingTimer = null;
@@ -2775,15 +2822,19 @@ HTML_TEMPLATE = """
                 return;
             }
             box.innerHTML = messages.map(m => {
-                const isSelf = m.sender === currentUserId || m.sender.startsWith(currentUserId + '#');
+                const isSelf = m.sender === currentUserId || m.sender === currentUserId;
+                const isAgent = !isSelf && m.sender_session;
+                const msgClass = isSelf ? 'self' : (isAgent ? 'agent' : 'other');
                 const timeStr = new Date(m.timestamp * 1000).toLocaleTimeString(currentLang === 'zh-CN' ? 'zh-CN' : 'en-US', {hour:'2-digit',minute:'2-digit'});
                 return `
-                    <div class="group-msg ${isSelf ? 'self' : 'other'}">
+                    <div class="group-msg ${msgClass}" ${isAgent ? 'data-agent-sender="'+escapeHtml(m.sender)+'"' : ''}>
                         <div class="group-msg-sender">${escapeHtml(m.sender)}</div>
-                        <div class="group-msg-content">${escapeHtml(m.content)}</div>
+                        <div class="group-msg-content markdown-body">${marked.parse(m.content || '')}</div>
                         <div class="group-msg-time">${timeStr}</div>
                     </div>`;
             }).join('');
+            box.querySelectorAll('pre code').forEach((block) => hljs.highlightElement(block));
+            box.querySelectorAll('.group-msg.agent[data-agent-sender]').forEach(el => applyAgentColor(el, el.dataset.agentSender));
             box.scrollTop = box.scrollHeight;
         }
 
@@ -2794,14 +2845,18 @@ HTML_TEMPLATE = """
             if (placeholder && messages.length > 0) placeholder.remove();
 
             for (const m of messages) {
-                const isSelf = m.sender === currentUserId || m.sender.startsWith(currentUserId + '#');
+                const isSelf = m.sender === currentUserId || m.sender === currentUserId;
+                const isAgent = !isSelf && m.sender_session;
+                const msgClass = isSelf ? 'self' : (isAgent ? 'agent' : 'other');
                 const timeStr = new Date(m.timestamp * 1000).toLocaleTimeString(currentLang === 'zh-CN' ? 'zh-CN' : 'en-US', {hour:'2-digit',minute:'2-digit'});
                 const div = document.createElement('div');
-                div.className = `group-msg ${isSelf ? 'self' : 'other'}`;
+                div.className = `group-msg ${msgClass}`;
                 div.innerHTML = `
                     <div class="group-msg-sender">${escapeHtml(m.sender)}</div>
-                    <div class="group-msg-content">${escapeHtml(m.content)}</div>
+                    <div class="group-msg-content markdown-body">${marked.parse(m.content || '')}</div>
                     <div class="group-msg-time">${timeStr}</div>`;
+                div.querySelectorAll('pre code').forEach((block) => hljs.highlightElement(block));
+                if (isAgent) applyAgentColor(div, m.sender);
                 box.appendChild(div);
                 if (m.id > groupLastMsgId) groupLastMsgId = m.id;
             }
