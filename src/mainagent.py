@@ -744,6 +744,10 @@ async def delete_session(
     try:
         async with aiosqlite.connect(db_path) as db:
             if req.session_id:
+                # 取消该会话正在运行的 agent task（避免删了 checkpoint 又被写回）
+                task_key = f"{req.user_id}#{req.session_id}"
+                await agent.cancel_task(task_key)
+
                 # 删除单个会话
                 thread_id = f"{req.user_id}#{req.session_id}"
                 for table in ("checkpoints", "writes"):
@@ -751,6 +755,12 @@ async def delete_session(
                 await db.commit()
                 return {"status": "success", "message": f"会话 {req.session_id} 已删除"}
             else:
+                # 取消该用户所有正在运行的 agent tasks
+                prefix = f"{req.user_id}#"
+                keys_to_cancel = [k for k in agent._active_tasks if k.startswith(prefix)]
+                for k in keys_to_cancel:
+                    await agent.cancel_task(k)
+
                 # 删除该用户所有会话
                 pattern = f"{req.user_id}#%"
                 for table in ("checkpoints", "writes"):
