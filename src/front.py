@@ -218,6 +218,123 @@ HTML_TEMPLATE = """
         .expert-default { background: linear-gradient(135deg, #6b7280, #4b5563); }
         .oasis-discussion-box { height: calc(100vh - 340px); overflow-y: auto; }
         .oasis-conclusion-box { background: linear-gradient(135deg, #f0fdf4, #ecfdf5); border: 1px solid #86efac; border-radius: 12px; padding: 12px; }
+
+        /* === Page Switch Tab === */
+        .page-tab-bar {
+            display: flex; background: #f9fafb; border-bottom: 1px solid #e5e7eb;
+            flex-shrink: 0; z-index: 10;
+        }
+        .page-tab {
+            flex: 1; padding: 10px 0; text-align: center; font-size: 13px; font-weight: 600;
+            color: #6b7280; cursor: pointer; transition: all 0.2s; border-bottom: 2px solid transparent;
+            user-select: none;
+        }
+        .page-tab:hover { color: #374151; background: #f3f4f6; }
+        .page-tab.active { color: #2563eb; border-bottom-color: #2563eb; background: white; }
+
+        /* === Group Chat Styles === */
+        .group-page { display: none; flex-direction: column; height: 100%; overflow: hidden; }
+        .group-page.active { display: flex; }
+        .chat-page { display: flex; flex-direction: column; height: 100%; overflow: hidden; }
+        .chat-page.hidden-page { display: none; }
+
+        .group-list-sidebar {
+            width: 240px; flex-shrink: 0; border-right: 1px solid #e5e7eb;
+            display: flex; flex-direction: column; height: 100%; background: #fafbfc;
+        }
+        .group-item {
+            padding: 10px 12px; cursor: pointer; transition: background 0.15s;
+            border-bottom: 1px solid #f3f4f6; position: relative;
+        }
+        .group-item:hover { background: #f3f4f6; }
+        .group-item.active { background: #eff6ff; border-left: 3px solid #2563eb; }
+        .group-item .group-name { font-size: 13px; font-weight: 600; color: #374151; }
+        .group-item .group-meta { font-size: 11px; color: #9ca3af; margin-top: 2px; }
+        .group-item .group-delete-btn {
+            display: none; position: absolute; right: 6px; top: 50%; transform: translateY(-50%);
+            background: #fee2e2; color: #dc2626; border: none; border-radius: 4px;
+            font-size: 11px; padding: 2px 6px; cursor: pointer;
+        }
+        .group-item:hover .group-delete-btn { display: block; }
+
+        .group-chat-area {
+            flex: 1; display: flex; flex-direction: column; min-width: 0;
+        }
+        .group-chat-header {
+            padding: 12px 16px; border-bottom: 1px solid #e5e7eb; background: white;
+            display: flex; align-items: center; justify-content: space-between; flex-shrink: 0;
+        }
+        .group-messages-box {
+            flex: 1; overflow-y: auto; padding: 16px; space-y: 3; background: #f9fafb;
+        }
+        .group-msg {
+            margin-bottom: 10px; animation: slideIn 0.2s ease;
+        }
+        .group-msg-sender {
+            font-size: 11px; font-weight: 600; color: #6b7280; margin-bottom: 2px;
+        }
+        .group-msg-content {
+            display: inline-block; padding: 8px 12px; border-radius: 12px;
+            font-size: 13px; line-height: 1.5; max-width: 85%; word-break: break-word;
+        }
+        .group-msg.self .group-msg-content { background: #2563eb; color: white; }
+        .group-msg.other .group-msg-content { background: white; border: 1px solid #e5e7eb; color: #374151; }
+        .group-msg.self { text-align: right; }
+        .group-msg-time { font-size: 10px; color: #9ca3af; margin-top: 2px; }
+
+        .group-input-area {
+            padding: 12px 16px; border-top: 1px solid #e5e7eb; background: white; flex-shrink: 0;
+            display: flex; align-items: end; gap: 8px;
+        }
+        .group-input-area textarea {
+            flex: 1; resize: none; border: 1px solid #d1d5db; border-radius: 10px;
+            padding: 8px 12px; font-size: 14px; max-height: 100px;
+            outline: none; transition: border-color 0.2s;
+        }
+        .group-input-area textarea:focus { border-color: #2563eb; }
+
+        /* Group member panel (right side) */
+        .group-member-panel {
+            width: 220px; flex-shrink: 0; border-left: 1px solid #e5e7eb;
+            display: flex; flex-direction: column; background: white; overflow: hidden;
+        }
+        .group-member-panel .panel-header {
+            padding: 12px; border-bottom: 1px solid #e5e7eb; font-size: 13px;
+            font-weight: 600; color: #374151; background: #f9fafb;
+        }
+        .member-list { flex: 1; overflow-y: auto; padding: 8px; }
+        .member-item {
+            display: flex; align-items: center; justify-content: space-between;
+            padding: 6px 8px; border-radius: 8px; margin-bottom: 4px; font-size: 12px;
+        }
+        .member-item .member-name { color: #374151; font-weight: 500; }
+        .member-item .member-badge {
+            font-size: 10px; padding: 1px 6px; border-radius: 9999px;
+        }
+        .member-item .badge-owner { background: #fef3c7; color: #92400e; }
+        .member-item .badge-agent { background: #dbeafe; color: #1e40af; }
+
+        .session-checkbox {
+            display: flex; align-items: center; padding: 6px 8px; border-radius: 8px;
+            cursor: pointer; transition: background 0.15s; font-size: 12px;
+        }
+        .session-checkbox:hover { background: #f3f4f6; }
+        .session-checkbox input { margin-right: 8px; }
+        .session-checkbox .session-label { color: #374151; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+        .group-empty-state {
+            flex: 1; display: flex; align-items: center; justify-content: center;
+            flex-direction: column; color: #9ca3af;
+        }
+        .group-empty-state .empty-icon { font-size: 48px; margin-bottom: 12px; }
+        .group-empty-state .empty-text { font-size: 14px; }
+
+        @media (max-width: 768px) {
+            .group-list-sidebar { display: none; }
+            .group-member-panel { display: none; }
+            .page-tab { font-size: 12px; padding: 8px 0; }
+        }
+
         .main-layout { display: flex; height: var(--app-height, 100vh); max-width: 100%; overflow: hidden; }
         .chat-main { flex: 1; min-width: 0; max-width: 900px; display: flex; flex-direction: column; height: var(--app-height, 100vh); overflow: hidden; }
 
@@ -406,6 +523,14 @@ HTML_TEMPLATE = """
 
         <!-- ===== 左侧：聊天区 ===== -->
         <div class="chat-main h-screen flex flex-col bg-white border-x border-gray-200 shadow-2xl">
+            <!-- Page Switch Tab Bar -->
+            <div class="page-tab-bar">
+                <div class="page-tab active" id="tab-chat" onclick="switchPage('chat')" data-i18n="tab_chat">💬 对话</div>
+                <div class="page-tab" id="tab-group" onclick="switchPage('group')" data-i18n="tab_group">👥 群聊</div>
+            </div>
+
+            <!-- === Chat Page === -->
+            <div id="page-chat" class="chat-page">
             <header class="p-3 sm:p-4 border-b bg-white flex justify-between items-start sm:items-center gap-2 flex-shrink-0">
                 <div class="flex items-center space-x-2 sm:space-x-3 mobile-header-top flex-shrink-0">
                     <div class="bg-blue-600 p-1.5 sm:p-2 rounded-lg text-white font-bold text-lg sm:text-xl">X</div>
@@ -492,6 +617,70 @@ HTML_TEMPLATE = """
                 <p class="text-[10px] text-center text-gray-400 mt-2 sm:mt-3 font-mono hidden sm:block" data-i18n="secure_footer">Secured by Nginx Reverse Proxy & SSH Tunnel</p>
             </div>
         </div>
+        <!-- end of chat-page -->
+
+        <!-- === Group Chat Page === -->
+        <div id="page-group" class="group-page">
+            <div style="display:flex; flex:1; overflow:hidden;">
+                <!-- Group list sidebar -->
+                <div class="group-list-sidebar">
+                    <div class="p-3 border-b bg-gray-50 flex justify-between items-center flex-shrink-0">
+                        <span class="text-sm font-bold text-gray-700" data-i18n="group_title">👥 群聊列表</span>
+                        <button onclick="showCreateGroupModal()" class="text-xs bg-blue-50 text-blue-600 hover:bg-blue-100 px-2 py-1 rounded border border-blue-200" data-i18n="group_new">+ 新建</button>
+                    </div>
+                    <div id="group-list" class="flex-1 overflow-y-auto">
+                        <div class="group-empty-state" style="padding:40px 0;">
+                            <div class="empty-icon">👥</div>
+                            <div class="empty-text" data-i18n="group_no_groups">暂无群聊</div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Group chat main area -->
+                <div class="group-chat-area" id="group-chat-area">
+                    <div class="group-empty-state" id="group-empty-placeholder">
+                        <div class="empty-icon">💬</div>
+                        <div class="empty-text" data-i18n="group_select_hint">选择或创建一个群聊</div>
+                    </div>
+                    <!-- Active group chat (hidden initially) -->
+                    <div id="group-active-chat" style="display:none; flex-direction:column; height:100%;">
+                        <div class="group-chat-header">
+                            <div>
+                                <span id="group-active-name" class="font-bold text-gray-800 text-sm"></span>
+                                <span id="group-active-id" class="text-[10px] text-gray-400 ml-2"></span>
+                            </div>
+                            <div class="flex items-center gap-2">
+                                <button onclick="toggleGroupMemberPanel()" class="text-xs bg-gray-50 hover:bg-gray-100 px-2 py-1 rounded border border-gray-200" data-i18n="group_members_btn">👤 成员</button>
+                            </div>
+                        </div>
+                        <div id="group-messages-box" class="group-messages-box"></div>
+                        <div class="group-input-area">
+                            <textarea id="group-input" rows="1" placeholder="发送消息..." data-i18n-placeholder="group_input_placeholder" onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();sendGroupMessage();}"></textarea>
+                            <button onclick="sendGroupMessage()" class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-xl font-bold text-sm flex-shrink-0" data-i18n="send_btn">发送</button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Member panel (right side) -->
+                <div class="group-member-panel" id="group-member-panel" style="display:none;">
+                    <div class="panel-header flex justify-between items-center">
+                        <span data-i18n="group_members">成员管理</span>
+                        <button onclick="toggleGroupMemberPanel()" class="text-gray-400 hover:text-gray-600 text-sm">&times;</button>
+                    </div>
+                    <div class="p-2 border-b">
+                        <div class="text-xs font-semibold text-gray-500 mb-2" data-i18n="group_current_members">当前成员</div>
+                        <div id="group-current-members" class="member-list" style="max-height:200px;"></div>
+                    </div>
+                    <div class="p-2 flex-1 overflow-hidden flex flex-col">
+                        <div class="text-xs font-semibold text-gray-500 mb-2" data-i18n="group_add_agents">添加 Agent Session</div>
+                        <div id="group-available-sessions" class="flex-1 overflow-y-auto"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <!-- end of group-page -->
+        </div>
+        <!-- end of chat-main -->
 
         <!-- ===== 分割线 ===== -->
         <div class="oasis-divider" id="oasis-divider"></div>
@@ -703,6 +892,30 @@ HTML_TEMPLATE = """
                 oasis_delete_success: '记录已删除',
                 oasis_action_fail: '操作失败',
                 
+                // 页面切换
+                tab_chat: '💬 对话',
+                tab_group: '👥 群聊',
+                
+                // 群聊
+                group_title: '👥 群聊列表',
+                group_new: '+ 新建',
+                group_no_groups: '暂无群聊',
+                group_select_hint: '选择或创建一个群聊',
+                group_members_btn: '👤 成员',
+                group_members: '成员管理',
+                group_current_members: '当前成员',
+                group_add_agents: '添加 Agent Session',
+                group_input_placeholder: '发送消息...',
+                group_create_title: '创建群聊',
+                group_name_placeholder: '群聊名称',
+                group_no_sessions: '没有可用的 Agent Session',
+                group_create_btn: '创建',
+                group_delete_confirm: '确定删除此群聊？',
+                group_owner: '群主',
+                group_agent: 'Agent',
+                group_msg_count: '条消息',
+                group_member_count: '人',
+                
                 // 离线提示
                 offline_banner: '⚠️ 网络已断开，请检查连接',
                 
@@ -835,6 +1048,30 @@ HTML_TEMPLATE = """
                 oasis_delete_confirm: 'Permanently delete this discussion? This cannot be undone.',
                 oasis_delete_success: 'Record deleted',
                 oasis_action_fail: 'Action failed',
+                
+                // Page switch
+                tab_chat: '💬 Chat',
+                tab_group: '👥 Groups',
+                
+                // Group chat
+                group_title: '👥 Group Chats',
+                group_new: '+ New',
+                group_no_groups: 'No group chats',
+                group_select_hint: 'Select or create a group chat',
+                group_members_btn: '👤 Members',
+                group_members: 'Member Management',
+                group_current_members: 'Current Members',
+                group_add_agents: 'Add Agent Session',
+                group_input_placeholder: 'Send a message...',
+                group_create_title: 'Create Group Chat',
+                group_name_placeholder: 'Group name',
+                group_no_sessions: 'No available Agent Sessions',
+                group_create_btn: 'Create',
+                group_delete_confirm: 'Delete this group chat?',
+                group_owner: 'Owner',
+                group_agent: 'Agent',
+                group_msg_count: 'messages',
+                group_member_count: 'members',
                 
                 // Offline
                 offline_banner: '⚠️ Network disconnected, please check connection',
@@ -2424,6 +2661,335 @@ HTML_TEMPLATE = """
             }
         });
         _chatObserver.observe(document.body, { childList: true, subtree: true, attributes: true });
+
+        // ================================================================
+        // ===== Group Chat (群聊) 逻辑 =====
+        // ================================================================
+
+        let currentPage = 'chat'; // 'chat' or 'group'
+        let currentGroupId = null;
+        let groupPollingTimer = null;
+        let groupLastMsgId = 0;
+
+        function switchPage(page) {
+            currentPage = page;
+            // Update tabs
+            document.getElementById('tab-chat').classList.toggle('active', page === 'chat');
+            document.getElementById('tab-group').classList.toggle('active', page === 'group');
+            // Show/hide pages
+            const chatPage = document.getElementById('page-chat');
+            const groupPage = document.getElementById('page-group');
+            if (page === 'chat') {
+                chatPage.classList.remove('hidden-page');
+                chatPage.style.display = 'flex';
+                groupPage.classList.remove('active');
+                stopGroupPolling();
+            } else {
+                chatPage.classList.add('hidden-page');
+                chatPage.style.display = 'none';
+                groupPage.classList.add('active');
+                loadGroupList();
+            }
+        }
+
+        function stopGroupPolling() {
+            if (groupPollingTimer) { clearInterval(groupPollingTimer); groupPollingTimer = null; }
+        }
+
+        async function loadGroupList() {
+            try {
+                const resp = await fetch('/proxy_groups', {
+                    headers: { 'Authorization': 'Bearer ' + getAuthToken() }
+                });
+                if (!resp.ok) return;
+                const groups = await resp.json();
+                renderGroupList(groups);
+            } catch (e) {
+                console.error('Failed to load groups:', e);
+            }
+        }
+
+        function renderGroupList(groups) {
+            const container = document.getElementById('group-list');
+            if (!groups || groups.length === 0) {
+                container.innerHTML = `
+                    <div class="group-empty-state" style="padding:40px 0;">
+                        <div class="empty-icon">👥</div>
+                        <div class="empty-text">${t('group_no_groups')}</div>
+                    </div>`;
+                return;
+            }
+            container.innerHTML = groups.map(g => {
+                const isActive = g.group_id === currentGroupId;
+                return `
+                    <div class="group-item ${isActive ? 'active' : ''}" onclick="openGroup('${g.group_id}')">
+                        <div class="group-name">${escapeHtml(g.name)}</div>
+                        <div class="group-meta">${g.member_count || 0} ${t('group_member_count')} · ${g.message_count || 0} ${t('group_msg_count')}</div>
+                        <button class="group-delete-btn" onclick="event.stopPropagation(); deleteGroup('${g.group_id}')">${t('delete_session')}</button>
+                    </div>`;
+            }).join('');
+        }
+
+        async function openGroup(groupId) {
+            currentGroupId = groupId;
+            groupLastMsgId = 0;
+            stopGroupPolling();
+
+            document.getElementById('group-empty-placeholder').style.display = 'none';
+            const activeChat = document.getElementById('group-active-chat');
+            activeChat.style.display = 'flex';
+
+            // Load group detail
+            try {
+                const resp = await fetch(`/proxy_groups/${groupId}`, {
+                    headers: { 'Authorization': 'Bearer ' + getAuthToken() }
+                });
+                if (!resp.ok) return;
+                const detail = await resp.json();
+
+                document.getElementById('group-active-name').textContent = detail.name;
+                document.getElementById('group-active-id').textContent = '#' + groupId.slice(-8);
+
+                renderGroupMessages(detail.messages || []);
+                renderGroupMembers(detail.members || []);
+
+                // Track last message ID
+                if (detail.messages && detail.messages.length > 0) {
+                    groupLastMsgId = detail.messages[detail.messages.length - 1].id;
+                }
+
+                // Start polling for new messages
+                startGroupPolling(groupId);
+
+                // Update group list selection
+                loadGroupList();
+            } catch (e) {
+                console.error('Failed to open group:', e);
+            }
+        }
+
+        function renderGroupMessages(messages) {
+            const box = document.getElementById('group-messages-box');
+            if (messages.length === 0) {
+                box.innerHTML = '<div style="text-align:center;color:#9ca3af;padding:40px 0;font-size:13px;">暂无消息</div>';
+                return;
+            }
+            box.innerHTML = messages.map(m => {
+                const isSelf = m.sender === currentUserId || m.sender.startsWith(currentUserId + '#');
+                const timeStr = new Date(m.timestamp * 1000).toLocaleTimeString(currentLang === 'zh-CN' ? 'zh-CN' : 'en-US', {hour:'2-digit',minute:'2-digit'});
+                return `
+                    <div class="group-msg ${isSelf ? 'self' : 'other'}">
+                        <div class="group-msg-sender">${escapeHtml(m.sender)}</div>
+                        <div class="group-msg-content">${escapeHtml(m.content)}</div>
+                        <div class="group-msg-time">${timeStr}</div>
+                    </div>`;
+            }).join('');
+            box.scrollTop = box.scrollHeight;
+        }
+
+        function appendGroupMessages(messages) {
+            const box = document.getElementById('group-messages-box');
+            // Remove "no messages" placeholder if present
+            const placeholder = box.querySelector('div[style*="text-align:center"]');
+            if (placeholder && messages.length > 0) placeholder.remove();
+
+            for (const m of messages) {
+                const isSelf = m.sender === currentUserId || m.sender.startsWith(currentUserId + '#');
+                const timeStr = new Date(m.timestamp * 1000).toLocaleTimeString(currentLang === 'zh-CN' ? 'zh-CN' : 'en-US', {hour:'2-digit',minute:'2-digit'});
+                const div = document.createElement('div');
+                div.className = `group-msg ${isSelf ? 'self' : 'other'}`;
+                div.innerHTML = `
+                    <div class="group-msg-sender">${escapeHtml(m.sender)}</div>
+                    <div class="group-msg-content">${escapeHtml(m.content)}</div>
+                    <div class="group-msg-time">${timeStr}</div>`;
+                box.appendChild(div);
+                if (m.id > groupLastMsgId) groupLastMsgId = m.id;
+            }
+            box.scrollTop = box.scrollHeight;
+        }
+
+        function startGroupPolling(groupId) {
+            stopGroupPolling();
+            groupPollingTimer = setInterval(async () => {
+                if (currentGroupId !== groupId || currentPage !== 'group') {
+                    stopGroupPolling();
+                    return;
+                }
+                try {
+                    const resp = await fetch(`/proxy_groups/${groupId}/messages?after_id=${groupLastMsgId}`, {
+                        headers: { 'Authorization': 'Bearer ' + getAuthToken() }
+                    });
+                    if (!resp.ok) return;
+                    const data = await resp.json();
+                    if (data.messages && data.messages.length > 0) {
+                        appendGroupMessages(data.messages);
+                    }
+                } catch (e) {
+                    // silent
+                }
+            }, 2000);
+        }
+
+        async function sendGroupMessage() {
+            const input = document.getElementById('group-input');
+            const text = input.value.trim();
+            if (!text || !currentGroupId) return;
+            input.value = '';
+
+            try {
+                await fetch(`/proxy_groups/${currentGroupId}/messages`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': 'Bearer ' + getAuthToken()
+                    },
+                    body: JSON.stringify({ content: text })
+                });
+                // Immediately show in UI
+                appendGroupMessages([{
+                    id: groupLastMsgId + 1,
+                    sender: currentUserId,
+                    content: text,
+                    timestamp: Date.now() / 1000
+                }]);
+                groupLastMsgId++;
+            } catch (e) {
+                console.error('Failed to send group message:', e);
+            }
+        }
+
+        function renderGroupMembers(members) {
+            const container = document.getElementById('group-current-members');
+            container.innerHTML = members.map(m => {
+                const badge = m.is_agent
+                    ? `<span class="member-badge badge-agent">${t('group_agent')}</span>`
+                    : `<span class="member-badge badge-owner">${t('group_owner')}</span>`;
+                return `
+                    <div class="member-item">
+                        <span class="member-name">${escapeHtml(m.user_id)}${m.session_id !== 'default' ? '#' + m.session_id : ''}</span>
+                        ${badge}
+                    </div>`;
+            }).join('');
+        }
+
+        let groupMemberPanelOpen = false;
+        function toggleGroupMemberPanel() {
+            groupMemberPanelOpen = !groupMemberPanelOpen;
+            document.getElementById('group-member-panel').style.display = groupMemberPanelOpen ? 'flex' : 'none';
+            if (groupMemberPanelOpen && currentGroupId) {
+                loadAvailableSessions();
+            }
+        }
+
+        async function loadAvailableSessions() {
+            const container = document.getElementById('group-available-sessions');
+            container.innerHTML = '<div class="text-xs text-gray-400 p-2">' + t('loading') + '</div>';
+            try {
+                const resp = await fetch(`/proxy_groups/${currentGroupId}/sessions`, {
+                    headers: { 'Authorization': 'Bearer ' + getAuthToken() }
+                });
+                if (!resp.ok) return;
+                const data = await resp.json();
+                const sessions = data.sessions || [];
+
+                // Get current members to mark them
+                const detailResp = await fetch(`/proxy_groups/${currentGroupId}`, {
+                    headers: { 'Authorization': 'Bearer ' + getAuthToken() }
+                });
+                const detail = await detailResp.json();
+                const memberSet = new Set((detail.members || []).map(m => m.user_id + '#' + m.session_id));
+
+                if (sessions.length === 0) {
+                    container.innerHTML = '<div class="text-xs text-gray-400 p-2">' + t('group_no_sessions') + '</div>';
+                    return;
+                }
+
+                container.innerHTML = sessions.map(s => {
+                    const key = currentUserId + '#' + s.session_id;
+                    const checked = memberSet.has(key) ? 'checked' : '';
+                    const title = s.title || s.session_id;
+                    return `
+                        <label class="session-checkbox">
+                            <input type="checkbox" ${checked} onchange="toggleGroupAgent('${s.session_id}', this.checked)">
+                            <span class="session-label" title="${escapeHtml(title)}">${escapeHtml(title)}</span>
+                        </label>`;
+                }).join('');
+            } catch (e) {
+                container.innerHTML = '<div class="text-xs text-red-400 p-2">加载失败</div>';
+            }
+        }
+
+        async function toggleGroupAgent(sessionId, add) {
+            if (!currentGroupId) return;
+            try {
+                await fetch(`/proxy_groups/${currentGroupId}`, {
+                    method: 'PUT',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': 'Bearer ' + getAuthToken()
+                    },
+                    body: JSON.stringify({
+                        members: [{
+                            user_id: currentUserId,
+                            session_id: sessionId,
+                            action: add ? 'add' : 'remove'
+                        }]
+                    })
+                });
+                // Refresh member list
+                const resp = await fetch(`/proxy_groups/${currentGroupId}`, {
+                    headers: { 'Authorization': 'Bearer ' + getAuthToken() }
+                });
+                const detail = await resp.json();
+                renderGroupMembers(detail.members || []);
+            } catch (e) {
+                console.error('Failed to toggle group agent:', e);
+            }
+        }
+
+        function showCreateGroupModal() {
+            const name = prompt(t('group_name_placeholder'));
+            if (!name || !name.trim()) return;
+            createGroup(name.trim());
+        }
+
+        async function createGroup(name) {
+            try {
+                const resp = await fetch('/proxy_groups', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': 'Bearer ' + getAuthToken()
+                    },
+                    body: JSON.stringify({ name: name, members: [] })
+                });
+                if (!resp.ok) { alert('创建失败'); return; }
+                const data = await resp.json();
+                await loadGroupList();
+                openGroup(data.group_id);
+            } catch (e) {
+                alert('创建失败: ' + e.message);
+            }
+        }
+
+        async function deleteGroup(groupId) {
+            if (!confirm(t('group_delete_confirm'))) return;
+            try {
+                await fetch(`/proxy_groups/${groupId}`, {
+                    method: 'DELETE',
+                    headers: { 'Authorization': 'Bearer ' + getAuthToken() }
+                });
+                if (currentGroupId === groupId) {
+                    currentGroupId = null;
+                    document.getElementById('group-active-chat').style.display = 'none';
+                    document.getElementById('group-empty-placeholder').style.display = 'flex';
+                    stopGroupPolling();
+                }
+                loadGroupList();
+            } catch (e) {
+                alert('删除失败: ' + e.message);
+            }
+        }
     </script>
 
     <script>
@@ -3085,6 +3651,136 @@ def proxy_delete_session():
         return jsonify(r.json()), r.status_code
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+
+
+# ===== Group Chat Proxy Routes =====
+
+def _group_auth_headers():
+    """构造群聊API的Authorization header"""
+    user_id = session.get("user_id")
+    password = session.get("password")
+    if not user_id or not password:
+        return None, None
+    return user_id, {"Authorization": f"Bearer {user_id}:{password}"}
+
+
+@app.route("/proxy_groups", methods=["GET"])
+def proxy_list_groups():
+    """代理列出用户群聊"""
+    uid, headers = _group_auth_headers()
+    if not uid:
+        return jsonify([]), 200
+    try:
+        r = requests.get(f"http://127.0.0.1:{PORT_AGENT}/groups", headers=headers, timeout=10)
+        return jsonify(r.json()), r.status_code
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/proxy_groups", methods=["POST"])
+def proxy_create_group():
+    """代理创建群聊"""
+    uid, headers = _group_auth_headers()
+    if not uid:
+        return jsonify({"error": "未登录"}), 401
+    try:
+        headers["Content-Type"] = "application/json"
+        r = requests.post(f"http://127.0.0.1:{PORT_AGENT}/groups", json=request.get_json(silent=True), headers=headers, timeout=10)
+        return jsonify(r.json()), r.status_code
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/proxy_groups/<group_id>", methods=["GET"])
+def proxy_get_group(group_id):
+    """代理获取群聊详情"""
+    uid, headers = _group_auth_headers()
+    if not uid:
+        return jsonify({"error": "未登录"}), 401
+    try:
+        r = requests.get(f"http://127.0.0.1:{PORT_AGENT}/groups/{group_id}", headers=headers, timeout=10)
+        return jsonify(r.json()), r.status_code
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/proxy_groups/<group_id>", methods=["PUT"])
+def proxy_update_group(group_id):
+    """代理更新群聊"""
+    uid, headers = _group_auth_headers()
+    if not uid:
+        return jsonify({"error": "未登录"}), 401
+    try:
+        headers["Content-Type"] = "application/json"
+        r = requests.put(f"http://127.0.0.1:{PORT_AGENT}/groups/{group_id}", json=request.get_json(silent=True), headers=headers, timeout=10)
+        return jsonify(r.json()), r.status_code
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/proxy_groups/<group_id>", methods=["DELETE"])
+def proxy_delete_group(group_id):
+    """代理删除群聊"""
+    uid, headers = _group_auth_headers()
+    if not uid:
+        return jsonify({"error": "未登录"}), 401
+    try:
+        r = requests.delete(f"http://127.0.0.1:{PORT_AGENT}/groups/{group_id}", headers=headers, timeout=10)
+        return jsonify(r.json()), r.status_code
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/proxy_groups/<group_id>/messages", methods=["GET"])
+def proxy_group_messages(group_id):
+    """代理获取群聊消息（支持增量 after_id）"""
+    uid, headers = _group_auth_headers()
+    if not uid:
+        return jsonify({"messages": []}), 200
+    try:
+        after_id = request.args.get("after_id", "0")
+        r = requests.get(
+            f"http://127.0.0.1:{PORT_AGENT}/groups/{group_id}/messages",
+            params={"after_id": after_id},
+            headers=headers, timeout=10,
+        )
+        return jsonify(r.json()), r.status_code
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/proxy_groups/<group_id>/messages", methods=["POST"])
+def proxy_post_group_message(group_id):
+    """代理发送群聊消息"""
+    uid, headers = _group_auth_headers()
+    if not uid:
+        return jsonify({"error": "未登录"}), 401
+    try:
+        headers["Content-Type"] = "application/json"
+        r = requests.post(
+            f"http://127.0.0.1:{PORT_AGENT}/groups/{group_id}/messages",
+            json=request.get_json(silent=True),
+            headers=headers, timeout=10,
+        )
+        return jsonify(r.json()), r.status_code
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/proxy_groups/<group_id>/sessions", methods=["GET"])
+def proxy_group_sessions(group_id):
+    """代理获取可加入群聊的sessions"""
+    uid, headers = _group_auth_headers()
+    if not uid:
+        return jsonify({"sessions": []}), 200
+    try:
+        r = requests.get(
+            f"http://127.0.0.1:{PORT_AGENT}/groups/{group_id}/sessions",
+            headers=headers, timeout=15,
+        )
+        return jsonify(r.json()), r.status_code
+    except Exception as e:
+        return jsonify({"sessions": [], "error": str(e)}), 500
 
 
 # ===== OASIS Proxy Routes =====

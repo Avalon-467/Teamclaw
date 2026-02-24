@@ -274,5 +274,54 @@ async def send_internal_message(
             return f"❌ 消息投递异常: {type(e).__name__}: {str(e)}"
 
 
+@mcp.tool()
+async def send_to_group(
+    username: str,
+    group_id: str,
+    content: str,
+    source_session: str = "",
+) -> str:
+    """
+    Send a message to a group chat. Use this when you receive a message
+    from a group chat (indicated by "[群聊 xxx]" prefix) and want to reply,
+    or when you proactively want to say something in a group.
+
+    The message will be broadcast to all agent members in the group (except yourself).
+    Human members will see it when they next poll/refresh the group chat UI.
+
+    Args:
+        username: (auto-injected) current user identity; do NOT set manually
+        group_id: The group chat ID (e.g. "g_1234567890_abcd1234")
+        content: The message content to send to the group
+        source_session: (auto-injected) current session ID; do NOT set manually
+
+    Returns:
+        Confirmation of message delivery
+    """
+    if not _INTERNAL_TOKEN:
+        return "❌ 系统未配置 INTERNAL_TOKEN，无法发送群聊消息。"
+
+    url = f"http://127.0.0.1:{_AGENT_PORT}/groups/{group_id}/messages"
+    try:
+        async with httpx.AsyncClient(timeout=15) as client:
+            response = await client.post(
+                url,
+                headers={
+                    "X-Internal-Token": _INTERNAL_TOKEN,
+                    "Content-Type": "application/json",
+                },
+                json={
+                    "content": content,
+                    "sender": f"{username}#{source_session}" if source_session else username,
+                    "sender_session": source_session,
+                },
+            )
+            if response.status_code != 200:
+                return f"❌ 发送失败 (HTTP {response.status_code}): {response.text[:500]}"
+            return f"✅ 消息已发送到群聊 [{group_id}]"
+    except Exception as e:
+        return f"❌ 发送群聊消息失败: {type(e).__name__}: {str(e)}"
+
+
 if __name__ == "__main__":
     mcp.run(transport="stdio")

@@ -98,6 +98,7 @@ agent = MiniTimeAgent(src_dir=current_dir, db_path=db_path)
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     await agent.startup()
+    await _init_group_db()   # 初始化群聊数据库（on_event 与 lifespan 不兼容）
     yield
     await agent.shutdown()
 
@@ -1244,6 +1245,347 @@ async def list_models():
             "owned_by": "mini-timebot",
         }],
     }
+
+
+# ------------------------------------------------------------------
+# Group Chat (群聊) — SQLite 存储，REST API
+# ------------------------------------------------------------------
+
+_GROUP_DB_PATH = os.path.join(root_dir, "data", "group_chat.db")
+
+async def _init_group_db():
+    """初始化群聊数据库表结构"""
+    async with aiosqlite.connect(_GROUP_DB_PATH) as db:
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS groups (
+                group_id TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                owner TEXT NOT NULL,
+                created_at REAL NOT NULL
+            )
+        """)
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS group_members (
+                group_id TEXT NOT NULL,
+                user_id TEXT NOT NULL,
+                session_id TEXT NOT NULL DEFAULT 'default',
+                is_agent INTEGER NOT NULL DEFAULT 1,
+                joined_at REAL NOT NULL,
+                PRIMARY KEY (group_id, user_id, session_id),
+                FOREIGN KEY (group_id) REFERENCES groups(group_id) ON DELETE CASCADE
+            )
+        """)
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS group_messages (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                group_id TEXT NOT NULL,
+                sender TEXT NOT NULL,
+                sender_session TEXT NOT NULL DEFAULT '',
+                content TEXT NOT NULL,
+                timestamp REAL NOT NULL,
+                FOREIGN KEY (group_id) REFERENCES groups(group_id) ON DELETE CASCADE
+            )
+        """)
+        await db.commit()
+
+
+# --- Pydantic models ---
+
+class GroupCreateRequest(BaseModel):
+    name: str
+    members: list[dict] = Field(default_factory=list)  # [{user_id, session_id}]
+
+class GroupUpdateRequest(BaseModel):
+    name: Optional[str] = None
+    members: Optional[list[dict]] = None  # [{user_id, session_id, action:"add"|"remove"}]
+
+class GroupMessageRequest(BaseModel):
+    content: str
+    sender: Optional[str] = None       # 人类发消息时可省略（自动取 owner）
+    sender_session: Optional[str] = ""
+
+
+# --- Helpers ---
+
+def _parse_group_auth(authorization: str | None):
+    """从 Bearer token 解析用户认证，返回 (user_id, password, session_id)"""
+    if not authorization or not authorization.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="Missing Authorization header")
+    token = authorization[7:]
+    # 格式: user_id:password 或 user_id:password:session_id
+    parts = token.split(":")
+    if len(parts) < 2:
+        raise HTTPException(status_code=401, detail="Invalid token format")
+    uid, pw = parts[0], parts[1]
+    sid = parts[2] if len(parts) > 2 else "default"
+    if not verify_password(uid, pw):
+        raise HTTPException(status_code=401, detail="认证失败")
+    return uid, pw, sid
+
+
+async def _broadcast_to_group(group_id: str, sender: str, content: str, exclude_user: str = "", exclude_session: str = ""):
+    """向群内所有 agent 成员广播消息（异步 fire-and-forget）"""
+    async with aiosqlite.connect(_GROUP_DB_PATH) as db:
+        cursor = await db.execute(
+            "SELECT user_id, session_id, is_agent FROM group_members WHERE group_id = ?",
+            (group_id,),
+        )
+        members = await cursor.fetchall()
+
+    for user_id, session_id, is_agent in members:
+        if not is_agent:
+            continue  # 人类成员不需要异步通知
+        if user_id == exclude_user and session_id == exclude_session:
+            continue  # 不通知发送者自己
+        # 用 system_trigger 异步投递
+        trigger_url = f"http://127.0.0.1:{os.getenv('PORT_AGENT', '51200')}/system_trigger"
+        msg_text = f"[群聊 {group_id}] {sender} 说:\n{content}\n\n(仅当消息与你直接相关、点名你、或向你提问时，才使用 send_to_group 工具回复，group_id={group_id}。其他情况请忽略，不要回应。)"
+        try:
+            async with httpx.AsyncClient(timeout=10) as client:
+                await client.post(
+                    trigger_url,
+                    headers={"X-Internal-Token": INTERNAL_TOKEN},
+                    json={
+                        "user_id": user_id,
+                        "session_id": session_id,
+                        "text": msg_text,
+                    },
+                )
+        except Exception as e:
+            print(f"[GroupChat] 广播到 {user_id}#{session_id} 失败: {e}")
+
+
+# --- API 端点 ---
+
+@app.post("/groups")
+async def create_group(req: GroupCreateRequest, authorization: str | None = Header(None)):
+    """创建群聊"""
+    uid, _, _ = _parse_group_auth(authorization)
+    group_id = f"g_{int(time.time()*1000)}_{secrets.token_hex(4)}"
+    now = time.time()
+    async with aiosqlite.connect(_GROUP_DB_PATH) as db:
+        await db.execute(
+            "INSERT INTO groups (group_id, name, owner, created_at) VALUES (?, ?, ?, ?)",
+            (group_id, req.name, uid, now),
+        )
+        # Owner 作为人类成员加入
+        await db.execute(
+            "INSERT INTO group_members (group_id, user_id, session_id, is_agent, joined_at) VALUES (?, ?, ?, 0, ?)",
+            (group_id, uid, "default", now),
+        )
+        # 添加 agent 成员
+        for m in req.members:
+            m_uid = m.get("user_id", "")
+            m_sid = m.get("session_id", "default")
+            if m_uid:
+                await db.execute(
+                    "INSERT OR IGNORE INTO group_members (group_id, user_id, session_id, is_agent, joined_at) VALUES (?, ?, ?, 1, ?)",
+                    (group_id, m_uid, m_sid, now),
+                )
+        await db.commit()
+    return {"group_id": group_id, "name": req.name, "owner": uid}
+
+
+@app.get("/groups")
+async def list_groups(authorization: str | None = Header(None)):
+    """列出用户所属的群聊"""
+    uid, _, _ = _parse_group_auth(authorization)
+    async with aiosqlite.connect(_GROUP_DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        cursor = await db.execute("""
+            SELECT g.group_id, g.name, g.owner, g.created_at,
+                   (SELECT COUNT(*) FROM group_members WHERE group_id = g.group_id) as member_count,
+                   (SELECT COUNT(*) FROM group_messages WHERE group_id = g.group_id) as message_count
+            FROM groups g
+            WHERE g.owner = ? OR g.group_id IN (
+                SELECT group_id FROM group_members WHERE user_id = ?
+            )
+            ORDER BY g.created_at DESC
+        """, (uid, uid))
+        rows = await cursor.fetchall()
+    return [dict(r) for r in rows]
+
+
+@app.get("/groups/{group_id}")
+async def get_group(group_id: str, authorization: str | None = Header(None)):
+    """获取群聊详情（含成员和最近消息）"""
+    uid, _, _ = _parse_group_auth(authorization)
+    async with aiosqlite.connect(_GROUP_DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        # 群信息
+        cursor = await db.execute("SELECT * FROM groups WHERE group_id = ?", (group_id,))
+        group = await cursor.fetchone()
+        if not group:
+            raise HTTPException(status_code=404, detail="群聊不存在")
+        # 成员列表
+        cursor = await db.execute(
+            "SELECT user_id, session_id, is_agent, joined_at FROM group_members WHERE group_id = ?",
+            (group_id,),
+        )
+        members = [dict(r) for r in await cursor.fetchall()]
+        # 最近 100 条消息
+        cursor = await db.execute(
+            "SELECT id, sender, sender_session, content, timestamp FROM group_messages WHERE group_id = ? ORDER BY id DESC LIMIT 100",
+            (group_id,),
+        )
+        messages = [dict(r) for r in await cursor.fetchall()]
+        messages.reverse()  # 按时间正序
+
+    return {**dict(group), "members": members, "messages": messages}
+
+
+@app.get("/groups/{group_id}/messages")
+async def get_group_messages(group_id: str, after_id: int = 0, authorization: str | None = Header(None)):
+    """获取群聊消息（支持增量获取 after_id）"""
+    _parse_group_auth(authorization)
+    async with aiosqlite.connect(_GROUP_DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        cursor = await db.execute(
+            "SELECT id, sender, sender_session, content, timestamp FROM group_messages WHERE group_id = ? AND id > ? ORDER BY id ASC LIMIT 200",
+            (group_id, after_id),
+        )
+        messages = [dict(r) for r in await cursor.fetchall()]
+    return {"messages": messages}
+
+
+@app.post("/groups/{group_id}/messages")
+async def post_group_message(group_id: str, req: GroupMessageRequest, authorization: str | None = Header(None),
+                              x_internal_token: str | None = Header(None)):
+    """发送群聊消息 — 人类用 Bearer auth，Agent 用 X-Internal-Token"""
+    sender = ""
+    sender_session = req.sender_session or ""
+
+    if x_internal_token and x_internal_token == INTERNAL_TOKEN:
+        # Agent 调用（通过 MCP 工具）
+        sender = req.sender or "agent"
+    else:
+        uid, _, sid = _parse_group_auth(authorization)
+        sender = uid
+        sender_session = sid
+
+    # 存入消息
+    now = time.time()
+    async with aiosqlite.connect(_GROUP_DB_PATH) as db:
+        # 校验群存在
+        cursor = await db.execute("SELECT group_id FROM groups WHERE group_id = ?", (group_id,))
+        if not await cursor.fetchone():
+            raise HTTPException(status_code=404, detail="群聊不存在")
+        await db.execute(
+            "INSERT INTO group_messages (group_id, sender, sender_session, content, timestamp) VALUES (?, ?, ?, ?, ?)",
+            (group_id, sender, sender_session, req.content, now),
+        )
+        await db.commit()
+
+    # 异步广播给群内所有 agent
+    asyncio.create_task(_broadcast_to_group(group_id, sender, req.content, exclude_user=sender, exclude_session=sender_session))
+
+    return {"status": "sent", "sender": sender, "timestamp": now}
+
+
+@app.put("/groups/{group_id}")
+async def update_group(group_id: str, req: GroupUpdateRequest, authorization: str | None = Header(None)):
+    """更新群聊（改名、增删成员）"""
+    uid, _, _ = _parse_group_auth(authorization)
+    async with aiosqlite.connect(_GROUP_DB_PATH) as db:
+        # 验证所有者
+        cursor = await db.execute("SELECT owner FROM groups WHERE group_id = ?", (group_id,))
+        row = await cursor.fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="群聊不存在")
+        if row[0] != uid:
+            raise HTTPException(status_code=403, detail="只有群主可以修改群设置")
+
+        if req.name:
+            await db.execute("UPDATE groups SET name = ? WHERE group_id = ?", (req.name, group_id))
+
+        if req.members:
+            now = time.time()
+            for m in req.members:
+                action = m.get("action", "add")
+                m_uid = m.get("user_id", "")
+                m_sid = m.get("session_id", "default")
+                if not m_uid:
+                    continue
+                if action == "add":
+                    await db.execute(
+                        "INSERT OR IGNORE INTO group_members (group_id, user_id, session_id, is_agent, joined_at) VALUES (?, ?, ?, 1, ?)",
+                        (group_id, m_uid, m_sid, now),
+                    )
+                elif action == "remove":
+                    await db.execute(
+                        "DELETE FROM group_members WHERE group_id = ? AND user_id = ? AND session_id = ?",
+                        (group_id, m_uid, m_sid),
+                    )
+        await db.commit()
+    return {"status": "updated"}
+
+
+@app.delete("/groups/{group_id}")
+async def delete_group(group_id: str, authorization: str | None = Header(None)):
+    """删除群聊"""
+    uid, _, _ = _parse_group_auth(authorization)
+    async with aiosqlite.connect(_GROUP_DB_PATH) as db:
+        cursor = await db.execute("SELECT owner FROM groups WHERE group_id = ?", (group_id,))
+        row = await cursor.fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="群聊不存在")
+        if row[0] != uid:
+            raise HTTPException(status_code=403, detail="只有群主可以删除群")
+        await db.execute("DELETE FROM group_messages WHERE group_id = ?", (group_id,))
+        await db.execute("DELETE FROM group_members WHERE group_id = ?", (group_id,))
+        await db.execute("DELETE FROM groups WHERE group_id = ?", (group_id,))
+        await db.commit()
+    return {"status": "deleted"}
+
+
+@app.get("/groups/{group_id}/sessions")
+async def list_available_sessions(group_id: str, authorization: str | None = Header(None)):
+    """列出可以加入群聊的 agent sessions（直接查 checkpoint DB）"""
+    uid, pw, _ = _parse_group_auth(authorization)
+    # 复用 mainagent 自身的 list_sessions 逻辑
+    prefix = f"{uid}#"
+    sessions = []
+    try:
+        async with aiosqlite.connect(db_path) as db:
+            cursor = await db.execute(
+                "SELECT DISTINCT thread_id FROM checkpoints WHERE thread_id LIKE ? ORDER BY thread_id",
+                (f"{prefix}%",),
+            )
+            rows = await cursor.fetchall()
+
+        for (thread_id,) in rows:
+            sid = thread_id[len(prefix):]
+            # 获取摘要作为标题
+            config = {"configurable": {"thread_id": thread_id}}
+            snapshot = await agent.agent_app.aget_state(config)
+            msgs = snapshot.values.get("messages", []) if snapshot and snapshot.values else []
+
+            first_human = ""
+            for m in msgs:
+                if hasattr(m, "content") and type(m).__name__ == "HumanMessage":
+                    raw = m.content
+                    if isinstance(raw, str):
+                        content = raw
+                    elif isinstance(raw, list):
+                        content = " ".join(
+                            p.get("text", "") for p in raw if isinstance(p, dict) and p.get("type") == "text"
+                        ) or "(图片消息)"
+                    else:
+                        content = str(raw)
+                    if content.startswith("[系统触发]") or content.startswith("[外部学术会议邀请]"):
+                        continue
+                    if not first_human:
+                        first_human = content[:80]
+                        break
+
+            sessions.append({
+                "session_id": sid,
+                "title": first_human or f"Session {sid}",
+            })
+    except Exception as e:
+        return {"sessions": [], "error": str(e)}
+
+    return {"sessions": sessions}
 
 
 if __name__ == "__main__":

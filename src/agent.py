@@ -39,6 +39,8 @@ USER_INJECTED_TOOLS = {
     "list_sessions", "get_current_session",
     # LLM API access tools
     "call_llm_api", "send_internal_message",
+    # Group chat tools
+    "send_to_group",
 }
 
 # Tools that need session_id auto-injected (in addition to username)
@@ -49,6 +51,7 @@ SESSION_INJECTED_TOOLS = {
     "get_current_session": "current_session_id",
     "send_telegram_message": "source_session",
     "send_internal_message": "source_session",
+    "send_to_group": "source_session",
 }
 
 
