@@ -340,8 +340,17 @@ HTML_TEMPLATE = """
         .group-empty-state .empty-text { font-size: 14px; }
 
         @media (max-width: 768px) {
-            .group-list-sidebar { display: none; }
-            .group-member-panel { display: none; }
+            .group-list-sidebar {
+                width: 100% !important; border-right: none;
+            }
+            .group-chat-area { display: none !important; }
+            .group-page.mobile-chat-open .group-list-sidebar { display: none !important; }
+            .group-page.mobile-chat-open .group-chat-area { display: flex !important; }
+            .group-member-panel {
+                position: fixed; left: 0; top: 0; right: 0; bottom: 0;
+                width: 100% !important; z-index: 250; box-shadow: 0 0 30px rgba(0,0,0,0.2);
+            }
+            .group-chat-header .group-back-btn { display: inline-flex !important; }
             .page-tab { font-size: 12px; padding: 8px 0; }
         }
 
@@ -682,9 +691,10 @@ HTML_TEMPLATE = """
                     <!-- Active group chat (hidden initially) -->
                     <div id="group-active-chat" style="display:none; flex-direction:column; height:100%;">
                         <div class="group-chat-header">
-                            <div>
+                            <div class="flex items-center gap-2">
+                                <button onclick="groupBackToList()" class="group-back-btn text-xs text-gray-500 hover:text-gray-700 px-1" style="display:none;">← </button>
                                 <span id="group-active-name" class="font-bold text-gray-800 text-sm"></span>
-                                <span id="group-active-id" class="text-[10px] text-gray-400 ml-2"></span>
+                                <span id="group-active-id" class="text-[10px] text-gray-400 ml-1"></span>
                             </div>
                             <div class="flex items-center gap-2">
                                 <button id="group-mute-btn" onclick="toggleGroupMute()" class="text-xs px-2 py-1 rounded border font-bold" style="background:#fef2f2;color:#dc2626;border-color:#fecaca;" data-i18n="group_mute">🔇 急停</button>
@@ -2933,6 +2943,7 @@ HTML_TEMPLATE = """
                 chatPage.classList.remove('hidden-page');
                 chatPage.style.display = 'flex';
                 groupPage.classList.remove('active');
+                groupPage.classList.remove('mobile-chat-open');
                 stopGroupPolling();
                 stopGroupListPolling();
             } else {
@@ -3004,6 +3015,9 @@ HTML_TEMPLATE = """
             groupLastMsgId = 0;
             stopGroupPolling();
 
+            // Mobile: switch to chat view
+            document.getElementById('page-group').classList.add('mobile-chat-open');
+
             document.getElementById('group-empty-placeholder').style.display = 'none';
             const activeChat = document.getElementById('group-active-chat');
             activeChat.style.display = 'flex';
@@ -3047,6 +3061,12 @@ HTML_TEMPLATE = """
             } catch (e) {
                 console.error('Failed to open group:', e);
             }
+        }
+
+        function groupBackToList() {
+            document.getElementById('page-group').classList.remove('mobile-chat-open');
+            // Close member panel if open
+            if (groupMemberPanelOpen) toggleGroupMemberPanel();
         }
 
         function renderGroupMessages(messages) {
@@ -3244,9 +3264,46 @@ HTML_TEMPLATE = """
         }
 
         function showCreateGroupModal() {
-            const name = prompt(t('group_name_placeholder'));
-            if (!name || !name.trim()) return;
-            createGroup(name.trim());
+            // 用自定义弹窗替代 prompt()，兼容移动端
+            let overlay = document.getElementById('group-create-overlay');
+            if (!overlay) {
+                overlay = document.createElement('div');
+                overlay.id = 'group-create-overlay';
+                overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.4);z-index:300;display:flex;align-items:center;justify-content:center;';
+                overlay.innerHTML = `
+                    <div style="background:white;border-radius:12px;padding:20px;width:90%;max-width:320px;box-shadow:0 10px 40px rgba(0,0,0,0.2);">
+                        <div style="font-size:14px;font-weight:600;color:#374151;margin-bottom:12px;" data-i18n="group_create_title">${t('group_create_title')}</div>
+                        <input id="group-create-name-input" type="text" placeholder="${t('group_name_placeholder')}" data-i18n-placeholder="group_name_placeholder"
+                            style="width:100%;box-sizing:border-box;padding:8px 12px;border:1px solid #d1d5db;border-radius:8px;font-size:14px;outline:none;" />
+                        <div style="display:flex;gap:8px;margin-top:14px;justify-content:flex-end;">
+                            <button onclick="closeCreateGroupModal()" style="padding:6px 16px;border-radius:8px;border:1px solid #d1d5db;background:white;font-size:13px;cursor:pointer;color:#6b7280;">取消</button>
+                            <button onclick="submitCreateGroup()" style="padding:6px 16px;border-radius:8px;border:none;background:#2563eb;color:white;font-size:13px;font-weight:600;cursor:pointer;">${t('group_create_btn')}</button>
+                        </div>
+                    </div>`;
+                document.body.appendChild(overlay);
+                // Enter to submit
+                document.getElementById('group-create-name-input').addEventListener('keydown', (e) => {
+                    if (e.key === 'Enter') { e.preventDefault(); submitCreateGroup(); }
+                });
+            } else {
+                overlay.style.display = 'flex';
+            }
+            const input = document.getElementById('group-create-name-input');
+            input.value = '';
+            setTimeout(() => input.focus(), 100);
+        }
+
+        function closeCreateGroupModal() {
+            const overlay = document.getElementById('group-create-overlay');
+            if (overlay) overlay.style.display = 'none';
+        }
+
+        function submitCreateGroup() {
+            const input = document.getElementById('group-create-name-input');
+            const name = (input.value || '').trim();
+            if (!name) return;
+            closeCreateGroupModal();
+            createGroup(name);
         }
 
         async function createGroup(name) {
@@ -3279,6 +3336,7 @@ HTML_TEMPLATE = """
                     currentGroupId = null;
                     document.getElementById('group-active-chat').style.display = 'none';
                     document.getElementById('group-empty-placeholder').style.display = 'flex';
+                    document.getElementById('page-group').classList.remove('mobile-chat-open');
                     stopGroupPolling();
                 }
                 loadGroupList();
@@ -4308,4 +4366,4 @@ def proxy_oasis_purge_all_topics():
 
 
 if __name__ == "__main__":
-    app.run(host="127.0.0.1", port=int(os.getenv("PORT_FRONTEND", "51209")), debug=False, threaded=True)
+    app.run(host="0.0.0.0", port=int(os.getenv("PORT_FRONTEND", "51209")), debug=False, threaded=True)
