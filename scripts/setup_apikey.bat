@@ -44,8 +44,16 @@ if "%TTS_MODEL%"=="" set "TTS_MODEL=gemini-2.5-flash-preview-tts"
 set /p TTS_VOICE=请输入 TTS 语音 (默认 charon): 
 if "%TTS_VOICE%"=="" set "TTS_VOICE=charon"
 
+echo 该模型是否支持视觉/图片输入？(y/N，默认 N)
+set /p VISION_INPUT=> 
+if /i "%VISION_INPUT%"=="y" (set "VISION_SUPPORT=true") else (set "VISION_SUPPORT=false")
+
+echo 是否使用 OpenAI 标准 API 模式？(Y/n，默认 Y)
+set /p STANDARD_INPUT=> 
+if /i "%STANDARD_INPUT%"=="n" (set "STANDARD_MODE=false") else (set "STANDARD_MODE=true")
+
 :: 3. 核心写入逻辑：使用双引号包裹以确保 `n 被 PowerShell 正确识别为换行符
-powershell -Command "$p='%ENV_FILE%'; $data=\"LLM_API_KEY=%API_KEY%`nLLM_BASE_URL=%BASE_URL%`nLLM_MODEL=%MODEL_NAME%`nTTS_MODEL=%TTS_MODEL%`nTTS_VOICE=%TTS_VOICE%\"; [System.IO.File]::WriteAllText($p, $data, (New-Object System.Text.UTF8Encoding $false))"
+powershell -Command "$p='%ENV_FILE%'; $data=\"LLM_API_KEY=%API_KEY%`nLLM_BASE_URL=%BASE_URL%`nLLM_MODEL=%MODEL_NAME%`nTTS_MODEL=%TTS_MODEL%`nTTS_VOICE=%TTS_VOICE%`nLLM_VISION_SUPPORT=%VISION_SUPPORT%`nOPENAI_STANDARD_MODE=%STANDARD_MODE%\"; [System.IO.File]::WriteAllText($p, $data, (New-Object System.Text.UTF8Encoding $false))"
 
 echo [OK] API Key 已保存到 config\.env
 exit /b 0

@@ -37,13 +37,13 @@ HTML_TEMPLATE = """
 <html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
-    <title>Xavier AnyControl | AI Agent</title>
+    <title>Teamclaw | AI Agent</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
 
     <!-- PWA / iOS Full-screen support -->
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-    <meta name="apple-mobile-web-app-title" content="AnyControl">
+    <meta name="apple-mobile-web-app-title" content="Teamclaw">
     <meta name="mobile-web-app-capable" content="yes">
     <meta name="theme-color" content="#111827">
     <meta name="format-detection" content="telephone=no">
@@ -507,7 +507,7 @@ HTML_TEMPLATE = """
     <!-- Splash Screen -->
     <div id="app-splash">
         <img class="splash-icon" src="https://img.icons8.com/fluency/180/robot-2.png" alt="">
-        <div class="splash-title">AnyControl</div>
+        <div class="splash-title">Teamclaw</div>
         <div class="splash-sub">Xavier AI Agent</div>
     </div>
 
@@ -519,7 +519,7 @@ HTML_TEMPLATE = """
         <div class="bg-white rounded-2xl shadow-2xl p-6 sm:p-8 w-full max-w-md border">
             <div class="flex items-center justify-center space-x-3 mb-6">
                 <div class="bg-blue-600 p-3 rounded-xl text-white font-bold text-2xl">X</div>
-                <h1 class="text-2xl font-bold text-gray-800" data-i18n="login_title">Xavier AnyControl</h1>
+                <h1 class="text-2xl font-bold text-gray-800" data-i18n="login_title">Teamclaw</h1>
             </div>
             <p class="text-center text-gray-500 text-sm mb-8" data-i18n="login_subtitle">请登录以开始对话</p>
             <div class="space-y-4">
@@ -569,7 +569,7 @@ HTML_TEMPLATE = """
                 <div class="flex items-center space-x-2 sm:space-x-3 mobile-header-top flex-shrink-0">
                     <div class="bg-blue-600 p-1.5 sm:p-2 rounded-lg text-white font-bold text-lg sm:text-xl">X</div>
                     <div>
-                        <h1 class="text-sm sm:text-lg font-bold text-gray-800 leading-tight">AnyControl</h1>
+                        <h1 class="text-sm sm:text-lg font-bold text-gray-800 leading-tight">Teamclaw</h1>
                         <p class="text-[10px] sm:text-xs text-green-500 flex items-center" data-i18n="encrypted">● 已加密</p>
                     </div>
                 </div>
@@ -813,7 +813,7 @@ HTML_TEMPLATE = """
                 close: '关闭',
                 
                 // 登录页
-                login_title: 'Xavier AnyControl',
+                login_title: 'Teamclaw',
                 login_subtitle: '请登录以开始对话',
                 username: '用户名',
                 password: '密码',
@@ -972,7 +972,7 @@ HTML_TEMPLATE = """
                 close: 'Close',
                 
                 // Login
-                login_title: 'Xavier AnyControl',
+                login_title: 'Teamclaw',
                 login_subtitle: 'Please login to start',
                 username: 'Username',
                 password: 'Password',
@@ -1167,7 +1167,7 @@ HTML_TEMPLATE = """
             });
             
             // 更新 title
-            document.title = 'Xavier AnyControl | AI Agent';
+            document.title = 'Teamclaw | AI Agent';
         }
         
         marked.setOptions({
@@ -3534,8 +3534,8 @@ def index():
 def manifest():
     """Serve PWA manifest for iOS/Android Add-to-Home-Screen support."""
     manifest_data = {
-        "name": "Xavier AnyControl",
-        "short_name": "AnyControl",
+        "name": "Teamclaw",
+        "short_name": "Teamclaw",
         "description": "Xavier AI Agent - Intelligent Control Assistant",
         "start_url": "/",
         "scope": "/",
@@ -3570,8 +3570,8 @@ def manifest():
 def service_worker():
     """Serve Service Worker for PWA offline support and caching."""
     sw_code = """
-// Xavier AnyControl Service Worker
-const CACHE_NAME = 'anycontrol-v1';
+// Teamclaw Service Worker
+const CACHE_NAME = 'teamclaw-v1';
 const PRECACHE_URLS = ['/'];
 
 self.addEventListener('install', event => {

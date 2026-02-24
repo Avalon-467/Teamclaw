@@ -595,5 +595,111 @@ async def list_oasis_topics(username: str = "") -> str:
         return f"❌ 查询异常: {str(e)}"
 
 
+# ======================================================================
+# Workflow management
+# ======================================================================
+
+@mcp.tool()
+async def set_oasis_workflow(
+    username: str,
+    name: str,
+    schedule_yaml: str,
+    description: str = "",
+) -> str:
+    """
+    Save a YAML workflow so it can be reused later via post_to_oasis(schedule_file="name.yaml").
+
+    Workflows are stored under data/user_files/{user}/oasis/yaml/.
+    Use list_oasis_workflows to see saved workflows.
+
+    Args:
+        username: (auto-injected) current user identity; do NOT set manually
+        name: Filename for the workflow (e.g. "code_review"). ".yaml" appended if missing.
+        schedule_yaml: The full YAML content to save
+        description: Optional one-line description (saved as comment at top of file)
+
+    Returns:
+        Confirmation with the saved file path
+    """
+    effective_user = username or _FALLBACK_USER
+
+    if not name.endswith((".yaml", ".yml")):
+        name += ".yaml"
+
+    # Validate YAML syntax before saving
+    try:
+        import yaml
+        data = yaml.safe_load(schedule_yaml)
+        if not isinstance(data, dict) or "plan" not in data:
+            return "❌ 无效的 workflow YAML：必须包含 'plan' 键"
+    except Exception as e:
+        return f"❌ YAML 解析错误: {e}"
+
+    yaml_dir = os.path.join(
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+        "data", "user_files", effective_user, "oasis", "yaml",
+    )
+    os.makedirs(yaml_dir, exist_ok=True)
+    filepath = os.path.join(yaml_dir, name)
+
+    content = ""
+    if description:
+        content += f"# {description}\n"
+    content += schedule_yaml
+
+    try:
+        with open(filepath, "w", encoding="utf-8") as f:
+            f.write(content)
+        return (
+            f"✅ Workflow 已保存\n"
+            f"  文件: {name}\n"
+            f"  路径: {filepath}\n\n"
+            f"💡 使用方式: post_to_oasis(schedule_file=\"{name}\", ...)"
+        )
+    except Exception as e:
+        return f"❌ 保存失败: {e}"
+
+
+@mcp.tool()
+async def list_oasis_workflows(username: str = "") -> str:
+    """
+    List all saved YAML workflows for the current user.
+
+    Args:
+        username: (auto-injected) current user identity; do NOT set manually
+
+    Returns:
+        List of saved workflow files with preview
+    """
+    effective_user = username or _FALLBACK_USER
+    yaml_dir = os.path.join(
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+        "data", "user_files", effective_user, "oasis", "yaml",
+    )
+
+    if not os.path.isdir(yaml_dir):
+        return "📭 暂无保存的 workflow"
+
+    files = sorted(
+        f for f in os.listdir(yaml_dir) if f.endswith((".yaml", ".yml"))
+    )
+    if not files:
+        return "📭 暂无保存的 workflow"
+
+    lines = [f"📋 已保存的 OASIS Workflows — 共 {len(files)} 个\n"]
+    for fname in files:
+        fpath = os.path.join(yaml_dir, fname)
+        try:
+            with open(fpath, "r", encoding="utf-8") as f:
+                first_line = f.readline().strip()
+            desc = first_line.lstrip("# ") if first_line.startswith("#") else ""
+            lines.append(f"  • {fname}" + (f"  — {desc}" if desc else ""))
+        except Exception:
+            lines.append(f"  • {fname}")
+
+    lines.append(f"\n💡 使用: post_to_oasis(schedule_file=\"文件名\", ...)")
+    return "\n".join(lines)
+
+
 if __name__ == "__main__":
     mcp.run(transport="stdio")
