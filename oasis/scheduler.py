@@ -4,8 +4,9 @@ OASIS Forum - Discussion Scheduler
 Parses YAML schedule definitions and yields execution steps
 that control the order in which experts speak.
 
-schedule_yaml is required for all discussions. Even for simple
-all-parallel scenarios, a minimal YAML suffices:
+Either schedule_file or schedule_yaml is required. schedule_file
+takes priority if both are provided. Even for simple all-parallel
+scenarios, a minimal YAML suffices:
   version: 1
   repeat: true
   plan:
@@ -22,10 +23,12 @@ Schedule YAML format:
     #   "标题#session_id"     → SessionExpert (普通 agent, 不注入)
     #   任何 session 名 + "#new" → 强制创建全新 session（ID 替换为随机 UUID）
     - expert: "critical#temp#1"
+      instruction: "请重点分析技术风险"    # 可选：给专家的具体指令
 
     # 多个专家同时并行发言
     - parallel:
         - expert: "创意专家"
+          instruction: "从创新角度提出方案"
         - expert: "数据分析师"
 
     # 手动注入一条帖子（不经过 LLM）
@@ -66,6 +69,7 @@ class ScheduleStep:
     """A single step in the discussion schedule."""
     step_type: StepType
     expert_names: list[str] = field(default_factory=list)   # for EXPERT / PARALLEL
+    instructions: dict[str, str] = field(default_factory=dict)  # expert_name → instruction text
     manual_author: str = ""                                  # for MANUAL
     manual_content: str = ""                                 # for MANUAL
     manual_reply_to: Optional[int] = None                    # for MANUAL
@@ -100,16 +104,25 @@ def parse_schedule(yaml_content: str) -> Schedule:
             raise ValueError(f"Step {i}: must be a dict, got {type(item).__name__}")
 
         if "expert" in item:
+            expert_name = str(item["expert"])
+            instr_map = {}
+            if "instruction" in item:
+                instr_map[expert_name] = str(item["instruction"])
             steps.append(ScheduleStep(
                 step_type=StepType.EXPERT,
-                expert_names=[str(item["expert"])],
+                expert_names=[expert_name],
+                instructions=instr_map,
             ))
 
         elif "parallel" in item:
             names = []
+            instr_map = {}
             for sub in item["parallel"]:
                 if isinstance(sub, dict) and "expert" in sub:
-                    names.append(str(sub["expert"]))
+                    ename = str(sub["expert"])
+                    names.append(ename)
+                    if "instruction" in sub:
+                        instr_map[ename] = str(sub["instruction"])
                 elif isinstance(sub, str):
                     names.append(sub)
                 else:
@@ -119,6 +132,7 @@ def parse_schedule(yaml_content: str) -> Schedule:
             steps.append(ScheduleStep(
                 step_type=StepType.PARALLEL,
                 expert_names=names,
+                instructions=instr_map,
             ))
 
         elif "all_experts" in item:

@@ -10,8 +10,9 @@ Two expert backends:
      - "#oasis#" in session_id → oasis-managed, first-round identity injection
      - other session_id → regular agent, no identity injection
 
-Expert pool sourcing (YAML-only, schedule_yaml is required):
+Expert pool sourcing (YAML-only, schedule_file or schedule_yaml required):
   Pool is built entirely from YAML expert names (deduplicated).
+  Priority: schedule_file > schedule_yaml (file takes precedence if both provided).
   Names MUST contain '#' to specify type:
     "tag#temp#N"              → ExpertAgent (tag looked up in presets for name/persona)
     "tag#oasis#<random_id>"  → SessionExpert (oasis, tag→name/persona from presets)
@@ -106,13 +107,14 @@ class DiscussionEngine:
         self._early_stop = early_stop
 
         # ── Step 1: Parse schedule (required) ──
+        # Priority: schedule object > schedule_file > schedule_yaml
         self.schedule: Schedule | None = None
         if schedule:
             self.schedule = schedule
-        elif schedule_yaml:
-            self.schedule = parse_schedule(schedule_yaml)
         elif schedule_file:
             self.schedule = load_schedule_file(schedule_file)
+        elif schedule_yaml:
+            self.schedule = parse_schedule(schedule_yaml)
 
         if not self.schedule:
             raise ValueError(
@@ -327,16 +329,21 @@ class DiscussionEngine:
         elif step.step_type == StepType.EXPERT:
             agents = self._resolve_experts(step.expert_names)
             if agents:
-                print(f"  [OASIS] 🎤 {agents[0].name} speaks")
-                await agents[0].participate(self.forum)
+                instr = step.instructions.get(step.expert_names[0], "")
+                print(f"  [OASIS] 🎤 {agents[0].name} speaks" + (f" (instruction: {instr[:40]}...)" if instr else ""))
+                await agents[0].participate(self.forum, instruction=instr)
 
         elif step.step_type == StepType.PARALLEL:
             agents = self._resolve_experts(step.expert_names)
             if agents:
                 names = ", ".join(a.name for a in agents)
                 print(f"  [OASIS] 🎤 Parallel: {names}")
+                # Match instructions by original YAML name
+                async def _run_with_instr(agent, yaml_name):
+                    instr = step.instructions.get(yaml_name, "")
+                    await agent.participate(self.forum, instruction=instr)
                 await asyncio.gather(
-                    *[agent.participate(self.forum) for agent in agents],
+                    *[_run_with_instr(a, n) for a, n in zip(agents, step.expert_names)],
                     return_exceptions=True,
                 )
 

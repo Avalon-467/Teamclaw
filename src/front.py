@@ -143,6 +143,21 @@ HTML_TEMPLATE = """
         .markdown-body code { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; font-size: 0.9em; }
         .message-user { border-radius: 1.25rem 1.25rem 0.2rem 1.25rem; }
         .message-agent { border-radius: 1.25rem 1.25rem 1.25rem 0.2rem; }
+        /* 流式工具调用指示器 */
+        .stream-tool-indicator {
+            display: inline-flex; align-items: center; gap: 6px;
+            background: #f0f7ff; border: 1px solid #d0e3f7; border-radius: 1rem;
+            padding: 4px 14px; margin: 3px 0; font-size: 0.82rem; color: #3b6fa0;
+            max-width: 85%;
+        }
+        .stream-tool-icon { font-size: 0.9rem; }
+        .stream-tool-name { font-weight: 500; }
+        .stream-tool-running { animation: toolPulse 1s ease-in-out infinite; }
+        .stream-tool-done { color: #16a34a; }
+        @keyframes toolPulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.3; }
+        }
         /* TTS 朗读按钮 */
         .tts-btn {
             display: inline-flex; align-items: center; gap: 4px;
@@ -2397,10 +2412,52 @@ HTML_TEMPLATE = """
 
                 agentDiv = appendMessage('', false);
 
-                // --- 解析 OpenAI SSE 流式响应 ---
+                // --- 解析 OpenAI SSE 流式响应（支持分段渲染） ---
                 const reader = response.body.getReader();
                 const decoder = new TextDecoder();
                 let buffer = '';
+                let allSegmentTexts = [];  // 记录所有段落的文本
+
+                // 辅助函数：封存当前文本气泡，添加朗读按钮
+                function sealCurrentBubble() {
+                    if (fullText && agentDiv) {
+                        agentDiv.innerHTML = marked.parse(fullText);
+                        agentDiv.querySelectorAll('pre code').forEach(b => hljs.highlightElement(b));
+                        const ttsBtn = createTtsButton(() => agentDiv.innerText || agentDiv.textContent || '');
+                        agentDiv.appendChild(ttsBtn);
+                        allSegmentTexts.push(fullText);
+                    }
+                }
+
+                // 辅助函数：创建新的 AI 文本气泡
+                function startNewBubble() {
+                    fullText = '';
+                    agentDiv = appendMessage('', false);
+                }
+
+                // 辅助函数：创建工具调用指示区
+                function createToolIndicator(toolName, type) {
+                    if (type === 'end') {
+                        // 查找最后一个同名且仍在运行的 indicator 并更新
+                        const allRunning = chatBox.querySelectorAll(`.stream-tool-indicator[data-tool-name="${CSS.escape(toolName)}"] .stream-tool-running`);
+                        const last = allRunning.length ? allRunning[allRunning.length - 1] : null;
+                        if (last) {
+                            last.textContent = '✅';
+                            last.classList.remove('stream-tool-running');
+                            last.classList.add('stream-tool-done');
+                        }
+                        return;
+                    }
+                    const w = document.createElement('div');
+                    w.className = 'flex justify-start animate-in fade-in duration-200';
+                    const d = document.createElement('div');
+                    d.className = 'stream-tool-indicator';
+                    d.dataset.toolName = toolName;
+                    d.innerHTML = `<span class="stream-tool-icon">🔧</span> <span class="stream-tool-name">${escapeHtml(toolName)}</span> <span class="stream-tool-status stream-tool-running">…</span>`;
+                    w.appendChild(d);
+                    chatBox.appendChild(w);
+                    chatBox.scrollTop = chatBox.scrollHeight;
+                }
 
                 while (true) {
                     const { done, value } = await reader.read();
@@ -2418,7 +2475,29 @@ HTML_TEMPLATE = """
                         try {
                             const chunk = JSON.parse(data);
                             const delta = chunk.choices && chunk.choices[0] && chunk.choices[0].delta;
-                            if (delta && delta.content) {
+                            if (!delta) continue;
+
+                            // --- 处理结构化 meta 事件 ---
+                            if (delta.meta) {
+                                const m = delta.meta;
+                                if (m.type === 'tools_start') {
+                                    // LLM 回复结束，即将调工具 → 封存当前气泡
+                                    sealCurrentBubble();
+                                } else if (m.type === 'tool_start') {
+                                    createToolIndicator(m.name, 'start');
+                                } else if (m.type === 'tool_end') {
+                                    createToolIndicator(m.name, 'end');
+                                } else if (m.type === 'tools_end') {
+                                    // 所有工具执行完毕（可选：加分隔符）
+                                } else if (m.type === 'ai_start') {
+                                    // 新一轮 LLM 开始 → 创建新文本气泡
+                                    startNewBubble();
+                                }
+                                continue;
+                            }
+
+                            // --- 处理文本内容 ---
+                            if (delta.content) {
                                 fullText += delta.content;
                                 agentDiv.innerHTML = marked.parse(fullText);
                                 agentDiv.querySelectorAll('pre code').forEach((block) => {
@@ -2435,16 +2514,16 @@ HTML_TEMPLATE = """
                     }
                 }
 
+                // 流式结束：封存最后一个气泡
                 if (fullText) {
                     agentDiv.innerHTML = marked.parse(fullText);
                     agentDiv.querySelectorAll('pre code').forEach((block) => hljs.highlightElement(block));
-                    // 流式结束后添加朗读按钮
                     const ttsBtn = createTtsButton(() => agentDiv.innerText || agentDiv.textContent || '');
                     agentDiv.appendChild(ttsBtn);
                     chatBox.scrollTop = chatBox.scrollHeight;
                 }
 
-                if (!fullText) {
+                if (!fullText && allSegmentTexts.length === 0) {
                     agentDiv.innerHTML = `<span class="text-gray-400">${t('no_response')}</span>`;
                 }
 

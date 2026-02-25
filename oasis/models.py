@@ -18,7 +18,8 @@ class DiscussionStatus(str, Enum):
 class CreateTopicRequest(BaseModel):
     """Request body for creating a new discussion topic.
 
-    Expert pool is built entirely from schedule_yaml (required).
+    Expert pool is built from schedule_yaml or schedule_file (at least one required).
+    schedule_file takes priority if both provided.
       "tag#temp#N" → ExpertAgent; "tag#oasis#id" → SessionExpert (oasis);
       "title#sid" → SessionExpert (regular).  Tag used to lookup name/persona.
 

@@ -328,7 +328,7 @@ async def list_oasis_sessions(username: str = "") -> str:
 @mcp.tool()
 async def post_to_oasis(
     question: str,
-    schedule_yaml: str,
+    schedule_yaml: str = "",
     username: str = "",
     max_rounds: int = 5,
     schedule_file: str = "",
@@ -338,7 +338,10 @@ async def post_to_oasis(
     """
     Submit a question or work task to the OASIS forum for multi-expert discussion.
 
-    Expert pool is built entirely from schedule_yaml expert names (required).
+    Expert pool is built entirely from schedule YAML expert names.
+    Either schedule_file or schedule_yaml must be provided (at least one).
+    If both are provided, schedule_file takes priority (file content is used, schedule_yaml is ignored).
+    If the user already has a saved YAML workflow file, just use schedule_file — no need to write schedule_yaml again.
 
     Expert name formats (must contain '#', engine parses by tag):
       "creative#temp#1"       → ExpertAgent (tag→name/persona from presets, direct LLM)
@@ -358,26 +361,31 @@ async def post_to_oasis(
 
     Args:
         question: The question/topic to discuss or work task to assign
-        schedule_yaml: YAML defining expert pool AND speaking order (required).
+        schedule_yaml: YAML defining expert pool AND speaking order.
+            Not needed if schedule_file is provided. If both given, schedule_file wins.
 
             Example:
               version: 1
               repeat: true
               plan:
                 - expert: "creative#temp#1"
+                  instruction: "请重点分析创新方向"
                 - expert: "creative#oasis#ab12cd34"
                 - expert: "creative#oasis#new#new"
                 - parallel:
-                    - "critical#temp#2"
+                    - expert: "critical#temp#2"
+                      instruction: "从风险角度分析"
                     - "data#temp#3"
                 - all_experts: true
                 - manual:
                     author: "主持人"
                     content: "请聚焦可行性"
+
+            instruction 字段（可选）：给专家的专项指令，专家会在发言时重点关注该指令。
         username: (auto-injected) current user identity; do NOT set manually
         max_rounds: Maximum number of discussion rounds (1-20, default 5)
-        schedule_file: Filename or path to a saved YAML workflow. Short names (e.g. "review.yaml")
-            are resolved under data/user_files/{user}/oasis/yaml/. Prefer schedule_yaml inline.
+        schedule_file: Filename or path to a saved YAML workflow file. Short names (e.g. "review.yaml")
+            are resolved under data/user_files/{user}/oasis/yaml/. Takes priority over schedule_yaml.
         detach: If True, return immediately with topic_id. Use check_oasis_discussion later.
         notify_session: (auto-injected) Session ID for completion notification.
 
@@ -385,6 +393,10 @@ async def post_to_oasis(
         The final conclusion, or (if detach=True) the topic_id for later retrieval
     """
     effective_user = username or _FALLBACK_USER
+
+    # Validate: at least one of schedule_yaml / schedule_file must be provided
+    if not schedule_yaml and not schedule_file:
+        return "❌ 必须提供 schedule_yaml 或 schedule_file（至少一个）。如果已有保存的工作流文件，用 schedule_file 指定文件名即可。"
 
     try:
         async with httpx.AsyncClient(timeout=httpx.Timeout(timeout=300.0)) as client:
@@ -397,8 +409,8 @@ async def post_to_oasis(
                 port = os.getenv("PORT_AGENT", "51200")
                 body["callback_url"] = f"http://127.0.0.1:{port}/system_trigger"
                 body["callback_session_id"] = notify_session or "default"
-            if schedule_yaml:
-                body["schedule_yaml"] = schedule_yaml
+
+            # schedule_file takes priority over schedule_yaml
             if schedule_file:
                 if not os.path.isabs(schedule_file):
                     yaml_dir = os.path.join(
@@ -407,6 +419,9 @@ async def post_to_oasis(
                     )
                     schedule_file = os.path.join(yaml_dir, schedule_file)
                 body["schedule_file"] = schedule_file
+                # Do NOT send schedule_yaml when file is provided
+            elif schedule_yaml:
+                body["schedule_yaml"] = schedule_yaml
 
             resp = await client.post(
                 f"{OASIS_BASE_URL}/topics",
