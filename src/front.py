@@ -4720,10 +4720,13 @@ HTML_TEMPLATE = """
 
     async function orchDoGenerateAgentYaml() {
         const data = orchGetLayoutData();
+        // Attach the user-selected target session_id
+        data.target_session_id = orchTargetSessionId || null;
+
         const statusEl = document.getElementById('orch-agent-status');
         const promptEl = document.getElementById('orch-prompt-content');
         const yamlEl = document.getElementById('orch-agent-yaml');
-        statusEl.textContent = '🔄 正在与 Agent 通信...';
+        statusEl.textContent = '🔄 正在与 Agent 通信 (Session: #' + (orchTargetSessionId||'').slice(-6) + ')...';
         statusEl.style.cssText = 'color:#2563eb;background:#eff6ff;border-color:#bfdbfe;';
         promptEl.textContent = '⏳ 生成中...';
         yamlEl.textContent = '⏳ 等待 Agent 返回...';
@@ -5793,7 +5796,7 @@ def proxy_visual_agent_generate_yaml():
                 {"role": "user", "content": prompt},
             ],
             "stream": False,
-            "session_id": "visual_orchestrator",
+            "session_id": data.get("target_session_id") or "visual_orchestrator",
             "temperature": 0.3,
         }
         resp = requests.post(LOCAL_OPENAI_COMPLETIONS_URL, json=payload, headers=headers, timeout=60)
