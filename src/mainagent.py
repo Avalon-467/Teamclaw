@@ -248,8 +248,16 @@ def _build_human_message(text: str, images: list[str] | None = None, files: list
     """
     vision_supported = _is_vision_model()
 
-    # 收集需要以 file content part 传入的 PDF（视觉模式下）
-    pdf_file_parts: list[dict] = []
+    # 收集需要以 file content part 直传的文件（PDF 视觉模式 + 媒体文件）
+    direct_file_parts: list[dict] = []
+
+    # MIME 类型映射（媒体文件）
+    _MEDIA_MIME = {
+        ".avi": "video/x-msvideo", ".mp4": "video/mp4", ".mkv": "video/x-matroska",
+        ".mov": "video/quicktime", ".webm": "video/webm",
+        ".mp3": "audio/mpeg", ".wav": "audio/wav", ".flac": "audio/flac",
+        ".ogg": "audio/ogg", ".aac": "audio/aac",
+    }
 
     # 拼接文件内容到消息末尾
     file_text = ""
@@ -266,9 +274,8 @@ def _build_human_message(text: str, images: list[str] | None = None, files: list
                     pdf_text = _extract_pdf_text(fcontent)
                     if len(pdf_text) > 50000:
                         pdf_text = pdf_text[:50000] + f"\n\n... (文件过长，已截断)"
-                    # 确保 data URI 格式正确
                     pdf_data_uri = fcontent if fcontent.startswith("data:") else f"data:application/pdf;base64,{fcontent}"
-                    pdf_file_parts.append({
+                    direct_file_parts.append({
                         "type": "file",
                         "file": {
                             "filename": fname,
@@ -277,11 +284,23 @@ def _build_human_message(text: str, images: list[str] | None = None, files: list
                     })
                     file_parts.append(f"📄 **附件: {fname}** (已上传原始 PDF 供分析，同时附上提取的文本)\n```\n{pdf_text}\n```")
                 else:
-                    # 非视觉模式：仅文本
                     pdf_text = _extract_pdf_text(fcontent)
                     if len(pdf_text) > 50000:
                         pdf_text = pdf_text[:50000] + f"\n\n... (文件过长，已截断)"
                     file_parts.append(f"📄 **附件: {fname}**\n```\n{pdf_text}\n```")
+            elif ftype == "media":
+                # 媒体文件（视频/音频）：以 file content part 直传，不展开为文本
+                ext = os.path.splitext(fname)[1].lower()
+                mime = _MEDIA_MIME.get(ext, "application/octet-stream")
+                data_uri = fcontent if fcontent.startswith("data:") else f"data:{mime};base64,{fcontent}"
+                direct_file_parts.append({
+                    "type": "file",
+                    "file": {
+                        "filename": fname,
+                        "file_data": data_uri,
+                    },
+                })
+                file_parts.append(f"🎬 **附件: {fname}** (已上传原始媒体文件供分析)")
             else:
                 # 普通文本文件
                 if len(fcontent) > 50000:
@@ -296,8 +315,8 @@ def _build_human_message(text: str, images: list[str] | None = None, files: list
     # 用户上传的图片
     all_images = list(images or [])
 
-    # 判断是否有多模态内容（图片、PDF file parts、音频）
-    has_multimodal = bool(all_images) or bool(pdf_file_parts) or bool(audios)
+    # 判断是否有多模态内容（图片、直传文件、音频）
+    has_multimodal = bool(all_images) or bool(direct_file_parts) or bool(audios)
 
     if not has_multimodal:
         return HumanMessage(content=combined_text or "(空消息)")
@@ -311,8 +330,8 @@ def _build_human_message(text: str, images: list[str] | None = None, files: list
             hints.append(f"你发送了{len(audios)}条语音，但当前模型不支持音频输入，语音已忽略。")
             audios = None
         combined_text += f"\n\n[系统提示：{'；'.join(hints)}请切换到支持多模态的模型（如 gemini-2.0-flash、gpt-4o）后重试。]"
-        # 如果没有 PDF file part，直接返回纯文本
-        if not pdf_file_parts:
+        # 如果没有直传文件 part，直接返回纯文本
+        if not direct_file_parts:
             return HumanMessage(content=combined_text)
 
     # 多模态：构造 content list
@@ -330,8 +349,8 @@ def _build_human_message(text: str, images: list[str] | None = None, files: list
             "image_url": {"url": img_data},
         })
 
-    # PDF 文件：以 file content part 直传
-    content_parts.extend(pdf_file_parts)
+    # 直传文件（PDF + 媒体文件）：以 file content part 传入
+    content_parts.extend(direct_file_parts)
 
     # 音频：根据模式自动选择格式
     # 标准模式 -> type: "input_audio"，非标准模式 -> type: "file"
@@ -789,10 +808,12 @@ async def session_status(req: SessionStatusRequest):
     has_new = agent.has_pending_system_messages(thread_id)
     busy = agent.is_thread_busy(thread_id)
     pending_count = agent.consume_pending_system_messages(thread_id) if has_new else 0
+    busy_source = agent.get_thread_busy_source(thread_id) if busy else ""
     return {
         "has_new_messages": has_new,
         "pending_count": pending_count,
         "busy": busy,
+        "busy_source": busy_source,
     }
 
 
@@ -884,13 +905,23 @@ def _openai_msg_to_human_message(msg: ChatMessage) -> HumanMessage:
         })
 
     # 提取文件列表
+    # 媒体文件扩展名：以 file content part 直传，不当文本展开
+    _MEDIA_EXTS = {".avi", ".mp4", ".mkv", ".mov", ".webm", ".mp3", ".wav", ".flac", ".ogg", ".aac"}
     files = []
     for fp in file_parts:
         fdata = fp.get("file", {})
+        fname = fdata.get("filename", "file")
+        ext = os.path.splitext(fname)[1].lower()
+        if fname.endswith(".pdf"):
+            ftype = "pdf"
+        elif ext in _MEDIA_EXTS:
+            ftype = "media"
+        else:
+            ftype = "text"
         files.append({
-            "name": fdata.get("filename", "file"),
+            "name": fname,
             "content": fdata.get("file_data", ""),
-            "type": "pdf" if fdata.get("filename", "").endswith(".pdf") else "text",
+            "type": ftype,
         })
 
     return _build_human_message(combined_text, images or None, files or None, audios or None)
