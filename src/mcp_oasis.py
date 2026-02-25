@@ -13,9 +13,13 @@ Exposes tools for the user's Agent to interact with the OASIS discussion forum:
 Runs as a stdio MCP server, just like the other mcp_*.py tools.
 """
 
+import json
 import os
+import re
+
 import httpx
 import aiosqlite
+import yaml as _yaml
 from mcp.server.fastmcp import FastMCP
 from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer
 
@@ -616,10 +620,11 @@ async def list_oasis_topics(username: str = "") -> str:
 
 @mcp.tool()
 async def set_oasis_workflow(
-    username: str,
-    name: str,
-    schedule_yaml: str,
+    username: str = "",
+    name: str = "",
+    schedule_yaml: str = "",
     description: str = "",
+    save_layout: bool = True,
 ) -> str:
     """
     Save a YAML workflow so it can be reused later via post_to_oasis(schedule_file="name.yaml").
@@ -627,11 +632,14 @@ async def set_oasis_workflow(
     Workflows are stored under data/user_files/{user}/oasis/yaml/.
     Use list_oasis_workflows to see saved workflows.
 
+    By default, also generates and saves a visual layout for the orchestrator UI.
+
     Args:
         username: (auto-injected) current user identity; do NOT set manually
         name: Filename for the workflow (e.g. "code_review"). ".yaml" appended if missing.
         schedule_yaml: The full YAML content to save
         description: Optional one-line description (saved as comment at top of file)
+        save_layout: Whether to also generate and save a visual layout (default True)
 
     Returns:
         Confirmation with the saved file path
@@ -643,8 +651,7 @@ async def set_oasis_workflow(
 
     # Validate YAML syntax before saving
     try:
-        import yaml
-        data = yaml.safe_load(schedule_yaml)
+        data = _yaml.safe_load(schedule_yaml)
         if not isinstance(data, dict) or "plan" not in data:
             return "❌ 无效的 workflow YAML：必须包含 'plan' 键"
     except Exception as e:
@@ -665,14 +672,28 @@ async def set_oasis_workflow(
     try:
         with open(filepath, "w", encoding="utf-8") as f:
             f.write(content)
-        return (
-            f"✅ Workflow 已保存\n"
-            f"  文件: {name}\n"
-            f"  路径: {filepath}\n\n"
-            f"💡 使用方式: post_to_oasis(schedule_file=\"{name}\", ...)"
-        )
     except Exception as e:
         return f"❌ 保存失败: {e}"
+
+    result_lines = [
+        f"✅ Workflow 已保存",
+        f"  文件: {name}",
+        f"  路径: {filepath}",
+    ]
+
+    # Auto-generate layout
+    if save_layout:
+        layout_name = name.replace(".yaml", "").replace(".yml", "")
+        try:
+            layout = _yaml_to_layout_data(schedule_yaml)
+            layout_path = _save_layout(layout, layout_name, effective_user)
+            n_nodes = len(layout["nodes"])
+            result_lines.append(f"  📐 Layout: {os.path.basename(layout_path)} ({n_nodes}个节点)")
+        except Exception as e:
+            result_lines.append(f"  ⚠️ Layout 生成失败: {e}")
+
+    result_lines.append(f"\n💡 使用方式: post_to_oasis(schedule_file=\"{name}\", ...)")
+    return "\n".join(result_lines)
 
 
 @mcp.tool()
@@ -714,6 +735,358 @@ async def list_oasis_workflows(username: str = "") -> str:
 
     lines.append(f"\n💡 使用: post_to_oasis(schedule_file=\"文件名\", ...)")
     return "\n".join(lines)
+
+
+# ======================================================================
+# YAML → Layout conversion helpers
+# ======================================================================
+
+# Tag → display info mapping (same as visual/main.py)
+_TAG_EMOJI = {
+    "creative": "🎨", "critical": "🔍", "data": "📊", "synthesis": "🎯",
+    "economist": "📈", "lawyer": "⚖️", "cost_controller": "💰",
+    "revenue_planner": "📊", "entrepreneur": "🚀", "common_person": "🧑",
+    "manual": "📝", "custom": "⭐",
+}
+_TAG_NAMES: dict[str, str] = {}
+
+# Try to load names from preset experts JSON
+_EXPERTS_JSON = os.path.join(
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+    "data", "prompts", "oasis_experts.json",
+)
+try:
+    with open(_EXPERTS_JSON, "r", encoding="utf-8") as _ef:
+        for _exp in json.load(_ef):
+            _TAG_NAMES[_exp["tag"]] = _exp["name"]
+except Exception:
+    pass
+
+
+def _parse_expert_name(raw: str) -> dict:
+    """Parse a YAML expert name string into a layout node dict.
+
+    Formats:
+      tag#temp#N         → expert, instance=N
+      tag#oasis#xxx      → expert (bot session)
+      Title#session_id   → session_agent
+      Title#sid#N         → session_agent, instance=N
+    """
+    parts = raw.split("#")
+    tag = parts[0]
+
+    if len(parts) >= 3 and parts[1] == "temp":
+        inst = int(parts[2]) if parts[2].isdigit() else 1
+        return {
+            "type": "expert",
+            "tag": tag,
+            "name": _TAG_NAMES.get(tag, tag),
+            "emoji": _TAG_EMOJI.get(tag, "⭐"),
+            "temperature": 0.5,
+            "instance": inst,
+            "session_id": "",
+        }
+
+    if len(parts) >= 3 and parts[1] == "oasis":
+        return {
+            "type": "expert",
+            "tag": tag,
+            "name": _TAG_NAMES.get(tag, tag),
+            "emoji": _TAG_EMOJI.get(tag, "⭐"),
+            "temperature": 0.5,
+            "instance": 1,
+            "session_id": "",
+        }
+
+    # session_agent: Title#session_id or Title#session_id#N
+    sid = parts[1] if len(parts) >= 2 else ""
+    inst = int(parts[2]) if len(parts) >= 3 and parts[2].isdigit() else 1
+    return {
+        "type": "session_agent",
+        "tag": "session",
+        "name": tag,
+        "emoji": "🤖",
+        "temperature": 0.7,
+        "instance": inst,
+        "session_id": sid,
+    }
+
+
+def _yaml_to_layout_data(yaml_str: str) -> dict:
+    """Convert OASIS YAML schedule string to visual layout JSON.
+
+    Pure deterministic transformation — no LLM needed.
+    Nodes are auto-positioned left-to-right (sequential) / top-to-bottom (parallel).
+    """
+    data = _yaml.safe_load(yaml_str)
+    if not isinstance(data, dict) or "plan" not in data:
+        raise ValueError("YAML must contain 'plan' key")
+
+    plan = data.get("plan", [])
+    repeat = data.get("repeat", True)
+
+    nodes: list[dict] = []
+    edges: list[dict] = []
+    groups: list[dict] = []
+
+    nid = 1
+    eid = 1
+    gid = 1
+
+    # Track positions for auto-layout
+    cursor_x = 60
+    step_gap_x = 200
+    parallel_gap_y = 80
+    base_y = 120
+    prev_node_id: str | None = None  # for sequential edge chaining
+
+    for step in plan:
+        if not isinstance(step, dict):
+            continue
+
+        # --- expert step ---
+        if "expert" in step:
+            raw = step["expert"]
+            info = _parse_expert_name(raw)
+            node_id = f"on{nid}"; nid += 1
+            node = {
+                "id": node_id,
+                "x": cursor_x,
+                "y": base_y,
+                **info,
+                "author": "主持人",
+                "content": step.get("instruction", ""),
+                "source": "",
+            }
+            nodes.append(node)
+            if prev_node_id:
+                edges.append({"id": f"oe{eid}", "source": prev_node_id, "target": node_id})
+                eid += 1
+            prev_node_id = node_id
+            cursor_x += step_gap_x
+
+        # --- parallel step ---
+        elif "parallel" in step:
+            members = step["parallel"]
+            if not isinstance(members, list):
+                continue
+            group_node_ids = []
+            group_x = cursor_x
+            y_offset = base_y - ((len(members) - 1) * parallel_gap_y) // 2
+
+            for item in members:
+                if isinstance(item, str):
+                    raw = item
+                    instruction = ""
+                elif isinstance(item, dict) and "expert" in item:
+                    raw = item["expert"]
+                    instruction = item.get("instruction", "")
+                else:
+                    continue
+
+                info = _parse_expert_name(raw)
+                node_id = f"on{nid}"; nid += 1
+                node = {
+                    "id": node_id,
+                    "x": group_x,
+                    "y": y_offset,
+                    **info,
+                    "author": "主持人",
+                    "content": instruction,
+                    "source": "",
+                }
+                nodes.append(node)
+                group_node_ids.append(node_id)
+                y_offset += parallel_gap_y
+
+            # Create group container
+            if group_node_ids:
+                g_nodes = [n for n in nodes if n["id"] in group_node_ids]
+                min_x = min(n["x"] for n in g_nodes) - 30
+                min_y = min(n["y"] for n in g_nodes) - 30
+                max_x = max(n["x"] for n in g_nodes) + 160
+                max_y = max(n["y"] for n in g_nodes) + 60
+                groups.append({
+                    "id": f"og{gid}",
+                    "name": "🔀 并行",
+                    "type": "parallel",
+                    "x": min_x,
+                    "y": min_y,
+                    "w": max_x - min_x,
+                    "h": max_y - min_y,
+                    "nodeIds": group_node_ids,
+                })
+                gid += 1
+
+                # Edge from previous to first member, last member becomes prev
+                if prev_node_id:
+                    edges.append({"id": f"oe{eid}", "source": prev_node_id, "target": group_node_ids[0]})
+                    eid += 1
+                prev_node_id = group_node_ids[-1]
+
+            cursor_x += step_gap_x
+
+        # --- all_experts step ---
+        elif "all_experts" in step:
+            node_id = f"on{nid}"; nid += 1
+            node = {
+                "id": node_id,
+                "x": cursor_x,
+                "y": base_y,
+                "type": "expert",
+                "tag": "all",
+                "name": "全员讨论",
+                "emoji": "👥",
+                "temperature": 0.5,
+                "instance": 1,
+                "session_id": "",
+                "author": "主持人",
+                "content": "",
+                "source": "",
+            }
+            nodes.append(node)
+            # Wrap in all-type group
+            groups.append({
+                "id": f"og{gid}",
+                "name": "👥 全员",
+                "type": "all",
+                "x": cursor_x - 20,
+                "y": base_y - 20,
+                "w": 180,
+                "h": 80,
+                "nodeIds": [node_id],
+            })
+            gid += 1
+            if prev_node_id:
+                edges.append({"id": f"oe{eid}", "source": prev_node_id, "target": node_id})
+                eid += 1
+            prev_node_id = node_id
+            cursor_x += step_gap_x
+
+        # --- manual step ---
+        elif "manual" in step:
+            manual = step["manual"]
+            node_id = f"on{nid}"; nid += 1
+            node = {
+                "id": node_id,
+                "x": cursor_x,
+                "y": base_y,
+                "type": "manual",
+                "tag": "manual",
+                "name": "手动注入",
+                "emoji": "📝",
+                "temperature": 0,
+                "instance": 1,
+                "session_id": "",
+                "author": manual.get("author", "主持人") if isinstance(manual, dict) else "主持人",
+                "content": manual.get("content", "") if isinstance(manual, dict) else "",
+                "source": "",
+            }
+            nodes.append(node)
+            if prev_node_id:
+                edges.append({"id": f"oe{eid}", "source": prev_node_id, "target": node_id})
+                eid += 1
+            prev_node_id = node_id
+            cursor_x += step_gap_x
+
+    layout = {
+        "nodes": nodes,
+        "edges": edges,
+        "groups": groups,
+        "settings": {
+            "repeat": repeat,
+            "max_rounds": 5,
+            "use_bot_session": False,
+            "cluster_threshold": 150,
+        },
+    }
+    return layout
+
+
+def _save_layout(layout: dict, name: str, user: str) -> str:
+    """Save layout JSON to data/visual_layouts/{user}/{name}.json. Returns file path."""
+    layout_dir = os.path.join(
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+        "data", "visual_layouts", user,
+    )
+    os.makedirs(layout_dir, exist_ok=True)
+    safe_name = "".join(c for c in name if c.isalnum() or c in "-_ ").strip() or "untitled"
+    filepath = os.path.join(layout_dir, f"{safe_name}.json")
+    layout["name"] = safe_name
+    with open(filepath, "w", encoding="utf-8") as f:
+        json.dump(layout, f, ensure_ascii=False, indent=2)
+    return filepath
+
+
+@mcp.tool()
+async def yaml_to_layout(
+    username: str = "",
+    yaml_source: str = "",
+    layout_name: str = "",
+) -> str:
+    """
+    Convert an OASIS YAML schedule to a visual layout and save it.
+
+    The layout can be loaded in the visual orchestrator UI (编排器) for viewing/editing.
+    Accepts either a YAML filename (from saved workflows) or raw YAML content.
+
+    Args:
+        username: (auto-injected) current user identity; do NOT set manually
+        yaml_source: Either a saved workflow filename (e.g. "review.yaml") or raw YAML content
+        layout_name: Layout save name. If empty, auto-derived from yaml_source.
+
+    Returns:
+        Confirmation with saved layout path and node summary
+    """
+    effective_user = username or _FALLBACK_USER
+
+    # Determine if yaml_source is a filename or raw YAML
+    yaml_content = ""
+    source_name = ""
+
+    if "\n" not in yaml_source and yaml_source.strip().endswith((".yaml", ".yml")):
+        # Treat as filename
+        yaml_dir = os.path.join(
+            os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+            "data", "user_files", effective_user, "oasis", "yaml",
+        )
+        fpath = os.path.join(yaml_dir, yaml_source.strip())
+        if not os.path.isfile(fpath):
+            return f"❌ 找不到 YAML 文件: {yaml_source}"
+        with open(fpath, "r", encoding="utf-8") as f:
+            yaml_content = f.read()
+        source_name = yaml_source.replace(".yaml", "").replace(".yml", "")
+    else:
+        yaml_content = yaml_source
+        source_name = "converted"
+
+    try:
+        layout = _yaml_to_layout_data(yaml_content)
+    except Exception as e:
+        return f"❌ YAML 转换失败: {e}"
+
+    save_name = layout_name or source_name
+    try:
+        filepath = _save_layout(layout, save_name, effective_user)
+    except Exception as e:
+        return f"❌ Layout 保存失败: {e}"
+
+    n_nodes = len(layout["nodes"])
+    n_edges = len(layout["edges"])
+    n_groups = len(layout["groups"])
+    node_summary = ", ".join(
+        f"{n['emoji']}{n['name']}#{n['instance']}" for n in layout["nodes"][:8]
+    )
+    if len(layout["nodes"]) > 8:
+        node_summary += f" ...共{n_nodes}个"
+
+    return (
+        f"✅ Layout 已生成并保存\n"
+        f"  文件: {os.path.basename(filepath)}\n"
+        f"  节点: {n_nodes} | 连线: {n_edges} | 分组: {n_groups}\n"
+        f"  专家: {node_summary}\n\n"
+        f"💡 在编排器中点击「加载布局」即可查看和编辑此 layout。"
+    )
 
 
 if __name__ == "__main__":

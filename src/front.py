@@ -492,8 +492,41 @@ HTML_TEMPLATE = """
 
         .orch-canvas {
             flex: 1; position: relative; overflow: hidden;
+            background-color: #fafbfc;
+        }
+        .orch-canvas-inner {
+            position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+            transform-origin: 0 0;
             background: linear-gradient(#f1f5f9 1px, transparent 1px), linear-gradient(90deg, #f1f5f9 1px, transparent 1px);
-            background-size: 24px 24px; background-color: #fafbfc;
+            background-size: 24px 24px;
+        }
+        .orch-nav-controls {
+            position: absolute; bottom: 12px; right: 12px; z-index: 100;
+            display: flex; flex-direction: column; align-items: center; gap: 2px;
+            background: rgba(255,255,255,0.95); border-radius: 10px; padding: 4px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.13); font-size: 11px; color: #374151;
+        }
+        .orch-nav-controls .nav-row {
+            display: flex; align-items: center; justify-content: center; gap: 2px;
+        }
+        .orch-nav-controls button {
+            width: 26px; height: 26px; border: 1px solid #e5e7eb; border-radius: 6px;
+            background: white; cursor: pointer; font-size: 13px; line-height: 1;
+            display: flex; align-items: center; justify-content: center; color: #4b5563;
+            transition: background 0.12s, border-color 0.12s;
+        }
+        .orch-nav-controls button:hover { background: #f3f4f6; border-color: #d1d5db; }
+        .orch-nav-controls button:active { background: #e5e7eb; }
+        .orch-nav-controls button.nav-center {
+            width: 28px; height: 28px; font-size: 11px; font-weight: 600; color: #6b7280;
+        }
+        .orch-nav-controls .nav-zoom-row {
+            display: flex; align-items: center; gap: 2px; margin-top: 2px;
+            border-top: 1px solid #f0f0f0; padding-top: 4px;
+        }
+        .orch-nav-controls .nav-zoom-row button { width: 24px; height: 22px; font-size: 14px; }
+        .orch-nav-controls .zoom-label {
+            min-width: 34px; text-align: center; font-size: 10px; color: #9ca3af; user-select: none;
         }
 
         .orch-node {
@@ -1068,13 +1101,33 @@ HTML_TEMPLATE = """
                         <button onclick="orchClearCanvas()" class="orch-btn orch-btn-danger" title="清空画布">🗑️ 清空</button>
                     </div>
                     <div class="orch-canvas" id="orch-canvas-area">
-                        <svg id="orch-edge-svg" style="width:100%;height:100%;position:absolute;top:0;left:0;z-index:5;pointer-events:none;">
-                            <defs><marker id="orch-arrowhead" markerWidth="10" markerHeight="7" refX="10" refY="3.5" orient="auto"><polygon points="0 0, 10 3.5, 0 7" fill="#2563eb" /></marker></defs>
-                        </svg>
-                        <div id="orch-canvas-hint" style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);text-align:center;color:#9ca3af;pointer-events:none;z-index:1;">
-                            <div style="font-size:40px;margin-bottom:8px;">🎯</div>
-                            <div style="font-size:14px;font-weight:500;color:#6b7280;">拖入专家开始编排</div>
-                            <div style="font-size:11px;margin-top:6px;color:#9ca3af;">连线 = 工作流 | 分组 = 并行 | AI编排 = 自动生成</div>
+                        <div class="orch-canvas-inner" id="orch-canvas-inner">
+                            <svg id="orch-edge-svg" style="width:10000px;height:10000px;position:absolute;top:0;left:0;z-index:5;pointer-events:none;">
+                                <defs><marker id="orch-arrowhead" markerWidth="10" markerHeight="7" refX="10" refY="3.5" orient="auto"><polygon points="0 0, 10 3.5, 0 7" fill="#2563eb" /></marker></defs>
+                            </svg>
+                            <div id="orch-canvas-hint" style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);text-align:center;color:#9ca3af;pointer-events:none;z-index:1;">
+                                <div style="font-size:40px;margin-bottom:8px;">🎯</div>
+                                <div style="font-size:14px;font-weight:500;color:#6b7280;">拖入专家开始编排</div>
+                                <div style="font-size:11px;margin-top:6px;color:#9ca3af;">滚轮缩放 | 空格+拖动平移 | 拖入专家开始编排</div>
+                            </div>
+                        </div>
+                        <div class="orch-nav-controls">
+                            <div class="nav-row">
+                                <button onclick="orchPanBy(0,-60)" title="上移">▲</button>
+                            </div>
+                            <div class="nav-row">
+                                <button onclick="orchPanBy(-60,0)" title="左移">◀</button>
+                                <button class="nav-center" onclick="orchResetView()" title="重置视图">⌂</button>
+                                <button onclick="orchPanBy(60,0)" title="右移">▶</button>
+                            </div>
+                            <div class="nav-row">
+                                <button onclick="orchPanBy(0,60)" title="下移">▼</button>
+                            </div>
+                            <div class="nav-zoom-row">
+                                <button onclick="orchZoom(-0.1)" title="缩小">−</button>
+                                <span id="orch-zoom-label" class="zoom-label">100%</span>
+                                <button onclick="orchZoom(0.1)" title="放大">+</button>
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -4234,7 +4287,41 @@ HTML_TEMPLATE = """
         selecting: null,
         contextMenu: null,
         sessionStatuses: {},
+        // Zoom & pan state
+        zoom: 1,
+        panX: 0,
+        panY: 0,
+        panning: false,
+        spaceDown: false,
     };
+
+    // ── Zoom / Pan helpers ──
+    function orchApplyTransform() {
+        const inner = document.getElementById('orch-canvas-inner');
+        if (inner) inner.style.transform = `translate(${orch.panX}px, ${orch.panY}px) scale(${orch.zoom})`;
+        document.getElementById('orch-zoom-label').textContent = Math.round(orch.zoom * 100) + '%';
+    }
+    function orchZoom(delta) {
+        orch.zoom = Math.min(3, Math.max(0.15, orch.zoom + delta));
+        orchApplyTransform();
+    }
+    function orchPanBy(dx, dy) {
+        orch.panX += dx; orch.panY += dy;
+        orchApplyTransform();
+    }
+    function orchResetView() {
+        orch.zoom = 1; orch.panX = 0; orch.panY = 0;
+        orchApplyTransform();
+    }
+    /** Convert page-level clientX/Y to canvas-inner coordinates (accounting for zoom+pan) */
+    function orchClientToCanvas(clientX, clientY) {
+        const area = document.getElementById('orch-canvas-area');
+        const rect = area.getBoundingClientRect();
+        return {
+            x: (clientX - rect.left - orch.panX) / orch.zoom,
+            y: (clientY - rect.top  - orch.panY) / orch.zoom,
+        };
+    }
 
     function orchInit() {
         orchLoadExperts();
@@ -4422,7 +4509,8 @@ HTML_TEMPLATE = """
 
     function orchAddNodeCenter(data) {
         const area = document.getElementById('orch-canvas-area');
-        const cx = area.offsetWidth / 2 - 60, cy = area.offsetHeight / 2 - 20;
+        const cx = (area.offsetWidth / 2 - orch.panX) / orch.zoom - 60;
+        const cy = (area.offsetHeight / 2 - orch.panY) / orch.zoom - 20;
         const n = orch.nodes.length;
         const angle = n * 137.5 * Math.PI / 180;
         const radius = 80 * Math.sqrt(n) * 0.5;
@@ -4430,7 +4518,7 @@ HTML_TEMPLATE = """
     }
 
     function orchRenderNode(node) {
-        const area = document.getElementById('orch-canvas-area');
+        const area = document.getElementById('orch-canvas-inner');
         const el = document.createElement('div');
         const isSession = node.type === 'session_agent';
         el.className = 'orch-node' + (node.type === 'manual' ? ' manual-type' : '') + (isSession ? ' session-type' : '');
@@ -4458,7 +4546,8 @@ HTML_TEMPLATE = """
             e.stopPropagation();
             if (!e.shiftKey && !orch.selectedNodes.has(node.id)) orchClearSelection();
             orchSelectNode(node.id);
-            orch.dragging = { nodeId: node.id, offX: e.clientX - node.x, offY: e.clientY - node.y, multi: orch.selectedNodes.size > 1, starts: {} };
+            const cp = orchClientToCanvas(e.clientX, e.clientY);
+            orch.dragging = { nodeId: node.id, offX: cp.x - node.x, offY: cp.y - node.y, multi: orch.selectedNodes.size > 1, starts: {} };
             if (orch.selectedNodes.size > 1) {
                 orch.selectedNodes.forEach(nid => { const n = orch.nodes.find(nn=>nn.id===nid); if(n) orch.dragging.starts[nid]={x:n.x,y:n.y}; });
             }
@@ -4468,9 +4557,9 @@ HTML_TEMPLATE = """
             port.addEventListener('mousedown', e => {
                 e.stopPropagation();
                 if (port.dataset.dir === 'out') {
-                    const rect = port.getBoundingClientRect();
-                    const cRect = document.getElementById('orch-canvas-area').getBoundingClientRect();
-                    orch.connecting = { sourceId: node.id, sx: rect.left+5-cRect.left, sy: rect.top+5-cRect.top };
+                    const portRect = port.getBoundingClientRect();
+                    const cp = orchClientToCanvas(portRect.left + 5, portRect.top + 5);
+                    orch.connecting = { sourceId: node.id, sx: cp.x, sy: cp.y };
                 }
             });
             port.addEventListener('mouseup', e => {
@@ -4576,7 +4665,7 @@ HTML_TEMPLATE = """
     }
 
     function orchRenderGroup(group) {
-        const area = document.getElementById('orch-canvas-area');
+        const area = document.getElementById('orch-canvas-inner');
         const el = document.createElement('div');
         el.className = 'orch-group ' + group.type;
         el.id = 'ogroup-' + group.id;
@@ -4606,56 +4695,86 @@ HTML_TEMPLATE = """
     // ── Canvas Events ──
     function orchSetupCanvas() {
         const canvas = document.getElementById('orch-canvas-area');
+
+        // ── Drag-and-drop from sidebar ──
         canvas.addEventListener('dragover', e => { e.preventDefault(); e.dataTransfer.dropEffect = 'copy'; });
         canvas.addEventListener('drop', e => {
             e.preventDefault();
             try {
                 const data = JSON.parse(e.dataTransfer.getData('application/json'));
-                const rect = canvas.getBoundingClientRect();
-                orchAddNode(data, e.clientX - rect.left - 55, e.clientY - rect.top - 20);
+                const cp = orchClientToCanvas(e.clientX, e.clientY);
+                orchAddNode(data, cp.x - 55, cp.y - 20);
             } catch(err) {}
         });
+
+        // ── Mousedown: selection rect OR start panning ──
         canvas.addEventListener('mousedown', e => {
-            if (e.target === canvas || e.target.id === 'orch-canvas-hint') {
+            // Middle-button or Space+left → start panning
+            if (e.button === 1 || (e.button === 0 && orch.spaceDown)) {
+                e.preventDefault();
+                orch.panning = { lastX: e.clientX, lastY: e.clientY };
+                canvas.style.cursor = 'grabbing';
+                return;
+            }
+            const inner = document.getElementById('orch-canvas-inner');
+            if (e.target === canvas || e.target === inner || e.target.id === 'orch-canvas-hint') {
                 orchClearSelection();
-                orch.selecting = { sx: e.offsetX, sy: e.offsetY };
+                const cp = orchClientToCanvas(e.clientX, e.clientY);
+                orch.selecting = { sx: cp.x, sy: cp.y };
             }
         });
+
+        // ── Mousemove: drag nodes / connect / select / pan ──
         canvas.addEventListener('mousemove', e => {
+            if (orch.panning) {
+                orch.panX += e.clientX - orch.panning.lastX;
+                orch.panY += e.clientY - orch.panning.lastY;
+                orch.panning.lastX = e.clientX;
+                orch.panning.lastY = e.clientY;
+                orchApplyTransform();
+                return;
+            }
             if (orch.dragging) {
                 const d = orch.dragging;
+                const cp = orchClientToCanvas(e.clientX, e.clientY);
                 if (d.multi) {
-                    const dx = e.clientX - d.offX - d.starts[d.nodeId].x;
-                    const dy = e.clientY - d.offY - d.starts[d.nodeId].y;
+                    const dx = cp.x - d.offX - d.starts[d.nodeId].x;
+                    const dy = cp.y - d.offY - d.starts[d.nodeId].y;
                     orch.selectedNodes.forEach(nid => {
                         const n = orch.nodes.find(nn=>nn.id===nid);
                         if (n && d.starts[nid]) { n.x = d.starts[nid].x + dx; n.y = d.starts[nid].y + dy; const el=document.getElementById('onode-'+nid); if(el){el.style.left=n.x+'px';el.style.top=n.y+'px';} }
                     });
                 } else {
                     const n = orch.nodes.find(nn=>nn.id===d.nodeId);
-                    if (n) { n.x = e.clientX - d.offX; n.y = e.clientY - d.offY; const el=document.getElementById('onode-'+n.id); if(el){el.style.left=n.x+'px';el.style.top=n.y+'px';} }
+                    if (n) { n.x = cp.x - d.offX; n.y = cp.y - d.offY; const el=document.getElementById('onode-'+n.id); if(el){el.style.left=n.x+'px';el.style.top=n.y+'px';} }
                 }
                 orchRenderEdges();
                 orch.groups.forEach(g => orchUpdateGroupBounds(g));
             } else if (orch.connecting) {
-                const rect = canvas.getBoundingClientRect();
-                orchDrawTempLine(orch.connecting.sx, orch.connecting.sy, e.clientX - rect.left, e.clientY - rect.top);
+                const cp = orchClientToCanvas(e.clientX, e.clientY);
+                orchDrawTempLine(orch.connecting.sx, orch.connecting.sy, cp.x, cp.y);
             } else if (orch.selecting) {
                 const s = orch.selecting;
+                const cp = orchClientToCanvas(e.clientX, e.clientY);
                 let existing = document.querySelector('.orch-sel-rect');
-                if (!existing) { existing = document.createElement('div'); existing.className='orch-sel-rect'; canvas.appendChild(existing); }
-                const x = Math.min(s.sx, e.offsetX), y = Math.min(s.sy, e.offsetY);
-                const w = Math.abs(e.offsetX - s.sx), h = Math.abs(e.offsetY - s.sy);
+                const inner = document.getElementById('orch-canvas-inner');
+                if (!existing) { existing = document.createElement('div'); existing.className='orch-sel-rect'; inner.appendChild(existing); }
+                const x = Math.min(s.sx, cp.x), y = Math.min(s.sy, cp.y);
+                const w = Math.abs(cp.x - s.sx), h = Math.abs(cp.y - s.sy);
                 existing.style.cssText = `left:${x}px;top:${y}px;width:${w}px;height:${h}px;`;
             }
         });
+
+        // ── Mouseup ──
         canvas.addEventListener('mouseup', e => {
+            if (orch.panning) { orch.panning = false; canvas.style.cursor = ''; return; }
             if (orch.dragging) { orch.dragging = null; orchUpdateYaml(); }
             if (orch.connecting) { orch.connecting = null; orchRemoveTempLine(); }
             if (orch.selecting) {
                 const s = orch.selecting;
-                const x1 = Math.min(s.sx, e.offsetX), y1 = Math.min(s.sy, e.offsetY);
-                const x2 = Math.max(s.sx, e.offsetX), y2 = Math.max(s.sy, e.offsetY);
+                const cp = orchClientToCanvas(e.clientX, e.clientY);
+                const x1 = Math.min(s.sx, cp.x), y1 = Math.min(s.sy, cp.y);
+                const x2 = Math.max(s.sx, cp.x), y2 = Math.max(s.sy, cp.y);
                 if (Math.abs(x2-x1) > 10 && Math.abs(y2-y1) > 10) {
                     orch.nodes.forEach(n => { if (n.x > x1 && n.x < x2 && n.y > y1 && n.y < y2) orchSelectNode(n.id); });
                 }
@@ -4664,14 +4783,44 @@ HTML_TEMPLATE = """
             }
         });
 
-        // Context menu
+        // ── Wheel zoom (Ctrl+wheel or pinch) ──
+        canvas.addEventListener('wheel', e => {
+            e.preventDefault();
+            const area = canvas;
+            const rect = area.getBoundingClientRect();
+            // Pointer position relative to canvas viewport
+            const mx = e.clientX - rect.left;
+            const my = e.clientY - rect.top;
+            // Old canvas-space position under pointer
+            const oldX = (mx - orch.panX) / orch.zoom;
+            const oldY = (my - orch.panY) / orch.zoom;
+            // Apply zoom
+            const delta = e.deltaY > 0 ? -0.08 : 0.08;
+            orch.zoom = Math.min(3, Math.max(0.15, orch.zoom + delta));
+            // Adjust pan so the point under pointer stays fixed
+            orch.panX = mx - oldX * orch.zoom;
+            orch.panY = my - oldY * orch.zoom;
+            orchApplyTransform();
+        }, { passive: false });
+
+        // Stop panning if mouse leaves canvas
+        canvas.addEventListener('mouseleave', () => {
+            if (orch.panning) { orch.panning = false; canvas.style.cursor = ''; }
+        });
+
+        // ── Context menu ──
         canvas.addEventListener('contextmenu', e => {
             e.preventDefault();
             orchShowContextMenu(e.clientX, e.clientY);
         });
 
-        // Keyboard shortcuts
+        // ── Keyboard shortcuts ──
         document.addEventListener('keydown', e => {
+            if (e.code === 'Space' && currentPage === 'orchestrate' && document.activeElement.tagName !== 'INPUT' && document.activeElement.tagName !== 'TEXTAREA') {
+                e.preventDefault();
+                orch.spaceDown = true;
+                canvas.style.cursor = 'grab';
+            }
             if (currentPage !== 'orchestrate') return;
             if (e.key === 'Delete' || e.key === 'Backspace') {
                 if (document.activeElement.tagName === 'INPUT' || document.activeElement.tagName === 'TEXTAREA') return;
@@ -4686,6 +4835,12 @@ HTML_TEMPLATE = """
                 orch.nodes.forEach(n => orchSelectNode(n.id));
             }
             if (e.key === 'Escape') { orchClearSelection(); orchHideContextMenu(); }
+        });
+        document.addEventListener('keyup', e => {
+            if (e.code === 'Space') {
+                orch.spaceDown = false;
+                if (!orch.panning) canvas.style.cursor = '';
+            }
         });
     }
 
@@ -4770,6 +4925,7 @@ HTML_TEMPLATE = """
             edges: orch.edges.map(e => ({...e})),
             groups: orch.groups.map(g => ({...g})),
             settings: orchGetSettings(),
+            view: { zoom: orch.zoom, panX: orch.panX, panY: orch.panY },
         };
     }
 
@@ -4993,7 +5149,8 @@ HTML_TEMPLATE = """
     // ── Actions ──
     function orchClearCanvas() {
         orch.nodes = []; orch.edges = []; orch.groups = []; orch.selectedNodes.clear();
-        const area = document.getElementById('orch-canvas-area');
+        orch.zoom = 1; orch.panX = 0; orch.panY = 0; orchApplyTransform();
+        const area = document.getElementById('orch-canvas-inner');
         area.querySelectorAll('.orch-node,.orch-group').forEach(el => el.remove());
         orchRenderEdges();
         orchUpdateYaml();
@@ -5003,6 +5160,7 @@ HTML_TEMPLATE = """
     function orchAutoArrange() {
         const n = orch.nodes.length;
         if (n === 0) return;
+        orch.zoom = 1; orch.panX = 0; orch.panY = 0; orchApplyTransform();
         const area = document.getElementById('orch-canvas-area');
         const cw = area.offsetWidth, ch = area.offsetHeight;
         const cols = Math.ceil(Math.sqrt(n));
@@ -5109,6 +5267,14 @@ HTML_TEMPLATE = """
                     document.getElementById('orch-threshold').value = data.settings.cluster_threshold;
                     document.getElementById('orch-threshold-val').textContent = data.settings.cluster_threshold;
                 }
+            }
+
+            // Restore view (zoom/pan)
+            if (data.view) {
+                orch.zoom = data.view.zoom || 1;
+                orch.panX = data.view.panX || 0;
+                orch.panY = data.view.panY || 0;
+                orchApplyTransform();
             }
 
             // Build id mapping: restore nodes with ORIGINAL ids preserved
