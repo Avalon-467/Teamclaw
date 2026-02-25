@@ -4883,12 +4883,70 @@ HTML_TEMPLATE = """
             const r = await fetch('/proxy_visual/load-layouts');
             const layouts = await r.json();
             if (!layouts.length) { orchToast('没有已保存的布局'); return; }
-            const name = prompt('选择布局 (' + layouts.join(', ') + '):');
-            if (!name) return;
+
+            // Build visual selection modal
+            const overlay = document.createElement('div');
+            overlay.className = 'orch-modal-overlay';
+            overlay.id = 'orch-load-layout-overlay';
+            overlay.innerHTML = `
+                <div class="orch-modal" style="min-width:360px;max-width:460px;">
+                    <h3>📂 选择布局</h3>
+                    <div class="orch-session-list" id="orch-layout-select-list" style="max-height:300px;overflow-y:auto;"></div>
+                    <div class="orch-modal-btns">
+                        <button id="orch-layout-cancel-btn" style="padding:6px 14px;border-radius:6px;border:1px solid #d1d5db;background:white;color:#374151;cursor:pointer;font-size:12px;">取消</button>
+                        <button id="orch-layout-del-btn" style="padding:6px 14px;border-radius:6px;border:1px solid #fca5a5;background:#fef2f2;color:#dc2626;cursor:pointer;font-size:12px;display:none;">🗑️ 删除</button>
+                        <button id="orch-layout-confirm-btn" disabled style="padding:6px 14px;border-radius:6px;border:none;background:#2563eb;color:white;cursor:pointer;font-size:12px;opacity:0.5;">加载</button>
+                    </div>
+                </div>
+            `;
+            document.body.appendChild(overlay);
+
+            let selectedName = null;
+            overlay.querySelector('#orch-layout-cancel-btn').addEventListener('click', () => overlay.remove());
+            overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.remove(); });
+
+            const listEl = overlay.querySelector('#orch-layout-select-list');
+            for (const name of layouts) {
+                const item = document.createElement('div');
+                item.className = 'orch-session-item';
+                item.innerHTML = `<span class="orch-session-icon">📋</span><div style="flex:1;min-width:0;"><div class="orch-session-title">${escapeHtml(name)}</div></div>`;
+                item.addEventListener('click', () => {
+                    listEl.querySelectorAll('.orch-session-item').forEach(el => el.classList.remove('selected'));
+                    item.classList.add('selected');
+                    selectedName = name;
+                    const btn = overlay.querySelector('#orch-layout-confirm-btn');
+                    btn.disabled = false; btn.style.opacity = '1';
+                    overlay.querySelector('#orch-layout-del-btn').style.display = '';
+                });
+                listEl.appendChild(item);
+            }
+
+            overlay.querySelector('#orch-layout-del-btn').addEventListener('click', async () => {
+                if (!selectedName || !confirm('确定删除布局 "' + selectedName + '"？')) return;
+                try {
+                    await fetch('/proxy_visual/delete-layout/' + encodeURIComponent(selectedName), { method: 'DELETE' });
+                    orchToast('已删除: ' + selectedName);
+                    overlay.remove();
+                    orchLoadLayout();
+                } catch(e) { orchToast('删除失败'); }
+            });
+
+            overlay.querySelector('#orch-layout-confirm-btn').addEventListener('click', async () => {
+                if (!selectedName) return;
+                overlay.remove();
+                await orchDoLoadLayout(selectedName);
+            });
+        } catch(e) { orchToast('加载失败'); }
+    }
+
+    async function orchDoLoadLayout(name) {
+        try {
             const r2 = await fetch('/proxy_visual/load-layout/' + encodeURIComponent(name));
             const data = await r2.json();
             if (data.error) { orchToast(data.error); return; }
             orchClearCanvas();
+
+            // Restore settings
             if (data.settings) {
                 document.getElementById('orch-repeat').checked = data.settings.repeat !== false;
                 document.getElementById('orch-rounds').value = data.settings.max_rounds || 5;
@@ -4898,12 +4956,35 @@ HTML_TEMPLATE = """
                     document.getElementById('orch-threshold-val').textContent = data.settings.cluster_threshold;
                 }
             }
-            (data.nodes||[]).forEach(n => orchAddNode(n, n.x, n.y));
-            (data.edges||[]).forEach(e => orchAddEdge(e.source, e.target));
-            (data.groups||[]).forEach(g => { orch.groups.push(g); orchRenderGroup(g); });
+
+            // Build id mapping: restore nodes with ORIGINAL ids preserved
+            const idMap = {};
+            (data.nodes||[]).forEach(n => {
+                const origId = n.id;
+                const newNode = orchAddNode(n, n.x, n.y);
+                idMap[origId] = newNode.id;
+            });
+
+            // Restore edges using mapped ids
+            (data.edges||[]).forEach(e => {
+                const src = idMap[e.source];
+                const tgt = idMap[e.target];
+                if (src && tgt) orchAddEdge(src, tgt);
+            });
+
+            // Restore groups with mapped node ids
+            (data.groups||[]).forEach(g => {
+                const mappedGroup = {...g, nodeIds: (g.nodeIds||[]).map(nid => idMap[nid]).filter(Boolean)};
+                if (mappedGroup.nodeIds.length > 0) {
+                    orch.groups.push(mappedGroup);
+                    orchRenderGroup(mappedGroup);
+                }
+            });
+
+            orchRenderEdges();
             orchUpdateYaml();
             orchToast('已加载: ' + name);
-        } catch(e) { orchToast('加载失败'); }
+        } catch(e) { orchToast('加载失败: ' + e.message); }
     }
 
     function orchExportYaml() {
@@ -5888,6 +5969,19 @@ def proxy_visual_load_layout(name):
     import json as _json
     with open(path, "r", encoding="utf-8") as f:
         return jsonify(_json.load(f))
+
+
+@app.route("/proxy_visual/delete-layout/<name>", methods=["DELETE"])
+def proxy_visual_delete_layout(name):
+    user_id = session.get("user_id")
+    if not user_id:
+        return jsonify({"error": "Not logged in"}), 401
+    safe = "".join(c for c in name if c.isalnum() or c in "-_ ").strip()
+    path = os.path.join(root_dir, "data", "visual_layouts", user_id, f"{safe}.json")
+    if os.path.isfile(path):
+        os.remove(path)
+        return jsonify({"deleted": True})
+    return jsonify({"error": "Not found"}), 404
 
 
 @app.route("/proxy_visual/sessions-status", methods=["GET"])
