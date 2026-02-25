@@ -1026,11 +1026,26 @@ HTML_TEMPLATE = """
         <div id="page-orchestrate" class="orch-page">
             <div class="orch-layout">
                 <!-- Left: Expert Pool -->
-                <div class="orch-sidebar">
+                <div class="orch-sidebar" style="overflow-y:auto;">
                     <div class="orch-sidebar-header">
                         <span class="text-sm font-bold text-gray-700">🧑‍💼 专家池</span>
                     </div>
-                    <div class="orch-expert-list" id="orch-expert-list"></div>
+                    <!-- Public experts -->
+                    <div style="padding:2px 8px;font-size:10px;font-weight:600;color:#6b7280;text-transform:uppercase;letter-spacing:0.5px;">📚 预设专家</div>
+                    <div class="orch-expert-list" id="orch-expert-list-public"></div>
+                    <!-- Custom experts -->
+                    <div style="padding:2px 8px;font-size:10px;font-weight:600;color:#6b7280;text-transform:uppercase;letter-spacing:0.5px;border-top:1px solid #e5e7eb;margin-top:4px;display:flex;align-items:center;justify-content:space-between;">
+                        <span>🛠️ 自定义专家</span>
+                        <button onclick="orchShowAddExpertModal()" style="font-size:14px;background:none;border:none;cursor:pointer;padding:0 2px;" title="添加自定义专家">➕</button>
+                    </div>
+                    <div class="orch-expert-list" id="orch-expert-list-custom"></div>
+                    <!-- Session agents -->
+                    <div style="padding:2px 8px;font-size:10px;font-weight:600;color:#6b7280;text-transform:uppercase;letter-spacing:0.5px;border-top:1px solid #e5e7eb;margin-top:4px;display:flex;align-items:center;justify-content:space-between;">
+                        <span>💬 Session Agent</span>
+                        <button onclick="orchLoadSessionAgents()" style="font-size:11px;background:none;border:none;cursor:pointer;padding:0 2px;color:#2563eb;" title="刷新">🔄</button>
+                    </div>
+                    <div class="orch-expert-list" id="orch-expert-list-sessions"></div>
+                    <!-- Manual injection -->
                     <div class="orch-manual-card" draggable="true" id="orch-manual-card">
                         <span style="font-size:18px;">📝</span>
                         <div><div class="text-xs font-semibold text-gray-700">手动注入</div><div class="text-[10px] text-purple-400">固定内容</div></div>
@@ -4223,34 +4238,140 @@ HTML_TEMPLATE = """
 
     function orchInit() {
         orchLoadExperts();
+        orchLoadSessionAgents();
         orchSetupCanvas();
         orchSetupSettings();
     }
 
-    // ── Load experts ──
+    // ── Load experts (public + custom) ──
     async function orchLoadExperts() {
         try {
             const r = await fetch('/proxy_visual/experts');
             orch.experts = await r.json();
         } catch(e) { console.error('Load experts failed:', e); }
-        orchRenderSidebar();
+        orchRenderExpertSidebar();
     }
 
-    function orchRenderSidebar() {
-        const list = document.getElementById('orch-expert-list');
-        list.innerHTML = '';
+    function orchRenderExpertSidebar() {
+        const pubList = document.getElementById('orch-expert-list-public');
+        const custList = document.getElementById('orch-expert-list-custom');
+        pubList.innerHTML = '';
+        custList.innerHTML = '';
+
         orch.experts.forEach(exp => {
             const card = document.createElement('div');
             card.className = 'orch-expert-card';
             card.draggable = true;
-            card.innerHTML = `<span class="orch-emoji">${exp.emoji}</span><div style="min-width:0;flex:1;"><div class="orch-name">${exp.name}</div><div class="orch-tag">${exp.tag}</div></div><span class="orch-temp">${exp.temperature}</span>`;
+            const isCustom = exp.source === 'custom';
+            card.innerHTML = `<span class="orch-emoji">${exp.emoji}</span><div style="min-width:0;flex:1;"><div class="orch-name">${escapeHtml(exp.name)}</div><div class="orch-tag">${escapeHtml(exp.tag)}</div></div><span class="orch-temp">${exp.temperature||''}</span>${isCustom ? '<button class="orch-expert-del-btn" title="删除" style="font-size:10px;background:none;border:none;cursor:pointer;color:#dc2626;padding:0 2px;margin-left:2px;">✕</button>' : ''}`;
             card.addEventListener('dragstart', e => {
                 e.dataTransfer.setData('application/json', JSON.stringify({type:'expert', ...exp}));
                 e.dataTransfer.effectAllowed = 'copy';
             });
             card.addEventListener('dblclick', () => orchAddNodeCenter({type:'expert', ...exp}));
-            list.appendChild(card);
+            if (isCustom) {
+                card.querySelector('.orch-expert-del-btn').addEventListener('click', async (ev) => {
+                    ev.stopPropagation();
+                    if (!confirm('删除自定义专家 "' + exp.name + '"？')) return;
+                    try {
+                        await fetch('/proxy_visual/experts/custom/' + encodeURIComponent(exp.tag), { method: 'DELETE' });
+                        orchToast('已删除: ' + exp.name);
+                        orchLoadExperts();
+                    } catch(e) { orchToast('删除失败'); }
+                });
+                custList.appendChild(card);
+            } else {
+                pubList.appendChild(card);
+            }
         });
+
+        if (!custList.children.length) {
+            custList.innerHTML = '<div style="padding:6px 10px;font-size:10px;color:#d1d5db;text-align:center;">暂无自定义专家</div>';
+        }
+    }
+
+    // ── Load session agents ──
+    async function orchLoadSessionAgents() {
+        const list = document.getElementById('orch-expert-list-sessions');
+        list.innerHTML = '<div style="padding:6px 10px;font-size:10px;color:#9ca3af;text-align:center;">⏳ 加载中...</div>';
+        try {
+            const resp = await fetch('/proxy_sessions');
+            const data = await resp.json();
+            list.innerHTML = '';
+            if (!data.sessions || data.sessions.length === 0) {
+                list.innerHTML = '<div style="padding:6px 10px;font-size:10px;color:#d1d5db;text-align:center;">暂无 Session</div>';
+                return;
+            }
+            data.sessions.sort((a, b) => b.session_id.localeCompare(a.session_id));
+            for (const s of data.sessions) {
+                const card = document.createElement('div');
+                card.className = 'orch-expert-card';
+                card.draggable = true;
+                const title = s.title || 'Untitled';
+                card.innerHTML = `<span class="orch-emoji">🤖</span><div style="min-width:0;flex:1;"><div class="orch-name">${escapeHtml(title)}</div><div class="orch-tag" style="color:#6366f1;font-family:monospace;">#${s.session_id.slice(-8)}</div></div><span class="orch-temp" style="font-size:9px;color:#9ca3af;">${s.message_count||0}msg</span>`;
+                const sessionData = {type:'session_agent', name: title, tag: 'session', emoji:'🤖', temperature: 0.7, session_id: s.session_id};
+                card.addEventListener('dragstart', e => {
+                    e.dataTransfer.setData('application/json', JSON.stringify(sessionData));
+                    e.dataTransfer.effectAllowed = 'copy';
+                });
+                card.addEventListener('dblclick', () => orchAddNodeCenter(sessionData));
+                list.appendChild(card);
+            }
+        } catch(e) {
+            list.innerHTML = '<div style="padding:6px 10px;font-size:10px;color:#dc2626;text-align:center;">❌ 加载失败</div>';
+        }
+    }
+
+    // ── Add custom expert modal ──
+    function orchShowAddExpertModal() {
+        const overlay = document.createElement('div');
+        overlay.className = 'orch-modal-overlay';
+        overlay.id = 'orch-add-expert-overlay';
+        overlay.innerHTML = `
+            <div class="orch-modal" style="min-width:380px;max-width:460px;">
+                <h3>🛠️ 添加自定义专家</h3>
+                <div style="display:flex;flex-direction:column;gap:8px;margin:10px 0;">
+                    <label style="font-size:11px;font-weight:600;color:#374151;">名称 <input id="orch-ce-name" type="text" placeholder="如：金融分析师" style="width:100%;padding:6px 8px;border:1px solid #d1d5db;border-radius:6px;font-size:12px;margin-top:2px;"></label>
+                    <label style="font-size:11px;font-weight:600;color:#374151;">Tag (英文) <input id="orch-ce-tag" type="text" placeholder="如：finance" style="width:100%;padding:6px 8px;border:1px solid #d1d5db;border-radius:6px;font-size:12px;margin-top:2px;"></label>
+                    <label style="font-size:11px;font-weight:600;color:#374151;">Temperature <input id="orch-ce-temp" type="number" value="0.7" min="0" max="2" step="0.1" style="width:80px;padding:6px 8px;border:1px solid #d1d5db;border-radius:6px;font-size:12px;margin-top:2px;"></label>
+                    <label style="font-size:11px;font-weight:600;color:#374151;">Persona (角色描述)
+                        <textarea id="orch-ce-persona" rows="4" placeholder="描述这位专家的角色、专长和行为风格..." style="width:100%;padding:6px 8px;border:1px solid #d1d5db;border-radius:6px;font-size:12px;margin-top:2px;resize:vertical;"></textarea>
+                    </label>
+                </div>
+                <div class="orch-modal-btns">
+                    <button id="orch-ce-cancel" style="padding:6px 14px;border-radius:6px;border:1px solid #d1d5db;background:white;color:#374151;cursor:pointer;font-size:12px;">取消</button>
+                    <button id="orch-ce-save" style="padding:6px 14px;border-radius:6px;border:none;background:#2563eb;color:white;cursor:pointer;font-size:12px;">保存</button>
+                </div>
+            </div>
+        `;
+        document.body.appendChild(overlay);
+        overlay.querySelector('#orch-ce-cancel').addEventListener('click', () => overlay.remove());
+        overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.remove(); });
+        overlay.querySelector('#orch-ce-save').addEventListener('click', async () => {
+            const name = document.getElementById('orch-ce-name').value.trim();
+            const tag = document.getElementById('orch-ce-tag').value.trim();
+            const temperature = parseFloat(document.getElementById('orch-ce-temp').value) || 0.7;
+            const persona = document.getElementById('orch-ce-persona').value.trim();
+            if (!name || !tag || !persona) { orchToast('请填写完整信息'); return; }
+            try {
+                const r = await fetch('/proxy_visual/experts/custom', {
+                    method: 'POST', headers: {'Content-Type':'application/json'},
+                    body: JSON.stringify({name, tag, temperature, persona}),
+                });
+                const res = await r.json();
+                if (r.ok) {
+                    orchToast('自定义专家已添加: ' + name);
+                    overlay.remove();
+                    orchLoadExperts();
+                } else {
+                    orchToast('失败: ' + (res.detail || res.error || '未知错误'));
+                }
+            } catch(e) { orchToast('网络错误'); }
+        });
+    }
+
+    function orchRenderSidebar() {
+        orchRenderExpertSidebar();
         // Manual card
         const mc = document.getElementById('orch-manual-card');
         mc.addEventListener('dragstart', e => {
@@ -4278,7 +4399,7 @@ HTML_TEMPLATE = """
     // ── Node Management ──
     function orchAddNode(data, x, y) {
         const id = 'on' + orch.nid++;
-        const node = { id, name: data.name, tag: data.tag||'custom', emoji: data.emoji||'⭐', x: Math.round(x), y: Math.round(y), type: data.type||'expert', temperature: data.temperature||0.5, author: data.author||'主持人', content: data.content||'' };
+        const node = { id, name: data.name, tag: data.tag||'custom', emoji: data.emoji||'⭐', x: Math.round(x), y: Math.round(y), type: data.type||'expert', temperature: data.temperature||0.5, author: data.author||'主持人', content: data.content||'', session_id: data.session_id||'', source: data.source||'' };
         orch.nodes.push(node);
         orchRenderNode(node);
         orchUpdateYaml();
@@ -4299,15 +4420,18 @@ HTML_TEMPLATE = """
     function orchRenderNode(node) {
         const area = document.getElementById('orch-canvas-area');
         const el = document.createElement('div');
-        el.className = 'orch-node' + (node.type === 'manual' ? ' manual-type' : '');
+        const isSession = node.type === 'session_agent';
+        el.className = 'orch-node' + (node.type === 'manual' ? ' manual-type' : '') + (isSession ? ' session-type' : '');
         el.id = 'onode-' + node.id;
         el.style.left = node.x + 'px';
         el.style.top = node.y + 'px';
+        if (isSession) el.style.borderColor = '#6366f1';
 
         const status = orch.sessionStatuses[node.tag] || orch.sessionStatuses[node.name] || 'idle';
+        const tagLine = isSession ? `<div class="orch-node-tag" style="color:#6366f1;font-family:monospace;">#${(node.session_id||'').slice(-8)}</div>` : `<div class="orch-node-tag">${escapeHtml(node.tag)}</div>`;
         el.innerHTML = `
             <span class="orch-node-emoji">${node.emoji}</span>
-            <div style="min-width:0;flex:1;"><div class="orch-node-name">${node.name}</div><div class="orch-node-tag">${node.tag}</div></div>
+            <div style="min-width:0;flex:1;"><div class="orch-node-name">${escapeHtml(node.name)}</div>${tagLine}</div>
             <div class="orch-node-del" title="移除">×</div>
             <div class="orch-port port-in" data-node="${node.id}" data-dir="in"></div>
             <div class="orch-port port-out" data-node="${node.id}" data-dir="out"></div>
@@ -5829,12 +5953,65 @@ except Exception:
 
 @app.route("/proxy_visual/experts", methods=["GET"])
 def proxy_visual_experts():
-    """Return available expert pool for orchestration canvas."""
-    experts = []
-    for e in _VIS_EXPERTS:
+    """Return available expert pool for orchestration canvas (public + user custom)."""
+    user_id = session.get("user_id", "")
+    # Fetch full expert list from OASIS server (public + user custom)
+    all_experts = []
+    try:
+        r = requests.get(f"{OASIS_BASE_URL}/experts", params={"user_id": user_id}, timeout=5)
+        if r.ok:
+            all_experts = r.json().get("experts", [])
+    except Exception:
+        pass
+
+    # Fallback to static list if OASIS unavailable
+    if not all_experts:
+        all_experts = [{**e, "source": "public"} for e in _VIS_EXPERTS]
+
+    result = []
+    for e in all_experts:
         emoji = _VIS_TAG_EMOJI.get(e.get("tag", ""), "⭐")
-        experts.append({**e, "emoji": emoji})
-    return jsonify(experts)
+        if e.get("source") == "custom":
+            emoji = "🛠️"
+        result.append({**e, "emoji": emoji})
+    return jsonify(result)
+
+
+@app.route("/proxy_visual/experts/custom", methods=["POST"])
+def proxy_visual_add_custom_expert():
+    """Add a custom expert via OASIS server."""
+    user_id = session.get("user_id")
+    if not user_id:
+        return jsonify({"error": "未登录"}), 401
+    data = request.get_json()
+    if not data:
+        return jsonify({"error": "No data"}), 400
+    try:
+        r = requests.post(
+            f"{OASIS_BASE_URL}/experts/user",
+            json={"user_id": user_id, **data},
+            timeout=10,
+        )
+        return jsonify(r.json()), r.status_code
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/proxy_visual/experts/custom/<tag>", methods=["DELETE"])
+def proxy_visual_delete_custom_expert(tag):
+    """Delete a custom expert via OASIS server."""
+    user_id = session.get("user_id")
+    if not user_id:
+        return jsonify({"error": "未登录"}), 401
+    try:
+        r = requests.delete(
+            f"{OASIS_BASE_URL}/experts/user/{tag}",
+            params={"user_id": user_id},
+            timeout=10,
+        )
+        return jsonify(r.json()), r.status_code
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 
 @app.route("/proxy_visual/generate-yaml", methods=["POST"])
