@@ -11,13 +11,17 @@ Two expert backends:
      - other session_id (e.g. "助手#default") → regular agent,
        no identity injection, relies on session's own system prompt
 
-Expert pool is always built from schedule_yaml (YAML-only mode).
+Expert pool is built from schedule_yaml or schedule_file (YAML-only mode).
+schedule_file takes priority if both provided.
 Session IDs can be freely chosen; new IDs auto-create sessions on first use.
 Append "#new" to any session name in YAML to force a fresh session (ID
 replaced with random UUID, guaranteeing no reuse).
 No separate expert-session storage: oasis sessions are identified by the
 "#oasis#" pattern in their session_id and live in the normal Agent
 checkpoint DB.
+
+Both participate() methods accept an optional `instruction` parameter,
+which is injected into the expert's prompt to guide their focus.
 """
 
 import json
@@ -306,10 +310,12 @@ class ExpertAgent:
         self.tag = tag
         self.llm = _get_llm(temperature)
 
-    async def participate(self, forum: DiscussionForum):
+    async def participate(self, forum: DiscussionForum, instruction: str = ""):
         others = await forum.browse(viewer=self.name, exclude_self=True)
         posts_text = _format_posts(others) if others else "(还没有其他人发言，你来开启讨论吧)"
         prompt = _build_discuss_prompt(self.title, self.persona, forum.question, posts_text)
+        if instruction:
+            prompt += f"\n\n📋 本轮你的专项指令：{instruction}\n请在回复中重点关注和执行这个指令。"
 
         try:
             resp = await self.llm.ainvoke([HumanMessage(content=prompt)])
@@ -383,7 +389,7 @@ class SessionExpert:
     def _auth_header(self) -> dict:
         return {"Authorization": f"Bearer {self._internal_token}:{self._user_id}"}
 
-    async def participate(self, forum: DiscussionForum):
+    async def participate(self, forum: DiscussionForum, instruction: str = ""):
         """
         Participate in one round of discussion using the session.
 
@@ -396,6 +402,8 @@ class SessionExpert:
         new_posts = [p for p in others if p.id not in self._seen_post_ids]
         self._seen_post_ids.update(p.id for p in others)
 
+        instr_suffix = f"\n\n📋 本轮你的专项指令：{instruction}\n请在回复中重点关注和执行这个指令。" if instruction else ""
+
         messages = []
         if not self._initialized:
             posts_text = _format_posts(others) if others else "(还没有其他人发言，你来开启讨论吧)"
@@ -406,7 +414,7 @@ class SessionExpert:
                     self.title, self.persona, forum.question, posts_text, split=True,
                 )
                 messages.append({"role": "system", "content": system_prompt})
-                messages.append({"role": "user", "content": user_prompt})
+                messages.append({"role": "user", "content": user_prompt + instr_suffix})
             else:
                 # Regular agent session → no identity injection
                 user_prompt = (
@@ -428,7 +436,7 @@ class SessionExpert:
                     "- 你拥有工具调用能力，如需搜索资料、分析数据来支撑你的观点，可以使用可用的工具。\n"
                     "- 后续轮次只会发送新增帖子，之前的帖子请参考你的对话记忆。"
                 )
-                messages.append({"role": "user", "content": user_prompt})
+                messages.append({"role": "user", "content": user_prompt + instr_suffix})
 
             self._initialized = True
         else:

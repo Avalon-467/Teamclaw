@@ -924,12 +924,18 @@ def _make_openai_response(content: str, model: str = "mini-timebot",
 
 def _make_openai_chunk(content: str = "", model: str = "mini-timebot",
                        finish_reason: str | None = None,
-                       completion_id: str = "") -> str:
-    """构造标准 OpenAI SSE chunk（streaming）。"""
+                       completion_id: str = "",
+                       meta: dict | None = None) -> str:
+    """构造标准 OpenAI SSE chunk（streaming）。
+
+    meta: 可选的自定义元数据，前端用于结构化渲染。
+    """
     delta = {}
     if content:
         delta["content"] = content
-    if finish_reason is None and not content:
+    if meta:
+        delta["meta"] = meta
+    if finish_reason is None and not content and not meta:
         delta["role"] = "assistant"
     chunk = {
         "id": completion_id,
@@ -1154,6 +1160,8 @@ async def openai_chat_completions(
 
     async def _stream_worker():
         collected_tokens = []
+        _chatbot_round = 0          # chatbot 节点轮次计数
+        _active_tool_names = []     # 当前批次的工具名称列表
         async with thread_lock:
             agent.set_thread_busy_source(thread_id, "user")
             try:
@@ -1162,7 +1170,56 @@ async def openai_chat_completions(
 
                 async for event in agent.agent_app.astream_events(user_input, config, version="v2"):
                     kind = event.get("event", "")
-                    if kind == "on_chat_model_stream":
+                    ev_name = event.get("name", "")
+
+                    # --- 节点级事件：chatbot / tools 的进入与退出 ---
+                    if kind == "on_chain_start" and ev_name == "chatbot":
+                        _chatbot_round += 1
+                        if _chatbot_round > 1:
+                            # 非首轮 chatbot = 工具返回后 LLM 再次思考
+                            await queue.put(_make_openai_chunk(
+                                model=model_name, completion_id=completion_id,
+                                meta={"type": "ai_start", "round": _chatbot_round}))
+
+                    elif kind == "on_chain_end" and ev_name == "chatbot":
+                        # chatbot 结束：可能进入 tools 或直接结束
+                        pass  # 由 on_chain_start tools 触发分界
+
+                    elif kind == "on_chain_start" and ev_name == "tools":
+                        # 即将执行工具 → 通知前端封存当前文本气泡
+                        _active_tool_names = []
+                        await queue.put(_make_openai_chunk(
+                            model=model_name, completion_id=completion_id,
+                            meta={"type": "tools_start"}))
+
+                    elif kind == "on_chain_end" and ev_name == "tools":
+                        # 工具批次执行完毕
+                        await queue.put(_make_openai_chunk(
+                            model=model_name, completion_id=completion_id,
+                            meta={"type": "tools_end", "tools": _active_tool_names}))
+
+                    # --- 单个工具的开始/结束 ---
+                    elif kind == "on_tool_start":
+                        tool_name = ev_name
+                        if tool_name not in external_tool_names:
+                            _active_tool_names.append(tool_name)
+                            await queue.put(_make_openai_chunk(
+                                model=model_name, completion_id=completion_id,
+                                meta={"type": "tool_start", "name": tool_name}))
+                    elif kind == "on_tool_end":
+                        tool_name = ev_name
+                        if tool_name not in external_tool_names:
+                            # 提取工具返回内容的摘要（截断）
+                            output = event.get("data", {}).get("output", "")
+                            if hasattr(output, "content"):
+                                output = output.content
+                            output_str = str(output)[:200] if output else ""
+                            await queue.put(_make_openai_chunk(
+                                model=model_name, completion_id=completion_id,
+                                meta={"type": "tool_end", "name": tool_name, "result": output_str}))
+
+                    # --- LLM 流式 token ---
+                    elif kind == "on_chat_model_stream":
                         chunk = event.get("data", {}).get("chunk")
                         if chunk and hasattr(chunk, "content") and chunk.content:
                             text = _extract_text(chunk.content)
@@ -1170,18 +1227,6 @@ async def openai_chat_completions(
                                 collected_tokens.append(text)
                                 await queue.put(_make_openai_chunk(
                                 text, model=model_name, completion_id=completion_id))
-                    elif kind == "on_tool_start":
-                        tool_name = event.get("name", "")
-                        if tool_name not in external_tool_names:
-                            await queue.put(_make_openai_chunk(
-                                f"\n🔧 调用工具: {tool_name}...\n",
-                                model=model_name, completion_id=completion_id))
-                    elif kind == "on_tool_end":
-                        tool_name = event.get("name", "")
-                        if tool_name not in external_tool_names:
-                            await queue.put(_make_openai_chunk(
-                                f"\n✅ 工具执行完成\n",
-                                model=model_name, completion_id=completion_id))
 
                 # 流式结束后，检查是否有外部工具调用
                 snapshot = await agent.agent_app.aget_state(config)
