@@ -1345,6 +1345,7 @@ class GroupMessageRequest(BaseModel):
     content: str
     sender: Optional[str] = None       # 人类发消息时可省略（自动取 owner）
     sender_session: Optional[str] = ""
+    mentions: Optional[list[str]] = None  # 被 @ 的 agent session key 列表 (格式: "user_id#session_id")
 
 
 # --- Helpers ---
@@ -1393,8 +1394,10 @@ async def _get_agent_title(user_id: str, session_id: str) -> str:
     return session_id
 
 
-async def _broadcast_to_group(group_id: str, sender: str, content: str, exclude_user: str = "", exclude_session: str = ""):
-    """向群内所有 agent 成员广播消息（异步 fire-and-forget）"""
+async def _broadcast_to_group(group_id: str, sender: str, content: str, exclude_user: str = "", exclude_session: str = "", mentions: list[str] | None = None):
+    """向群内 agent 成员广播消息（异步 fire-and-forget）。
+    如果 mentions 非空，只发给被 @ 的 agent，并强调这是专门发送的信息。
+    """
     if group_id in _group_muted:
         print(f"[GroupChat] 群 {group_id} 已静音，跳过广播")
         return
@@ -1413,11 +1416,32 @@ async def _broadcast_to_group(group_id: str, sender: str, content: str, exclude_
             continue  # 人类成员不需要异步通知
         if user_id == exclude_user and session_id == exclude_session:
             continue  # 不通知发送者自己
+
+        member_key = f"{user_id}#{session_id}"
+
+        # 如果有 mentions 列表，只发给被 @ 的 agent
+        if mentions:
+            if member_key not in mentions:
+                continue
+
         # 获取目标 agent 的 title，让它知道自己的身份
         my_title = await _get_agent_title(user_id, session_id)
         # 用 system_trigger 异步投递
         trigger_url = f"http://127.0.0.1:{os.getenv('PORT_AGENT', '51200')}/system_trigger"
-        msg_text = f"[群聊 {group_id}] {sender} 说:\n{content}\n\n(你在群聊中的身份/角色是「{my_title}」，回复时请体现你的专业角色视角。仅当消息与你直接相关、点名你、向你提问、或面向所有人时，才使用 send_to_group 工具回复，group_id={group_id}。其他情况请忽略，不要回应。)"
+
+        if mentions and member_key in mentions:
+            # 被 @ 的消息：强调这是专门发送的，必须回复
+            msg_text = (f"[群聊 {group_id}] {sender} @你 说:\n{content}\n\n"
+                        f"(⚠️ 这是专门 @你 的消息，你必须回复！"
+                        f"你在群聊中的身份/角色是「{my_title}」，回复时请体现你的专业角色视角。"
+                        f"请使用 send_to_group 工具回复，group_id={group_id}。)")
+        else:
+            # 普通广播消息
+            msg_text = (f"[群聊 {group_id}] {sender} 说:\n{content}\n\n"
+                        f"(你在群聊中的身份/角色是「{my_title}」，回复时请体现你的专业角色视角。"
+                        f"仅当消息与你直接相关、点名你、向你提问、或面向所有人时，"
+                        f"才使用 send_to_group 工具回复，group_id={group_id}。"
+                        f"其他情况请忽略，不要回应。)")
         try:
             async with httpx.AsyncClient(timeout=10) as client:
                 await client.post(
@@ -1562,10 +1586,10 @@ async def post_group_message(group_id: str, req: GroupMessageRequest, authorizat
         msg_id = cursor2.lastrowid
         await db.commit()
 
-    # 异步广播给群内所有 agent
+    # 异步广播给群内 agent（如有 mentions 则只发给被 @ 的）
     # sender 可能是 "username#session_id" 格式，提取纯 user_id 用于排除
     exclude_uid = sender.split("#")[0] if "#" in sender else sender
-    asyncio.create_task(_broadcast_to_group(group_id, sender, req.content, exclude_user=exclude_uid, exclude_session=sender_session))
+    asyncio.create_task(_broadcast_to_group(group_id, sender, req.content, exclude_user=exclude_uid, exclude_session=sender_session, mentions=req.mentions))
 
     return {"status": "sent", "sender": sender, "timestamp": now, "id": msg_id}
 
