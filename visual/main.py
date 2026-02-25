@@ -183,23 +183,32 @@ def _topological_sort_edges(edges: list[dict], node_map: dict) -> list[str]:
 def _node_yaml_name(node: dict, use_bot_session: bool = False) -> str:
     """Convert a canvas node to an OASIS YAML expert name.
 
+    Each node carries an ``instance`` number (≥1) so the same agent can appear
+    multiple times in a layout with distinct identities.
+
     For expert nodes:
-      - use_bot_session=False → "tag#temp#1" (stateless ExpertAgent)
-      - use_bot_session=True  → "tag#oasis#new" (stateful SessionExpert, auto-create)
+      - use_bot_session=False → "tag#temp#<instance>" (stateless ExpertAgent)
+      - use_bot_session=True  → "tag#oasis#new"       (stateful SessionExpert)
     For session_agent nodes:
-      - "title#session_id" (existing agent session, no persona injection)
+      - "title#session_id#<instance>" when instance > 1 (multiple uses of same session)
+      - "title#session_id"            when instance == 1
     """
+    inst = node.get("instance", 1)
     node_type = node.get("type", "expert")
+
     if node_type == "session_agent":
         title = node.get("name", "Agent")
         sid = node.get("session_id", "")
         if sid:
+            if inst > 1:
+                return f"{title}#{sid}#{inst}"
             return f"{title}#{sid}"
         return title
+
     tag = node.get("tag", "custom")
     if use_bot_session:
         return f"{tag}#oasis#new"
-    return f"{tag}#temp#1"
+    return f"{tag}#temp#{inst}"
 
 
 def layout_to_yaml(data: dict) -> str:
@@ -377,10 +386,12 @@ def _build_llm_prompt(data: dict) -> str:
 
     expert_list_str = ""
     for i, n in enumerate(expert_nodes, 1):
+        inst = n.get("instance", 1)
+        inst_label = f" [instance #{inst}]" if inst > 1 else ""
         if n.get("type") == "session_agent":
-            expert_list_str += f"  {i}. {n['emoji']} {n['name']} [SESSION AGENT: session_id={n.get('session_id', '?')}] — existing agent with its own tools & memory\n"
+            expert_list_str += f"  {i}. {n['emoji']} {n['name']}{inst_label} [SESSION AGENT: session_id={n.get('session_id', '?')}] — existing agent with its own tools & memory\n"
         else:
-            expert_list_str += f"  {i}. {n['emoji']} {n['name']} (tag: {n['tag']}, temperature: {n.get('temperature', 0.5)}, source: {n.get('source', 'public')})\n"
+            expert_list_str += f"  {i}. {n['emoji']} {n['name']}{inst_label} (tag: {n['tag']}, temperature: {n.get('temperature', 0.5)}, source: {n.get('source', 'public')})\n"
 
     # ── Describe relationships ──
     relationships = []
@@ -450,7 +461,8 @@ The YAML must follow this structure:
 version: 1
 repeat: true/false
 plan:
-  - expert: "tag#temp#1"          # Preset expert (stateless, uses tag)
+  - expert: "tag#temp#1"          # Preset expert instance 1 (stateless, uses tag)
+  - expert: "tag#temp#2"          # Same expert, 2nd instance
   - expert: "tag#oasis#new"       # Preset expert (stateful session, auto-create)
   - expert: "Title#session_id"    # Existing session agent (with its own tools & memory)
   - parallel:                     # Multiple experts speak simultaneously
@@ -463,9 +475,10 @@ plan:
 ```
 
 ## Expert Name Formats
-1. `tag#temp#N` — Preset expert (stateless), e.g. "creative#temp#1", "critical#temp#1"
+1. `tag#temp#N` — Preset expert instance N (stateless), e.g. "creative#temp#1", "creative#temp#2" (same expert used twice)
 2. `tag#oasis#new` — Preset expert (stateful session, auto-creates new session), use when bot_session mode is ON
 3. `Title#session_id` — Existing session agent, referenced by actual session_id, has its own system prompt, tools & memory
+4. `Title#session_id#N` — Same session agent used multiple times (N>1)
 
 ## Available Step Types
 1. `expert: "Name"` — Single expert speaks in order
