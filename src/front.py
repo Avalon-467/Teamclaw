@@ -449,6 +449,187 @@ HTML_TEMPLATE = """
             .page-tab { font-size: 12px; padding: 8px 0; }
         }
 
+        /* === Orchestration Page (Light Theme) === */
+        .orch-page { display: none; flex-direction: column; height: 100%; overflow: hidden; }
+        .orch-page.active { display: flex; }
+        .orch-layout { display: flex; flex: 1; overflow: hidden; }
+        .orch-sidebar {
+            width: 200px; flex-shrink: 0; border-right: 1px solid #e5e7eb;
+            display: flex; flex-direction: column; background: #fafbfc; overflow: hidden;
+        }
+        .orch-sidebar-header { padding: 10px 12px; border-bottom: 1px solid #e5e7eb; background: #f3f4f6; flex-shrink: 0; }
+        .orch-expert-list { flex: 1; overflow-y: auto; padding: 4px 6px; }
+        .orch-expert-card {
+            display: flex; align-items: center; gap: 6px; padding: 6px 8px; margin-bottom: 3px;
+            border-radius: 8px; background: white; border: 1px solid #e5e7eb;
+            cursor: grab; transition: all 0.15s; font-size: 12px;
+        }
+        .orch-expert-card:hover { border-color: #2563eb; background: #eff6ff; }
+        .orch-expert-card:active { cursor: grabbing; }
+        .orch-expert-card .orch-emoji { font-size: 18px; }
+        .orch-expert-card .orch-name { font-weight: 500; color: #374151; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .orch-expert-card .orch-tag { font-size: 10px; color: #9ca3af; }
+        .orch-expert-card .orch-temp { font-size: 10px; color: #059669; background: #ecfdf5; padding: 1px 5px; border-radius: 4px; }
+        .orch-manual-card {
+            display: flex; align-items: center; gap: 6px; padding: 6px 8px; margin: 3px 6px 6px;
+            border-radius: 8px; background: #faf5ff; border: 1px dashed #a855f7; cursor: grab; font-size: 12px;
+        }
+        .orch-manual-card:hover { background: #f3e8ff; }
+
+        .orch-canvas-wrapper { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+        .orch-toolbar {
+            display: flex; gap: 4px; padding: 6px 10px; background: #f9fafb; border-bottom: 1px solid #e5e7eb; flex-shrink: 0; flex-wrap: wrap;
+        }
+        .orch-btn {
+            padding: 4px 10px; border: 1px solid #d1d5db; border-radius: 6px; background: white;
+            color: #374151; cursor: pointer; font-size: 11px; transition: all 0.15s;
+        }
+        .orch-btn:hover { background: #f3f4f6; border-color: #2563eb; }
+        .orch-btn-primary { background: #2563eb; color: white; border-color: #2563eb; }
+        .orch-btn-primary:hover { background: #1d4ed8; }
+        .orch-btn-danger { color: #dc2626; border-color: #fca5a5; }
+        .orch-btn-danger:hover { background: #fef2f2; }
+
+        .orch-canvas {
+            flex: 1; position: relative; overflow: hidden;
+            background: linear-gradient(#f1f5f9 1px, transparent 1px), linear-gradient(90deg, #f1f5f9 1px, transparent 1px);
+            background-size: 24px 24px; background-color: #fafbfc;
+        }
+
+        .orch-node {
+            position: absolute; min-width: 110px; padding: 8px 10px;
+            border-radius: 10px; background: white;
+            border: 2px solid #d1d5db; cursor: move; user-select: none; z-index: 10;
+            transition: box-shadow 0.15s, border-color 0.15s;
+            display: flex; align-items: center; gap: 6px; font-size: 12px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.06);
+        }
+        .orch-node:hover { border-color: #2563eb; box-shadow: 0 2px 8px rgba(37,99,235,0.15); }
+        .orch-node.selected { border-color: #2563eb; box-shadow: 0 0 0 3px rgba(37,99,235,0.2); }
+        .orch-node.manual-type { background: #faf5ff; border-color: #a855f7; }
+        .orch-node .orch-node-emoji { font-size: 18px; }
+        .orch-node .orch-node-name { font-weight: 600; color: #374151; white-space: nowrap; }
+        .orch-node .orch-node-tag { font-size: 10px; color: #9ca3af; }
+        .orch-node .orch-node-del {
+            position: absolute; top: -7px; right: -7px; width: 18px; height: 18px;
+            border-radius: 50%; background: #ef4444; color: white; font-size: 11px;
+            line-height: 18px; text-align: center; cursor: pointer; display: none; z-index: 20;
+        }
+        .orch-node:hover .orch-node-del { display: block; }
+        .orch-node .orch-node-status {
+            position: absolute; bottom: -4px; right: 6px; width: 8px; height: 8px;
+            border-radius: 50%; border: 2px solid white;
+        }
+        .orch-node .orch-node-status.running { background: #22c55e; animation: orch-pulse 1.5s infinite; }
+        .orch-node .orch-node-status.idle { background: #d1d5db; }
+        @keyframes orch-pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.4; } }
+
+        .orch-port {
+            position: absolute; width: 10px; height: 10px; border-radius: 50%;
+            background: #2563eb; border: 2px solid white; z-index: 15; cursor: crosshair;
+        }
+        .orch-port.port-out { right: -5px; top: 50%; transform: translateY(-50%); }
+        .orch-port.port-in { left: -5px; top: 50%; transform: translateY(-50%); }
+        .orch-port:hover { background: #3b82f6; transform: translateY(-50%) scale(1.3); }
+
+        .orch-group {
+            position: absolute; border-radius: 16px; border: 2px dashed; z-index: 2; min-width: 140px; min-height: 80px;
+        }
+        .orch-group.parallel { border-color: #22c55e80; background: #22c55e08; }
+        .orch-group.all { border-color: #f59e0b80; background: #f59e0b08; }
+        .orch-group .orch-group-label {
+            position: absolute; top: -10px; left: 14px; padding: 1px 8px; border-radius: 8px;
+            font-size: 10px; background: white; border: 1px solid;
+        }
+        .orch-group.parallel .orch-group-label { color: #16a34a; border-color: #22c55e80; }
+        .orch-group.all .orch-group-label { color: #d97706; border-color: #f59e0b80; }
+        .orch-group .orch-group-del {
+            position: absolute; top: -7px; right: -7px; width: 18px; height: 18px;
+            border-radius: 50%; background: #ef4444; color: white; font-size: 11px;
+            line-height: 18px; text-align: center; cursor: pointer; display: none; z-index: 20;
+        }
+        .orch-group:hover .orch-group-del { display: block; }
+
+        .orch-right-panel {
+            width: 280px; flex-shrink: 0; border-left: 1px solid #e5e7eb;
+            display: flex; flex-direction: column; background: white; overflow: hidden;
+        }
+        .orch-right-section { border-bottom: 1px solid #f3f4f6; }
+        .orch-yaml-box {
+            font-family: ui-monospace, SFMono-Regular, monospace; font-size: 11px;
+            background: #f9fafb; border: 1px solid #e5e7eb; border-radius: 6px;
+            padding: 6px 8px; overflow-y: auto; white-space: pre-wrap; word-break: break-all; line-height: 1.4;
+        }
+        .orch-status-bar {
+            padding: 4px 12px; background: #f9fafb; border-top: 1px solid #e5e7eb;
+            font-size: 10px; color: #9ca3af; flex-shrink: 0;
+        }
+
+        .orch-sel-rect { position: absolute; border: 1px solid #2563eb; background: rgba(37,99,235,0.08); z-index: 5; pointer-events: none; }
+        .orch-context-menu {
+            position: fixed; background: white; border: 1px solid #e5e7eb; border-radius: 8px;
+            padding: 4px; z-index: 1000; min-width: 150px; box-shadow: 0 4px 12px rgba(0,0,0,0.12);
+        }
+        .orch-context-menu .orch-menu-item { padding: 6px 10px; cursor: pointer; border-radius: 4px; font-size: 12px; color: #374151; }
+        .orch-context-menu .orch-menu-item:hover { background: #eff6ff; }
+        .orch-context-menu .orch-menu-divider { height: 1px; background: #e5e7eb; margin: 3px 0; }
+        .orch-toast {
+            position: fixed; bottom: 60px; left: 50%; transform: translateX(-50%);
+            padding: 8px 16px; background: #2563eb; color: white; border-radius: 8px;
+            font-size: 12px; z-index: 3000; animation: slideIn 0.3s ease; box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+        }
+
+        /* Session selector modal for orchestration */
+        .orch-session-list { max-height: 280px; overflow-y: auto; margin: 8px 0; }
+        .orch-session-item {
+            display: flex; align-items: center; gap: 10px; padding: 10px 12px; margin-bottom: 4px;
+            border: 1px solid #e5e7eb; border-radius: 8px; cursor: pointer; transition: all 0.2s;
+            background: #fafafa;
+        }
+        .orch-session-item:hover { border-color: #2563eb; background: #eff6ff; }
+        .orch-session-item.selected { border-color: #2563eb; background: #dbeafe; box-shadow: 0 0 0 2px rgba(37,99,235,0.2); }
+        .orch-session-item .orch-session-title { font-size: 13px; font-weight: 500; color: #374151; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .orch-session-item .orch-session-id { font-size: 10px; color: #9ca3af; font-family: monospace; }
+        .orch-session-item .orch-session-icon { font-size: 18px; }
+        .orch-session-new { display: flex; align-items: center; gap: 10px; padding: 10px 12px; margin-bottom: 4px; border: 2px dashed #d1d5db; border-radius: 8px; cursor: pointer; transition: all 0.2s; background: white; }
+        .orch-session-new:hover { border-color: #2563eb; background: #eff6ff; }
+        .orch-session-new.selected { border-color: #2563eb; background: #dbeafe; }
+        .orch-goto-chat-btn {
+            display: inline-flex; align-items: center; gap: 6px; margin-top: 8px; padding: 8px 16px;
+            background: linear-gradient(135deg, #2563eb, #7c3aed); color: white; border: none;
+            border-radius: 8px; font-size: 13px; font-weight: 500; cursor: pointer;
+            transition: all 0.2s; box-shadow: 0 2px 8px rgba(37,99,235,0.3);
+        }
+        .orch-goto-chat-btn:hover { transform: translateY(-1px); box-shadow: 0 4px 12px rgba(37,99,235,0.4); }
+        .orch-goto-chat-btn:active { transform: translateY(0); }
+
+        .orch-modal-overlay {
+            position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+            background: rgba(0,0,0,0.3); z-index: 2000; display: flex; align-items: center; justify-content: center;
+        }
+        .orch-modal {
+            background: white; border: 1px solid #e5e7eb; border-radius: 12px;
+            padding: 20px; min-width: 360px; max-width: 460px; box-shadow: 0 8px 24px rgba(0,0,0,0.12);
+        }
+        .orch-modal h3 { margin-bottom: 12px; color: #374151; font-size: 15px; }
+        .orch-modal input, .orch-modal textarea {
+            width: 100%; padding: 6px 10px; border: 1px solid #d1d5db; border-radius: 6px;
+            font-size: 12px; margin-bottom: 8px; outline: none; transition: border-color 0.2s;
+        }
+        .orch-modal input:focus, .orch-modal textarea:focus { border-color: #2563eb; }
+        .orch-modal textarea { height: 60px; resize: vertical; font-family: inherit; }
+        .orch-modal .orch-modal-btns { display: flex; gap: 6px; justify-content: flex-end; }
+        .orch-modal .orch-modal-btns button {
+            padding: 6px 14px; border-radius: 6px; border: 1px solid #d1d5db;
+            background: white; color: #374151; cursor: pointer; font-size: 12px;
+        }
+        .orch-modal .orch-modal-btns button.primary { background: #2563eb; color: white; border-color: #2563eb; }
+
+        @media (max-width: 768px) {
+            .orch-sidebar { display: none; }
+            .orch-right-panel { width: 200px; }
+        }
+
         .main-layout { display: flex; height: var(--app-height, 100vh); max-width: 100%; overflow: hidden; }
         .chat-main { flex: 1; min-width: 0; max-width: 900px; display: flex; flex-direction: column; height: var(--app-height, 100vh); overflow: hidden; }
 
@@ -665,6 +846,7 @@ HTML_TEMPLATE = """
             <div class="page-tab-bar">
                 <div class="page-tab active" id="tab-chat" onclick="switchPage('chat')" data-i18n="tab_chat">💬 对话</div>
                 <div class="page-tab" id="tab-group" onclick="switchPage('group')" data-i18n="tab_group">👥 群聊</div>
+                <div class="page-tab" id="tab-orchestrate" onclick="switchPage('orchestrate')">🎨 编排</div>
             </div>
 
             <!-- === Chat Page === -->
@@ -839,6 +1021,86 @@ HTML_TEMPLATE = """
             </div>
         </div>
         <!-- end of group-page -->
+
+        <!-- === Orchestration Page === -->
+        <div id="page-orchestrate" class="orch-page">
+            <div class="orch-layout">
+                <!-- Left: Expert Pool -->
+                <div class="orch-sidebar">
+                    <div class="orch-sidebar-header">
+                        <span class="text-sm font-bold text-gray-700">🧑‍💼 专家池</span>
+                    </div>
+                    <div class="orch-expert-list" id="orch-expert-list"></div>
+                    <div class="orch-manual-card" draggable="true" id="orch-manual-card">
+                        <span style="font-size:18px;">📝</span>
+                        <div><div class="text-xs font-semibold text-gray-700">手动注入</div><div class="text-[10px] text-purple-400">固定内容</div></div>
+                    </div>
+                    <div style="padding:6px 10px;font-size:10px;color:#9ca3af;border-top:1px solid #e5e7eb;">
+                        <b>快捷操作：</b><br>• 拖入专家到画布<br>• 连接端口 = 工作流<br>• 选中 + Ctrl+G = 分组<br>• 双击侧栏快速添加
+                    </div>
+                </div>
+
+                <!-- Center: Canvas -->
+                <div class="orch-canvas-wrapper">
+                    <!-- Toolbar -->
+                    <div class="orch-toolbar">
+                        <button onclick="orchAutoArrange()" class="orch-btn" title="自动排列">🔄 排列</button>
+                        <button onclick="orchSaveLayout()" class="orch-btn" title="保存布局">💾 保存</button>
+                        <button onclick="orchLoadLayout()" class="orch-btn" title="加载布局">📂 加载</button>
+                        <button onclick="orchGenerateAgentYaml()" class="orch-btn orch-btn-primary" title="AI 生成 YAML">🤖 AI编排</button>
+                        <button onclick="orchExportYaml()" class="orch-btn orch-btn-primary" title="复制 YAML">📋 导出</button>
+                        <button onclick="orchRefreshSessions()" class="orch-btn" title="刷新 session 状态">🔄 状态</button>
+                        <button onclick="orchClearCanvas()" class="orch-btn orch-btn-danger" title="清空画布">🗑️ 清空</button>
+                    </div>
+                    <div class="orch-canvas" id="orch-canvas-area">
+                        <svg id="orch-edge-svg" style="width:100%;height:100%;position:absolute;top:0;left:0;z-index:5;pointer-events:none;">
+                            <defs><marker id="orch-arrowhead" markerWidth="10" markerHeight="7" refX="10" refY="3.5" orient="auto"><polygon points="0 0, 10 3.5, 0 7" fill="#2563eb" /></marker></defs>
+                        </svg>
+                        <div id="orch-canvas-hint" style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);text-align:center;color:#9ca3af;pointer-events:none;z-index:1;">
+                            <div style="font-size:40px;margin-bottom:8px;">🎯</div>
+                            <div style="font-size:14px;font-weight:500;color:#6b7280;">拖入专家开始编排</div>
+                            <div style="font-size:11px;margin-top:6px;color:#9ca3af;">连线 = 工作流 | 分组 = 并行 | AI编排 = 自动生成</div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Right: Settings + YAML -->
+                <div class="orch-right-panel">
+                    <div class="orch-right-section">
+                        <div class="text-xs font-bold text-gray-500 uppercase tracking-wide px-3 pt-3 pb-1">⚙️ 设置</div>
+                        <div class="px-3 pb-2 space-y-1 text-xs text-gray-600 border-b border-gray-100">
+                            <label class="flex items-center gap-2 cursor-pointer"><input type="checkbox" id="orch-repeat" checked class="accent-blue-600"> 每轮重复计划</label>
+                            <label class="flex items-center gap-2">轮次: <input type="number" id="orch-rounds" value="5" min="1" max="20" class="w-12 px-1 py-0.5 border border-gray-300 rounded text-xs"></label>
+                            <label class="flex items-center gap-2 cursor-pointer"><input type="checkbox" id="orch-bot-session" class="accent-blue-600"> 有状态模式</label>
+                            <label class="flex items-center gap-2">聚类阈值: <input type="range" id="orch-threshold" min="50" max="400" value="150" class="flex-1 accent-blue-600"><span id="orch-threshold-val" class="text-[10px] text-gray-400">150</span></label>
+                        </div>
+                    </div>
+
+                    <div class="orch-right-section">
+                        <div class="text-xs font-bold text-gray-500 uppercase tracking-wide px-3 pt-2 pb-1">🤖 AI 生成</div>
+                        <div id="orch-agent-status" class="mx-3 mb-1 px-2 py-1 rounded text-[10px] bg-gray-50 border border-gray-200 text-gray-400">
+                            点击「🤖 AI编排」自动生成 YAML
+                        </div>
+                        <div class="px-3 pb-1">
+                            <div class="text-[10px] text-gray-400 mb-1">📨 发送的 Prompt <button onclick="orchCopyPrompt()" class="text-[10px] text-blue-500 hover:underline float-right">复制</button></div>
+                            <div class="orch-yaml-box text-[10px] text-amber-600" id="orch-prompt-content" style="max-height:100px;">点击 AI编排 后显示</div>
+                        </div>
+                        <div class="px-3 pb-1">
+                            <div class="text-[10px] text-gray-400 mb-1">🤖 Agent YAML <button onclick="orchCopyAgentYaml()" class="text-[10px] text-blue-500 hover:underline float-right">复制</button></div>
+                            <div class="orch-yaml-box text-[10px] text-green-600" id="orch-agent-yaml" style="max-height:140px;">等待 Agent 生成</div>
+                        </div>
+                    </div>
+
+                    <div class="orch-right-section flex-1 flex flex-col min-h-0">
+                        <div class="text-xs font-bold text-gray-500 uppercase tracking-wide px-3 pt-2 pb-1">📄 规则 YAML</div>
+                        <div class="orch-yaml-box flex-1 mx-3 mb-2 text-xs text-green-700" id="orch-yaml-content">拖入专家后自动生成...</div>
+                    </div>
+
+                    <div class="orch-status-bar" id="orch-status-bar">节点: 0 | 连线: 0 | 分组: 0</div>
+                </div>
+            </div>
+        </div>
+        <!-- end of orchestrate-page -->
         </div>
         <!-- end of chat-main -->
 
@@ -3272,26 +3534,39 @@ HTML_TEMPLATE = """
             // Update tabs
             document.getElementById('tab-chat').classList.toggle('active', page === 'chat');
             document.getElementById('tab-group').classList.toggle('active', page === 'group');
+            document.getElementById('tab-orchestrate').classList.toggle('active', page === 'orchestrate');
             // Show/hide pages
             const chatPage = document.getElementById('page-chat');
             const groupPage = document.getElementById('page-group');
+            const orchPage = document.getElementById('page-orchestrate');
             if (page === 'chat') {
                 chatPage.classList.remove('hidden-page');
                 chatPage.style.display = 'flex';
                 groupPage.classList.remove('active');
                 groupPage.classList.remove('mobile-chat-open');
+                if (orchPage) orchPage.classList.remove('active');
                 stopGroupPolling();
                 stopGroupListPolling();
-            } else {
+            } else if (page === 'group') {
                 chatPage.classList.add('hidden-page');
                 chatPage.style.display = 'none';
                 groupPage.classList.add('active');
+                if (orchPage) orchPage.classList.remove('active');
                 loadGroupList();
                 startGroupListPolling();
                 // 如果已有打开的群，恢复消息轮询
                 if (currentGroupId) {
                     startGroupPolling(currentGroupId);
                 }
+            } else if (page === 'orchestrate') {
+                chatPage.classList.add('hidden-page');
+                chatPage.style.display = 'none';
+                groupPage.classList.remove('active');
+                groupPage.classList.remove('mobile-chat-open');
+                if (orchPage) orchPage.classList.add('active');
+                stopGroupPolling();
+                stopGroupListPolling();
+                if (!window._orchInitialized) { orchInit(); window._orchInitialized = true; }
             }
         }
 
@@ -3926,6 +4201,732 @@ HTML_TEMPLATE = """
                 }
             }, 200);
         });
+    }
+    </script>
+
+    <!-- ===== Orchestration Page JavaScript ===== -->
+    <script>
+    // ── Orchestration State ──
+    const orch = {
+        experts: [],
+        nodes: [],
+        edges: [],
+        groups: [],
+        selectedNodes: new Set(),
+        nid: 1, eid: 1, gid: 1,
+        dragging: null,
+        connecting: null,
+        selecting: null,
+        contextMenu: null,
+        sessionStatuses: {},
+    };
+
+    function orchInit() {
+        orchLoadExperts();
+        orchSetupCanvas();
+        orchSetupSettings();
+    }
+
+    // ── Load experts ──
+    async function orchLoadExperts() {
+        try {
+            const r = await fetch('/proxy_visual/experts');
+            orch.experts = await r.json();
+        } catch(e) { console.error('Load experts failed:', e); }
+        orchRenderSidebar();
+    }
+
+    function orchRenderSidebar() {
+        const list = document.getElementById('orch-expert-list');
+        list.innerHTML = '';
+        orch.experts.forEach(exp => {
+            const card = document.createElement('div');
+            card.className = 'orch-expert-card';
+            card.draggable = true;
+            card.innerHTML = `<span class="orch-emoji">${exp.emoji}</span><div style="min-width:0;flex:1;"><div class="orch-name">${exp.name}</div><div class="orch-tag">${exp.tag}</div></div><span class="orch-temp">${exp.temperature}</span>`;
+            card.addEventListener('dragstart', e => {
+                e.dataTransfer.setData('application/json', JSON.stringify({type:'expert', ...exp}));
+                e.dataTransfer.effectAllowed = 'copy';
+            });
+            card.addEventListener('dblclick', () => orchAddNodeCenter({type:'expert', ...exp}));
+            list.appendChild(card);
+        });
+        // Manual card
+        const mc = document.getElementById('orch-manual-card');
+        mc.addEventListener('dragstart', e => {
+            e.dataTransfer.setData('application/json', JSON.stringify({type:'manual', name:'手动注入', tag:'manual', emoji:'📝', temperature:0}));
+            e.dataTransfer.effectAllowed = 'copy';
+        });
+        mc.addEventListener('dblclick', () => orchAddNodeCenter({type:'manual', name:'手动注入', tag:'manual', emoji:'📝', temperature:0}));
+    }
+
+    // ── Settings ──
+    function orchSetupSettings() {
+        document.getElementById('orch-threshold').addEventListener('input', e => {
+            document.getElementById('orch-threshold-val').textContent = e.target.value;
+        });
+    }
+    function orchGetSettings() {
+        return {
+            repeat: document.getElementById('orch-repeat').checked,
+            max_rounds: parseInt(document.getElementById('orch-rounds').value) || 5,
+            use_bot_session: document.getElementById('orch-bot-session').checked,
+            cluster_threshold: parseInt(document.getElementById('orch-threshold').value) || 150,
+        };
+    }
+
+    // ── Node Management ──
+    function orchAddNode(data, x, y) {
+        const id = 'on' + orch.nid++;
+        const node = { id, name: data.name, tag: data.tag||'custom', emoji: data.emoji||'⭐', x: Math.round(x), y: Math.round(y), type: data.type||'expert', temperature: data.temperature||0.5, author: data.author||'主持人', content: data.content||'' };
+        orch.nodes.push(node);
+        orchRenderNode(node);
+        orchUpdateYaml();
+        orchUpdateStatus();
+        document.getElementById('orch-canvas-hint').style.display = 'none';
+        return node;
+    }
+
+    function orchAddNodeCenter(data) {
+        const area = document.getElementById('orch-canvas-area');
+        const cx = area.offsetWidth / 2 - 60, cy = area.offsetHeight / 2 - 20;
+        const n = orch.nodes.length;
+        const angle = n * 137.5 * Math.PI / 180;
+        const radius = 80 * Math.sqrt(n) * 0.5;
+        return orchAddNode(data, cx + radius * Math.cos(angle), cy + radius * Math.sin(angle));
+    }
+
+    function orchRenderNode(node) {
+        const area = document.getElementById('orch-canvas-area');
+        const el = document.createElement('div');
+        el.className = 'orch-node' + (node.type === 'manual' ? ' manual-type' : '');
+        el.id = 'onode-' + node.id;
+        el.style.left = node.x + 'px';
+        el.style.top = node.y + 'px';
+
+        const status = orch.sessionStatuses[node.tag] || orch.sessionStatuses[node.name] || 'idle';
+        el.innerHTML = `
+            <span class="orch-node-emoji">${node.emoji}</span>
+            <div style="min-width:0;flex:1;"><div class="orch-node-name">${node.name}</div><div class="orch-node-tag">${node.tag}</div></div>
+            <div class="orch-node-del" title="移除">×</div>
+            <div class="orch-port port-in" data-node="${node.id}" data-dir="in"></div>
+            <div class="orch-port port-out" data-node="${node.id}" data-dir="out"></div>
+            <div class="orch-node-status ${status}"></div>
+        `;
+
+        el.querySelector('.orch-node-del').addEventListener('click', e => { e.stopPropagation(); orchRemoveNode(node.id); });
+
+        el.addEventListener('mousedown', e => {
+            if (e.target.classList.contains('orch-port') || e.target.classList.contains('orch-node-del')) return;
+            e.stopPropagation();
+            if (!e.shiftKey && !orch.selectedNodes.has(node.id)) orchClearSelection();
+            orchSelectNode(node.id);
+            orch.dragging = { nodeId: node.id, offX: e.clientX - node.x, offY: e.clientY - node.y, multi: orch.selectedNodes.size > 1, starts: {} };
+            if (orch.selectedNodes.size > 1) {
+                orch.selectedNodes.forEach(nid => { const n = orch.nodes.find(nn=>nn.id===nid); if(n) orch.dragging.starts[nid]={x:n.x,y:n.y}; });
+            }
+        });
+
+        el.querySelectorAll('.orch-port').forEach(port => {
+            port.addEventListener('mousedown', e => {
+                e.stopPropagation();
+                if (port.dataset.dir === 'out') {
+                    const rect = port.getBoundingClientRect();
+                    const cRect = document.getElementById('orch-canvas-area').getBoundingClientRect();
+                    orch.connecting = { sourceId: node.id, sx: rect.left+5-cRect.left, sy: rect.top+5-cRect.top };
+                }
+            });
+            port.addEventListener('mouseup', e => {
+                e.stopPropagation();
+                if (orch.connecting && port.dataset.dir === 'in' && port.dataset.node !== orch.connecting.sourceId) {
+                    orchAddEdge(orch.connecting.sourceId, node.id);
+                }
+                orch.connecting = null;
+                orchRemoveTempLine();
+            });
+        });
+
+        el.addEventListener('dblclick', () => { if (node.type === 'manual') orchShowManualModal(node); });
+        area.appendChild(el);
+    }
+
+    function orchRemoveNode(id) {
+        orch.nodes = orch.nodes.filter(n => n.id !== id);
+        orch.edges = orch.edges.filter(e => e.source !== id && e.target !== id);
+        orch.selectedNodes.delete(id);
+        orch.groups.forEach(g => { g.nodeIds = g.nodeIds.filter(nid => nid !== id); });
+        const el = document.getElementById('onode-' + id);
+        if (el) el.remove();
+        orchRenderEdges();
+        orchUpdateYaml();
+        orchUpdateStatus();
+        if (orch.nodes.length === 0) document.getElementById('orch-canvas-hint').style.display = '';
+    }
+
+    function orchSelectNode(id) { orch.selectedNodes.add(id); const el=document.getElementById('onode-'+id); if(el) el.classList.add('selected'); }
+    function orchClearSelection() { orch.selectedNodes.forEach(id => { const el=document.getElementById('onode-'+id); if(el) el.classList.remove('selected'); }); orch.selectedNodes.clear(); }
+
+    // ── Edge Management ──
+    function orchAddEdge(src, tgt) {
+        if (orch.edges.some(e => e.source === src && e.target === tgt)) return;
+        orch.edges.push({ id: 'oe' + orch.eid++, source: src, target: tgt });
+        orchRenderEdges();
+        orchUpdateYaml();
+    }
+
+    function orchRenderEdges() {
+        const svg = document.getElementById('orch-edge-svg');
+        const defs = svg.querySelector('defs');
+        svg.innerHTML = '';
+        svg.appendChild(defs);
+        orch.edges.forEach(edge => {
+            const sn = orch.nodes.find(n => n.id === edge.source);
+            const tn = orch.nodes.find(n => n.id === edge.target);
+            if (!sn || !tn) return;
+            const se = document.getElementById('onode-' + edge.source);
+            const te = document.getElementById('onode-' + edge.target);
+            if (!se || !te) return;
+            const x1 = sn.x + se.offsetWidth, y1 = sn.y + se.offsetHeight/2;
+            const x2 = tn.x, y2 = tn.y + te.offsetHeight/2;
+            const cpx = (x1+x2)/2;
+            const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+            path.setAttribute('d', `M${x1},${y1} C${cpx},${y1} ${cpx},${y2} ${x2},${y2}`);
+            path.setAttribute('stroke', '#2563eb');
+            path.setAttribute('stroke-width', '2');
+            path.setAttribute('fill', 'none');
+            path.setAttribute('marker-end', 'url(#orch-arrowhead)');
+            path.style.cursor = 'pointer';
+            path.style.pointerEvents = 'all';
+            path.addEventListener('click', e => { e.stopPropagation(); orch.edges = orch.edges.filter(ee=>ee.id!==edge.id); orchRenderEdges(); orchUpdateYaml(); });
+            path.addEventListener('mouseenter', () => { path.setAttribute('stroke','#ef4444'); path.setAttribute('stroke-width','3'); });
+            path.addEventListener('mouseleave', () => { path.setAttribute('stroke','#2563eb'); path.setAttribute('stroke-width','2'); });
+            svg.appendChild(path);
+        });
+    }
+
+    function orchRemoveTempLine() { const svg=document.getElementById('orch-edge-svg'); const t=svg.querySelector('.temp-line'); if(t)t.remove(); }
+    function orchDrawTempLine(x1,y1,x2,y2) {
+        const svg=document.getElementById('orch-edge-svg'); orchRemoveTempLine();
+        const line=document.createElementNS('http://www.w3.org/2000/svg','line');
+        line.classList.add('temp-line');
+        line.setAttribute('x1',x1); line.setAttribute('y1',y1); line.setAttribute('x2',x2); line.setAttribute('y2',y2);
+        line.setAttribute('stroke','#2563eb80'); line.setAttribute('stroke-width','2'); line.setAttribute('stroke-dasharray','5,5');
+        line.style.pointerEvents = 'none';
+        svg.appendChild(line);
+    }
+
+    // ── Group Management ──
+    function orchCreateGroup(type) {
+        if (orch.selectedNodes.size < 2 && type !== 'all') { orchToast('请先选中至少2个节点'); return; }
+        const members = [...orch.selectedNodes];
+        const nodes = members.map(id => orch.nodes.find(n=>n.id===id)).filter(Boolean);
+        const pad = 30;
+        const x = Math.min(...nodes.map(n=>n.x)) - pad;
+        const y = Math.min(...nodes.map(n=>n.y)) - pad;
+        const w = Math.max(...nodes.map(n=>n.x+120)) - x + pad;
+        const h = Math.max(...nodes.map(n=>n.y+50)) - y + pad;
+        const id = 'og' + orch.gid++;
+        const labelMap = {parallel:'🔀 并行', all:'👥 全员'};
+        const group = { id, name: labelMap[type]||type, type, x, y, w, h, nodeIds: members };
+        orch.groups.push(group);
+        orchRenderGroup(group);
+        orchUpdateYaml();
+    }
+
+    function orchRenderGroup(group) {
+        const area = document.getElementById('orch-canvas-area');
+        const el = document.createElement('div');
+        el.className = 'orch-group ' + group.type;
+        el.id = 'ogroup-' + group.id;
+        el.style.cssText = `left:${group.x}px;top:${group.y}px;width:${group.w}px;height:${group.h}px;`;
+        el.innerHTML = `<span class="orch-group-label">${group.name}</span><div class="orch-group-del" title="解散">×</div>`;
+        el.querySelector('.orch-group-del').addEventListener('click', e => {
+            e.stopPropagation();
+            orch.groups = orch.groups.filter(g=>g.id!==group.id);
+            el.remove();
+            orchUpdateYaml();
+        });
+        area.appendChild(el);
+    }
+
+    function orchUpdateGroupBounds(group) {
+        const members = orch.nodes.filter(n => group.nodeIds.includes(n.id));
+        if (!members.length) return;
+        const pad = 30;
+        group.x = Math.min(...members.map(n=>n.x)) - pad;
+        group.y = Math.min(...members.map(n=>n.y)) - pad;
+        group.w = Math.max(...members.map(n=>n.x+120)) - group.x + pad;
+        group.h = Math.max(...members.map(n=>n.y+50)) - group.y + pad;
+        const el = document.getElementById('ogroup-' + group.id);
+        if (el) { el.style.left=group.x+'px'; el.style.top=group.y+'px'; el.style.width=group.w+'px'; el.style.height=group.h+'px'; }
+    }
+
+    // ── Canvas Events ──
+    function orchSetupCanvas() {
+        const canvas = document.getElementById('orch-canvas-area');
+        canvas.addEventListener('dragover', e => { e.preventDefault(); e.dataTransfer.dropEffect = 'copy'; });
+        canvas.addEventListener('drop', e => {
+            e.preventDefault();
+            try {
+                const data = JSON.parse(e.dataTransfer.getData('application/json'));
+                const rect = canvas.getBoundingClientRect();
+                orchAddNode(data, e.clientX - rect.left - 55, e.clientY - rect.top - 20);
+            } catch(err) {}
+        });
+        canvas.addEventListener('mousedown', e => {
+            if (e.target === canvas || e.target.id === 'orch-canvas-hint') {
+                orchClearSelection();
+                orch.selecting = { sx: e.offsetX, sy: e.offsetY };
+            }
+        });
+        canvas.addEventListener('mousemove', e => {
+            if (orch.dragging) {
+                const d = orch.dragging;
+                if (d.multi) {
+                    const dx = e.clientX - d.offX - d.starts[d.nodeId].x;
+                    const dy = e.clientY - d.offY - d.starts[d.nodeId].y;
+                    orch.selectedNodes.forEach(nid => {
+                        const n = orch.nodes.find(nn=>nn.id===nid);
+                        if (n && d.starts[nid]) { n.x = d.starts[nid].x + dx; n.y = d.starts[nid].y + dy; const el=document.getElementById('onode-'+nid); if(el){el.style.left=n.x+'px';el.style.top=n.y+'px';} }
+                    });
+                } else {
+                    const n = orch.nodes.find(nn=>nn.id===d.nodeId);
+                    if (n) { n.x = e.clientX - d.offX; n.y = e.clientY - d.offY; const el=document.getElementById('onode-'+n.id); if(el){el.style.left=n.x+'px';el.style.top=n.y+'px';} }
+                }
+                orchRenderEdges();
+                orch.groups.forEach(g => orchUpdateGroupBounds(g));
+            } else if (orch.connecting) {
+                const rect = canvas.getBoundingClientRect();
+                orchDrawTempLine(orch.connecting.sx, orch.connecting.sy, e.clientX - rect.left, e.clientY - rect.top);
+            } else if (orch.selecting) {
+                const s = orch.selecting;
+                let existing = document.querySelector('.orch-sel-rect');
+                if (!existing) { existing = document.createElement('div'); existing.className='orch-sel-rect'; canvas.appendChild(existing); }
+                const x = Math.min(s.sx, e.offsetX), y = Math.min(s.sy, e.offsetY);
+                const w = Math.abs(e.offsetX - s.sx), h = Math.abs(e.offsetY - s.sy);
+                existing.style.cssText = `left:${x}px;top:${y}px;width:${w}px;height:${h}px;`;
+            }
+        });
+        canvas.addEventListener('mouseup', e => {
+            if (orch.dragging) { orch.dragging = null; orchUpdateYaml(); }
+            if (orch.connecting) { orch.connecting = null; orchRemoveTempLine(); }
+            if (orch.selecting) {
+                const s = orch.selecting;
+                const x1 = Math.min(s.sx, e.offsetX), y1 = Math.min(s.sy, e.offsetY);
+                const x2 = Math.max(s.sx, e.offsetX), y2 = Math.max(s.sy, e.offsetY);
+                if (Math.abs(x2-x1) > 10 && Math.abs(y2-y1) > 10) {
+                    orch.nodes.forEach(n => { if (n.x > x1 && n.x < x2 && n.y > y1 && n.y < y2) orchSelectNode(n.id); });
+                }
+                orch.selecting = null;
+                document.querySelectorAll('.orch-sel-rect').forEach(el => el.remove());
+            }
+        });
+
+        // Context menu
+        canvas.addEventListener('contextmenu', e => {
+            e.preventDefault();
+            orchShowContextMenu(e.clientX, e.clientY);
+        });
+
+        // Keyboard shortcuts
+        document.addEventListener('keydown', e => {
+            if (currentPage !== 'orchestrate') return;
+            if (e.key === 'Delete' || e.key === 'Backspace') {
+                if (document.activeElement.tagName === 'INPUT' || document.activeElement.tagName === 'TEXTAREA') return;
+                orch.selectedNodes.forEach(id => orchRemoveNode(id));
+            }
+            if ((e.ctrlKey || e.metaKey) && e.key === 'g') {
+                e.preventDefault();
+                if (orch.selectedNodes.size >= 2) orchCreateGroup('parallel');
+            }
+            if ((e.ctrlKey || e.metaKey) && e.key === 'a' && currentPage === 'orchestrate') {
+                e.preventDefault();
+                orch.nodes.forEach(n => orchSelectNode(n.id));
+            }
+            if (e.key === 'Escape') { orchClearSelection(); orchHideContextMenu(); }
+        });
+    }
+
+    function orchShowContextMenu(x, y) {
+        orchHideContextMenu();
+        const menu = document.createElement('div');
+        menu.className = 'orch-context-menu';
+        menu.id = 'orch-ctx-menu';
+        menu.style.left = x + 'px';
+        menu.style.top = y + 'px';
+
+        const hasSelection = orch.selectedNodes.size > 0;
+        const items = [];
+        if (hasSelection && orch.selectedNodes.size >= 2) {
+            items.push({label: '🔀 创建并行分组', action: () => orchCreateGroup('parallel')});
+            items.push({label: '👥 创建全员分组', action: () => orchCreateGroup('all')});
+            items.push({divider: true});
+        }
+        if (hasSelection) {
+            items.push({label: '🗑️ 删除选中', action: () => { orch.selectedNodes.forEach(id => orchRemoveNode(id)); }});
+        }
+        items.push({label: '🔄 刷新 YAML', action: () => orchUpdateYaml()});
+        items.push({label: '🗑️ 清空画布', action: () => orchClearCanvas()});
+
+        items.forEach(item => {
+            if (item.divider) { const d = document.createElement('div'); d.className='orch-menu-divider'; menu.appendChild(d); return; }
+            const d = document.createElement('div');
+            d.className = 'orch-menu-item';
+            d.textContent = item.label;
+            d.addEventListener('click', () => { item.action(); orchHideContextMenu(); });
+            menu.appendChild(d);
+        });
+
+        document.body.appendChild(menu);
+        document.addEventListener('click', orchHideContextMenu, {once: true});
+    }
+    function orchHideContextMenu() { const m = document.getElementById('orch-ctx-menu'); if(m) m.remove(); }
+
+    // ── Manual Edit Modal ──
+    function orchShowManualModal(node) {
+        const overlay = document.createElement('div');
+        overlay.className = 'orch-modal-overlay';
+        overlay.id = 'orch-manual-modal';
+        overlay.innerHTML = `<div class="orch-modal">
+            <h3>📝 编辑手动注入内容</h3>
+            <input type="text" id="orch-man-author" value="${node.author||'主持人'}" placeholder="作者">
+            <textarea id="orch-man-content" placeholder="注入内容...">${node.content||''}</textarea>
+            <div class="orch-modal-btns">
+                <button onclick="document.getElementById('orch-manual-modal').remove()">取消</button>
+                <button class="primary" onclick="orchSaveManual('${node.id}')">保存</button>
+            </div>
+        </div>`;
+        document.body.appendChild(overlay);
+        overlay.addEventListener('click', e => { if (e.target === overlay) overlay.remove(); });
+    }
+    function orchSaveManual(nodeId) {
+        const node = orch.nodes.find(n=>n.id===nodeId);
+        if (node) {
+            node.author = document.getElementById('orch-man-author').value;
+            node.content = document.getElementById('orch-man-content').value;
+        }
+        document.getElementById('orch-manual-modal')?.remove();
+        orchUpdateYaml();
+    }
+
+    // ── Layout Data ──
+    function orchGetLayoutData() {
+        return {
+            nodes: orch.nodes.map(n => ({...n})),
+            edges: orch.edges.map(e => ({...e})),
+            groups: orch.groups.map(g => ({...g})),
+            settings: orchGetSettings(),
+        };
+    }
+
+    // ── YAML Generation (Rule-based) ──
+    async function orchUpdateYaml() {
+        orchUpdateStatus();
+        const data = orchGetLayoutData();
+        if (orch.nodes.length === 0) {
+            document.getElementById('orch-yaml-content').textContent = '拖入专家后自动生成...';
+            return;
+        }
+        try {
+            const r = await fetch('/proxy_visual/generate-yaml', {
+                method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(data),
+            });
+            const res = await r.json();
+            document.getElementById('orch-yaml-content').textContent = res.yaml || '# Error: ' + (res.error || 'Unknown');
+        } catch(e) {
+            document.getElementById('orch-yaml-content').textContent = '# Error: ' + e.message;
+        }
+    }
+
+    // ── AI Generate YAML (with session selection) ──
+    let orchTargetSessionId = null;
+
+    async function orchGenerateAgentYaml() {
+        if (orch.nodes.length === 0) { orchToast('请先添加专家节点'); return; }
+        orchShowSessionSelectModal();
+    }
+
+    async function orchShowSessionSelectModal() {
+        const overlay = document.createElement('div');
+        overlay.className = 'orch-modal-overlay';
+        overlay.id = 'orch-session-select-overlay';
+
+        overlay.innerHTML = `
+            <div class="orch-modal" style="min-width:400px;max-width:500px;">
+                <h3>🎯 选择目标 Agent Session</h3>
+                <p style="font-size:12px;color:#6b7280;margin-bottom:10px;">选择一个已有的对话 Session，或新建一个，生成完成后可跳转继续对话。</p>
+                <div class="orch-session-list" id="orch-session-select-list">
+                    <div style="text-align:center;padding:20px;color:#9ca3af;font-size:12px;">⏳ 加载中...</div>
+                </div>
+                <div class="orch-modal-btns">
+                    <button id="orch-session-cancel-btn" style="padding:6px 14px;border-radius:6px;border:1px solid #d1d5db;background:white;color:#374151;cursor:pointer;font-size:12px;">取消</button>
+                    <button id="orch-session-confirm-btn" disabled style="padding:6px 14px;border-radius:6px;border:none;background:#2563eb;color:white;cursor:pointer;font-size:12px;opacity:0.5;">确认并生成</button>
+                </div>
+            </div>
+        `;
+        document.body.appendChild(overlay);
+
+        let selectedSid = null;
+
+        overlay.querySelector('#orch-session-cancel-btn').addEventListener('click', () => overlay.remove());
+        overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.remove(); });
+
+        const listEl = overlay.querySelector('#orch-session-select-list');
+        try {
+            const resp = await fetch('/proxy_sessions');
+            const data = await resp.json();
+            listEl.innerHTML = '';
+
+            const newSessionId = Date.now().toString(36) + Math.random().toString(36).substr(2, 4);
+            const newItem = document.createElement('div');
+            newItem.className = 'orch-session-new';
+            newItem.innerHTML = `<span style="font-size:18px;">🆕</span><div style="flex:1;"><div style="font-size:13px;font-weight:500;color:#2563eb;">新建对话</div><div style="font-size:10px;color:#9ca3af;font-family:monospace;">#${newSessionId.slice(-6)}</div></div>`;
+            newItem.addEventListener('click', () => {
+                listEl.querySelectorAll('.orch-session-item,.orch-session-new').forEach(el => el.classList.remove('selected'));
+                newItem.classList.add('selected');
+                selectedSid = newSessionId;
+                const btn = overlay.querySelector('#orch-session-confirm-btn');
+                btn.disabled = false; btn.style.opacity = '1';
+            });
+            listEl.appendChild(newItem);
+
+            if (data.sessions && data.sessions.length > 0) {
+                data.sessions.sort((a, b) => b.session_id.localeCompare(a.session_id));
+                for (const s of data.sessions) {
+                    const item = document.createElement('div');
+                    item.className = 'orch-session-item';
+                    item.innerHTML = `<span class="orch-session-icon">💬</span><div style="flex:1;min-width:0;"><div class="orch-session-title">${escapeHtml(s.title || 'Untitled')}</div><div class="orch-session-id">#${s.session_id.slice(-6)} · ${s.message_count || 0} 条消息</div></div>`;
+                    item.addEventListener('click', () => {
+                        listEl.querySelectorAll('.orch-session-item,.orch-session-new').forEach(el => el.classList.remove('selected'));
+                        item.classList.add('selected');
+                        selectedSid = s.session_id;
+                        const btn = overlay.querySelector('#orch-session-confirm-btn');
+                        btn.disabled = false; btn.style.opacity = '1';
+                    });
+                    listEl.appendChild(item);
+                }
+            }
+        } catch(e) {
+            listEl.innerHTML = '<div style="text-align:center;padding:20px;color:#dc2626;font-size:12px;">❌ 加载 Session 列表失败</div>';
+        }
+
+        overlay.querySelector('#orch-session-confirm-btn').addEventListener('click', () => {
+            if (!selectedSid) return;
+            orchTargetSessionId = selectedSid;
+            overlay.remove();
+            orchDoGenerateAgentYaml();
+        });
+    }
+
+    async function orchDoGenerateAgentYaml() {
+        const data = orchGetLayoutData();
+        const statusEl = document.getElementById('orch-agent-status');
+        const promptEl = document.getElementById('orch-prompt-content');
+        const yamlEl = document.getElementById('orch-agent-yaml');
+        statusEl.textContent = '🔄 正在与 Agent 通信...';
+        statusEl.style.cssText = 'color:#2563eb;background:#eff6ff;border-color:#bfdbfe;';
+        promptEl.textContent = '⏳ 生成中...';
+        yamlEl.textContent = '⏳ 等待 Agent 返回...';
+
+        const oldBtn = document.getElementById('orch-goto-chat-container');
+        if (oldBtn) oldBtn.remove();
+
+        try {
+            const r = await fetch('/proxy_visual/agent-generate-yaml', {
+                method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(data),
+            });
+            const res = await r.json();
+            if (res.prompt) promptEl.textContent = res.prompt;
+            if (res.error) {
+                yamlEl.textContent = '# ⚠️ ' + res.error;
+                statusEl.textContent = '⚠️ ' + (res.error.includes('401') ? '认证失败' : 'Agent 不可用');
+                statusEl.style.cssText = 'color:#dc2626;background:#fef2f2;border-color:#fca5a5;';
+                orchToast('Agent 不可用');
+                return;
+            }
+            if (res.agent_yaml) {
+                yamlEl.textContent = res.agent_yaml;
+                if (res.validation?.valid) {
+                    statusEl.textContent = `✅ 有效 YAML — ${res.validation.steps} 步骤 [${res.validation.step_types.join(', ')}]`;
+                    statusEl.style.cssText = 'color:#16a34a;background:#f0fdf4;border-color:#86efac;';
+                    orchToast('Agent 生成了有效的 YAML! ✅');
+                } else {
+                    statusEl.textContent = `⚠️ YAML 校验问题: ${res.validation?.error||''}`;
+                    statusEl.style.cssText = 'color:#d97706;background:#fffbeb;border-color:#fbbf24;';
+                }
+                orchShowGotoChatButton();
+            }
+        } catch(e) {
+            promptEl.textContent = '# 通信失败: ' + e.message;
+            statusEl.textContent = '❌ 连接错误';
+            statusEl.style.cssText = 'color:#dc2626;background:#fef2f2;border-color:#fca5a5;';
+        }
+    }
+
+    function orchShowGotoChatButton() {
+        const old = document.getElementById('orch-goto-chat-container');
+        if (old) old.remove();
+
+        if (!orchTargetSessionId) return;
+
+        const container = document.createElement('div');
+        container.id = 'orch-goto-chat-container';
+        container.style.cssText = 'padding: 8px 12px; text-align: center;';
+
+        const sessionLabel = '#' + orchTargetSessionId.slice(-6);
+        container.innerHTML = `
+            <button class="orch-goto-chat-btn" onclick="orchGotoChat()">
+                💬 跳转到对话 ${escapeHtml(sessionLabel)} 继续聊天
+            </button>
+        `;
+
+        const statusEl = document.getElementById('orch-agent-status');
+        if (statusEl && statusEl.parentNode) {
+            statusEl.parentNode.insertBefore(container, statusEl.nextSibling);
+        }
+    }
+
+    async function orchGotoChat() {
+        if (!orchTargetSessionId) { orchToast('没有选中的 Session'); return; }
+
+        const prevSessionId = currentSessionId;
+        if (currentSessionId === orchTargetSessionId) {
+            currentSessionId = '__temp_orch__';
+        }
+
+        switchPage('chat');
+        await switchToSession(orchTargetSessionId);
+
+        orchToast('已跳转到对话 #' + orchTargetSessionId.slice(-6));
+    }
+
+    // ── Session Status ──
+    async function orchRefreshSessions() {
+        try {
+            const r = await fetch('/proxy_visual/sessions-status');
+            const sessions = await r.json();
+            orch.sessionStatuses = {};
+            if (Array.isArray(sessions)) {
+                sessions.forEach(s => {
+                    const sid = s.session_id || s.id || '';
+                    const isRunning = s.is_running || s.status === 'running' || false;
+                    orch.sessionStatuses[sid] = isRunning ? 'running' : 'idle';
+                });
+            }
+            orch.nodes.forEach(n => {
+                const el = document.getElementById('onode-' + n.id);
+                if (!el) return;
+                const dot = el.querySelector('.orch-node-status');
+                if (!dot) return;
+                const isRunning = Object.entries(orch.sessionStatuses).some(([sid, st]) =>
+                    st === 'running' && (sid.includes(n.name) || sid.includes(n.tag))
+                );
+                dot.className = 'orch-node-status ' + (isRunning ? 'running' : 'idle');
+            });
+            orchToast('Session 状态已更新');
+        } catch(e) {
+            orchToast('获取状态失败');
+        }
+    }
+
+    // ── Actions ──
+    function orchClearCanvas() {
+        orch.nodes = []; orch.edges = []; orch.groups = []; orch.selectedNodes.clear();
+        const area = document.getElementById('orch-canvas-area');
+        area.querySelectorAll('.orch-node,.orch-group').forEach(el => el.remove());
+        orchRenderEdges();
+        orchUpdateYaml();
+        document.getElementById('orch-canvas-hint').style.display = '';
+    }
+
+    function orchAutoArrange() {
+        const n = orch.nodes.length;
+        if (n === 0) return;
+        const area = document.getElementById('orch-canvas-area');
+        const cw = area.offsetWidth, ch = area.offsetHeight;
+        const cols = Math.ceil(Math.sqrt(n));
+        const gapX = Math.min(180, (cw - 60) / cols);
+        const gapY = Math.min(90, (ch - 60) / Math.ceil(n / cols));
+        orch.nodes.forEach((node, i) => {
+            const col = i % cols, row = Math.floor(i / cols);
+            node.x = 40 + col * gapX;
+            node.y = 40 + row * gapY;
+            const el = document.getElementById('onode-' + node.id);
+            if (el) { el.style.left = node.x + 'px'; el.style.top = node.y + 'px'; }
+        });
+        orchRenderEdges();
+        orch.groups.forEach(g => orchUpdateGroupBounds(g));
+        orchUpdateYaml();
+        orchToast('已自动排列');
+    }
+
+    async function orchSaveLayout() {
+        const name = prompt('布局名称:', 'my-layout');
+        if (!name) return;
+        const data = orchGetLayoutData();
+        data.name = name;
+        try {
+            await fetch('/proxy_visual/save-layout', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(data) });
+            orchToast('已保存: ' + name);
+        } catch(e) { orchToast('保存失败'); }
+    }
+
+    async function orchLoadLayout() {
+        try {
+            const r = await fetch('/proxy_visual/load-layouts');
+            const layouts = await r.json();
+            if (!layouts.length) { orchToast('没有已保存的布局'); return; }
+            const name = prompt('选择布局 (' + layouts.join(', ') + '):');
+            if (!name) return;
+            const r2 = await fetch('/proxy_visual/load-layout/' + encodeURIComponent(name));
+            const data = await r2.json();
+            if (data.error) { orchToast(data.error); return; }
+            orchClearCanvas();
+            if (data.settings) {
+                document.getElementById('orch-repeat').checked = data.settings.repeat !== false;
+                document.getElementById('orch-rounds').value = data.settings.max_rounds || 5;
+                document.getElementById('orch-bot-session').checked = data.settings.use_bot_session || false;
+                if (data.settings.cluster_threshold) {
+                    document.getElementById('orch-threshold').value = data.settings.cluster_threshold;
+                    document.getElementById('orch-threshold-val').textContent = data.settings.cluster_threshold;
+                }
+            }
+            (data.nodes||[]).forEach(n => orchAddNode(n, n.x, n.y));
+            (data.edges||[]).forEach(e => orchAddEdge(e.source, e.target));
+            (data.groups||[]).forEach(g => { orch.groups.push(g); orchRenderGroup(g); });
+            orchUpdateYaml();
+            orchToast('已加载: ' + name);
+        } catch(e) { orchToast('加载失败'); }
+    }
+
+    function orchExportYaml() {
+        const yaml = document.getElementById('orch-yaml-content').textContent;
+        if (!yaml || yaml.startsWith('拖入')) { orchToast('请先生成 YAML'); return; }
+        navigator.clipboard.writeText(yaml).then(() => orchToast('YAML 已复制!')).catch(() => {
+            const ta = document.createElement('textarea'); ta.value = yaml; document.body.appendChild(ta); ta.select(); document.execCommand('copy'); document.body.removeChild(ta); orchToast('YAML 已复制!');
+        });
+    }
+    function orchCopyPrompt() {
+        const text = document.getElementById('orch-prompt-content').textContent;
+        navigator.clipboard.writeText(text).catch(() => {}); orchToast('Prompt 已复制');
+    }
+    function orchCopyAgentYaml() {
+        const text = document.getElementById('orch-agent-yaml').textContent;
+        navigator.clipboard.writeText(text).catch(() => {}); orchToast('Agent YAML 已复制');
+    }
+
+    function orchUpdateStatus() {
+        document.getElementById('orch-status-bar').textContent = `节点: ${orch.nodes.length} | 连线: ${orch.edges.length} | 分组: ${orch.groups.length}`;
+    }
+
+    function orchToast(msg) {
+        const existing = document.querySelector('.orch-toast');
+        if (existing) existing.remove();
+        const t = document.createElement('div');
+        t.className = 'orch-toast';
+        t.textContent = msg;
+        document.body.appendChild(t);
+        setTimeout(() => t.remove(), 2500);
     }
     </script>
 </body>
@@ -4707,6 +5708,179 @@ def proxy_oasis_purge_all_topics():
         return jsonify(r.json()), r.status_code
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+
+
+# ──────────────────────────────────────────────────────────────
+# Visual Orchestration – proxy endpoints
+# ──────────────────────────────────────────────────────────────
+import sys as _sys, math as _math, re as _re, yaml as _yaml
+
+# Import expert pool & conversion helpers from visual/main.py
+_VISUAL_DIR = os.path.join(root_dir, "visual")
+if _VISUAL_DIR not in _sys.path:
+    _sys.path.insert(0, _VISUAL_DIR)
+
+try:
+    from main import (
+        DEFAULT_EXPERTS as _VIS_EXPERTS,
+        TAG_EMOJI as _VIS_TAG_EMOJI,
+        layout_to_yaml as _vis_layout_to_yaml,
+        _build_llm_prompt as _vis_build_llm_prompt,
+        _extract_yaml_from_response as _vis_extract_yaml,
+        _validate_generated_yaml as _vis_validate_yaml,
+    )
+except Exception:
+    # Fallback: define minimal versions if visual module unavailable
+    _VIS_EXPERTS = []
+    _VIS_TAG_EMOJI = {}
+    _vis_layout_to_yaml = None
+    _vis_build_llm_prompt = None
+    _vis_extract_yaml = None
+    _vis_validate_yaml = None
+
+
+@app.route("/proxy_visual/experts", methods=["GET"])
+def proxy_visual_experts():
+    """Return available expert pool for orchestration canvas."""
+    experts = []
+    for e in _VIS_EXPERTS:
+        emoji = _VIS_TAG_EMOJI.get(e.get("tag", ""), "⭐")
+        experts.append({**e, "emoji": emoji})
+    return jsonify(experts)
+
+
+@app.route("/proxy_visual/generate-yaml", methods=["POST"])
+def proxy_visual_generate_yaml():
+    """Convert canvas layout to OASIS YAML (rule-based)."""
+    data = request.get_json()
+    if not data or not _vis_layout_to_yaml:
+        return jsonify({"error": "No data or visual module unavailable"}), 400
+    try:
+        yaml_out = _vis_layout_to_yaml(data)
+        return jsonify({"yaml": yaml_out})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/proxy_visual/agent-generate-yaml", methods=["POST"])
+def proxy_visual_agent_generate_yaml():
+    """Build prompt + send to main agent using session credentials → get YAML."""
+    data = request.get_json()
+    if not data:
+        return jsonify({"error": "No data"}), 400
+
+    user_id = session.get("user_id")
+    password = session.get("password")
+    if not user_id or not password:
+        return jsonify({"error": "Not logged in"}), 401
+
+    try:
+        prompt = _vis_build_llm_prompt(data) if _vis_build_llm_prompt else "Error: visual module unavailable"
+
+        # Call main agent with user credentials
+        headers = {
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {user_id}:{password}",
+        }
+        payload = {
+            "model": "mini-timebot",
+            "messages": [
+                {"role": "system", "content": (
+                    "You are a YAML schedule generator for the OASIS expert orchestration engine. "
+                    "Output ONLY valid YAML, no markdown fences, no explanations, no commentary. "
+                    "The YAML must start with 'version: 1' and contain a 'plan:' section."
+                )},
+                {"role": "user", "content": prompt},
+            ],
+            "stream": False,
+            "session_id": "visual_orchestrator",
+            "temperature": 0.3,
+        }
+        resp = requests.post(LOCAL_OPENAI_COMPLETIONS_URL, json=payload, headers=headers, timeout=60)
+        if resp.status_code != 200:
+            return jsonify({"prompt": prompt, "error": f"Agent returned HTTP {resp.status_code}: {resp.text[:500]}", "agent_yaml": None})
+
+        result = resp.json()
+        agent_reply = ""
+        try:
+            agent_reply = result["choices"][0]["message"]["content"]
+        except (KeyError, IndexError):
+            agent_reply = str(result)
+
+        agent_yaml = _vis_extract_yaml(agent_reply) if _vis_extract_yaml else agent_reply
+        validation = _vis_validate_yaml(agent_yaml) if _vis_validate_yaml else {"valid": False, "error": "validator unavailable"}
+
+        return jsonify({"prompt": prompt, "agent_yaml": agent_yaml, "agent_reply_raw": agent_reply, "validation": validation})
+
+    except requests.exceptions.ConnectionError:
+        prompt = _vis_build_llm_prompt(data) if _vis_build_llm_prompt else ""
+        return jsonify({"prompt": prompt, "error": "Cannot connect to main agent. Is mainagent.py running?", "agent_yaml": None})
+    except requests.exceptions.Timeout:
+        prompt = _vis_build_llm_prompt(data) if _vis_build_llm_prompt else ""
+        return jsonify({"prompt": prompt, "error": "Agent request timed out (60s).", "agent_yaml": None})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/proxy_visual/save-layout", methods=["POST"])
+def proxy_visual_save_layout():
+    """Save canvas layout JSON for the current user."""
+    user_id = session.get("user_id")
+    if not user_id:
+        return jsonify({"error": "Not logged in"}), 401
+    data = request.get_json()
+    if not data:
+        return jsonify({"error": "No data"}), 400
+    save_dir = os.path.join(root_dir, "data", "visual_layouts", user_id)
+    os.makedirs(save_dir, exist_ok=True)
+    name = data.get("name", "untitled")
+    safe = "".join(c for c in name if c.isalnum() or c in "-_ ").strip() or "untitled"
+    import json as _json
+    with open(os.path.join(save_dir, f"{safe}.json"), "w", encoding="utf-8") as f:
+        _json.dump(data, f, ensure_ascii=False, indent=2)
+    return jsonify({"saved": True})
+
+
+@app.route("/proxy_visual/load-layouts", methods=["GET"])
+def proxy_visual_load_layouts():
+    user_id = session.get("user_id")
+    if not user_id:
+        return jsonify([])
+    save_dir = os.path.join(root_dir, "data", "visual_layouts", user_id)
+    if not os.path.isdir(save_dir):
+        return jsonify([])
+    return jsonify([f[:-5] for f in os.listdir(save_dir) if f.endswith(".json")])
+
+
+@app.route("/proxy_visual/load-layout/<name>", methods=["GET"])
+def proxy_visual_load_layout(name):
+    user_id = session.get("user_id")
+    if not user_id:
+        return jsonify({"error": "Not logged in"}), 401
+    safe = "".join(c for c in name if c.isalnum() or c in "-_ ").strip()
+    path = os.path.join(root_dir, "data", "visual_layouts", user_id, f"{safe}.json")
+    if not os.path.isfile(path):
+        return jsonify({"error": "Not found"}), 404
+    import json as _json
+    with open(path, "r", encoding="utf-8") as f:
+        return jsonify(_json.load(f))
+
+
+@app.route("/proxy_visual/sessions-status", methods=["GET"])
+def proxy_visual_sessions_status():
+    """Return all sessions with their running status for the canvas display."""
+    user_id = session.get("user_id")
+    password = session.get("password")
+    if not user_id or not password:
+        return jsonify([])
+    try:
+        r = requests.post(LOCAL_SESSIONS_URL, json={"user_id": user_id, "password": password}, timeout=10)
+        if r.status_code != 200:
+            return jsonify([])
+        sessions_data = r.json()
+        return jsonify(sessions_data if isinstance(sessions_data, list) else [])
+    except Exception:
+        return jsonify([])
 
 
 if __name__ == "__main__":
