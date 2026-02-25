@@ -4397,9 +4397,21 @@ HTML_TEMPLATE = """
     }
 
     // ── Node Management ──
+    function orchNextInstance(data) {
+        // Compute next instance number for this agent identity
+        const key = data.type === 'session_agent' ? ('sa:' + (data.session_id||'')) : ('ex:' + (data.tag||'custom'));
+        let maxInst = 0;
+        orch.nodes.forEach(n => {
+            const nk = n.type === 'session_agent' ? ('sa:' + (n.session_id||'')) : ('ex:' + (n.tag||'custom'));
+            if (nk === key && n.instance > maxInst) maxInst = n.instance;
+        });
+        return maxInst + 1;
+    }
+
     function orchAddNode(data, x, y) {
         const id = 'on' + orch.nid++;
-        const node = { id, name: data.name, tag: data.tag||'custom', emoji: data.emoji||'⭐', x: Math.round(x), y: Math.round(y), type: data.type||'expert', temperature: data.temperature||0.5, author: data.author||'主持人', content: data.content||'', session_id: data.session_id||'', source: data.source||'' };
+        const inst = data.instance || orchNextInstance(data);
+        const node = { id, name: data.name, tag: data.tag||'custom', emoji: data.emoji||'⭐', x: Math.round(x), y: Math.round(y), type: data.type||'expert', temperature: data.temperature||0.5, author: data.author||'主持人', content: data.content||'', session_id: data.session_id||'', source: data.source||'', instance: inst };
         orch.nodes.push(node);
         orchRenderNode(node);
         orchUpdateYaml();
@@ -4428,10 +4440,11 @@ HTML_TEMPLATE = """
         if (isSession) el.style.borderColor = '#6366f1';
 
         const status = orch.sessionStatuses[node.tag] || orch.sessionStatuses[node.name] || 'idle';
+        const instBadge = `<span style="display:inline-block;background:#2563eb;color:#fff;font-size:9px;font-weight:700;border-radius:50%;min-width:16px;height:16px;line-height:16px;text-align:center;margin-left:3px;flex-shrink:0;">${node.instance||1}</span>`;
         const tagLine = isSession ? `<div class="orch-node-tag" style="color:#6366f1;font-family:monospace;">#${(node.session_id||'').slice(-8)}</div>` : `<div class="orch-node-tag">${escapeHtml(node.tag)}</div>`;
         el.innerHTML = `
             <span class="orch-node-emoji">${node.emoji}</span>
-            <div style="min-width:0;flex:1;"><div class="orch-node-name">${escapeHtml(node.name)}</div>${tagLine}</div>
+            <div style="min-width:0;flex:1;"><div class="orch-node-name" style="display:flex;align-items:center;">${escapeHtml(node.name)}${instBadge}</div>${tagLine}</div>
             <div class="orch-node-del" title="移除">×</div>
             <div class="orch-port port-in" data-node="${node.id}" data-dir="in"></div>
             <div class="orch-port port-out" data-node="${node.id}" data-dir="out"></div>
@@ -4470,6 +4483,11 @@ HTML_TEMPLATE = """
             });
         });
 
+        el.addEventListener('contextmenu', e => {
+            e.preventDefault(); e.stopPropagation();
+            if (!orch.selectedNodes.has(node.id)) { orchClearSelection(); orchSelectNode(node.id); }
+            orchShowContextMenu(e.clientX, e.clientY, node);
+        });
         el.addEventListener('dblclick', () => { if (node.type === 'manual') orchShowManualModal(node); });
         area.appendChild(el);
     }
@@ -4671,7 +4689,7 @@ HTML_TEMPLATE = """
         });
     }
 
-    function orchShowContextMenu(x, y) {
+    function orchShowContextMenu(x, y, targetNode) {
         orchHideContextMenu();
         const menu = document.createElement('div');
         menu.className = 'orch-context-menu';
@@ -4681,6 +4699,18 @@ HTML_TEMPLATE = """
 
         const hasSelection = orch.selectedNodes.size > 0;
         const items = [];
+
+        // ── Node-specific: duplicate / set instance ──
+        if (targetNode) {
+            items.push({label: '📋 复用此专家 (同序号)', action: () => {
+                orchAddNode({...targetNode, instance: targetNode.instance}, targetNode.x + 40, targetNode.y + 40);
+            }});
+            items.push({label: '➕ 新建实例 (新序号)', action: () => {
+                orchAddNode({...targetNode, instance: undefined}, targetNode.x + 40, targetNode.y + 40);
+            }});
+            items.push({divider: true});
+        }
+
         if (hasSelection && orch.selectedNodes.size >= 2) {
             items.push({label: '🔀 创建并行分组', action: () => orchCreateGroup('parallel')});
             items.push({label: '👥 创建全员分组', action: () => orchCreateGroup('all')});
