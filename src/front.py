@@ -158,6 +158,45 @@ HTML_TEMPLATE = """
             0%, 100% { opacity: 1; }
             50% { opacity: 0.3; }
         }
+        /* 系统占用中按钮 */
+        .busy-indicator-btn {
+            display: inline-flex; align-items: center; gap: 6px;
+            background: #f59e0b; color: white; border: none;
+            padding: 8px 16px; border-radius: 0.75rem;
+            font-weight: 700; font-size: 0.875rem;
+            cursor: not-allowed; opacity: 0.9;
+            box-shadow: 0 0 8px rgba(245,158,11,0.4);
+            animation: busyGlow 2s ease-in-out infinite;
+        }
+        .busy-spinner {
+            display: inline-block; width: 14px; height: 14px;
+            border: 2px solid rgba(255,255,255,0.4); border-top-color: white;
+            border-radius: 50%; animation: tts-spin 0.8s linear infinite;
+        }
+        @keyframes busyGlow {
+            0%, 100% { box-shadow: 0 0 4px rgba(245,158,11,0.3); }
+            50% { box-shadow: 0 0 14px rgba(245,158,11,0.6); }
+        }
+        /* 聊天区刷新小按钮 */
+        .refresh-chat-btn {
+            position: absolute; right: 12px; top: -38px; z-index: 10;
+            width: 32px; height: 32px; border-radius: 50%;
+            border: 1px solid #e5e7eb; background: white; color: #9ca3af;
+            font-size: 14px; cursor: pointer; display: flex; align-items: center;
+            justify-content: center; box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+            transition: all 0.3s; opacity: 0.5;
+        }
+        .refresh-chat-btn:hover { background: #f3f4f6; opacity: 0.8; }
+        .refresh-chat-btn.has-new {
+            opacity: 1; background: #fef3c7; border-color: #f59e0b; color: #d97706;
+            box-shadow: 0 0 8px rgba(245,158,11,0.4);
+            animation: refreshGlow 2s ease-in-out infinite;
+        }
+        .refresh-chat-btn.has-new:hover { background: #fde68a; }
+        @keyframes refreshGlow {
+            0%, 100% { box-shadow: 0 0 4px rgba(245,158,11,0.3); }
+            50% { box-shadow: 0 0 12px rgba(245,158,11,0.6); }
+        }
         /* TTS 朗读按钮 */
         .tts-btn {
             display: inline-flex; align-items: center; gap: 4px;
@@ -674,6 +713,13 @@ HTML_TEMPLATE = """
                 </div>
             </div>
 
+            <!-- 聊天区上方小刷新按钮 -->
+            <div style="position:relative;">
+                <button id="refresh-chat-btn" class="refresh-chat-btn" onclick="handleNewMsgRefresh()" title="刷新消息" data-i18n-title="refresh_chat">
+                    🔄
+                </button>
+            </div>
+
             <div class="p-2 sm:p-4 border-t bg-white flex-shrink-0">
                 <!-- Tool List Panel -->
                 <div id="tool-panel-wrapper" class="mb-2" style="display:none;">
@@ -696,7 +742,7 @@ HTML_TEMPLATE = """
                 <div class="flex items-end space-x-2 sm:space-x-3">
                     <label class="image-upload-btn" title="上传图片/文件/音频">
                         📎
-                        <input type="file" id="image-input" accept="image/*,.pdf,.txt,.md,.csv,.json,.xml,.yaml,.yml,.log,.py,.js,.ts,.html,.css,.java,.c,.cpp,.h,.go,.rs,.sh,.bat,.ini,.toml,.cfg,.conf,.sql,.r,.rb,.mp3,.wav,.ogg,.m4a,.webm,.flac,.aac" multiple style="display:none;" onchange="handleFileSelect(event)">
+                        <input type="file" id="image-input" accept="image/*,.pdf,.txt,.md,.csv,.json,.xml,.yaml,.yml,.log,.py,.js,.ts,.html,.css,.java,.c,.cpp,.h,.go,.rs,.sh,.bat,.ini,.toml,.cfg,.conf,.sql,.r,.rb,.mp3,.wav,.ogg,.m4a,.webm,.flac,.aac,.avi,.mp4,.mkv,.mov" multiple style="display:none;" onchange="handleFileSelect(event)">
                     </label>
                     <button id="record-btn" class="audio-record-btn" data-i18n-title="recording_title" title="录音" onclick="toggleRecording()">🎤</button>
                     <div class="flex-grow">
@@ -711,6 +757,11 @@ HTML_TEMPLATE = """
                     <button onclick="handleCancel()" id="cancel-btn"
                         class="bg-red-500 hover:bg-red-600 text-white px-4 sm:px-6 py-2 sm:py-3 rounded-xl transition-all font-bold shadow-lg h-[42px] sm:h-[50px] text-sm sm:text-base flex-shrink-0"
                         style="display:none;" data-i18n="cancel_btn">终止
+                    </button>
+                    <button id="busy-btn" disabled
+                        class="busy-indicator-btn h-[42px] sm:h-[50px] text-sm sm:text-base flex-shrink-0"
+                        style="display:none;" data-i18n="busy_btn">
+                        <span class="busy-spinner"></span>系统占用中
                     </button>
                 </div>
                 <p class="text-[10px] text-center text-gray-400 mt-2 sm:mt-3 font-mono hidden sm:block" data-i18n="secure_footer">Secured by Nginx Reverse Proxy & SSH Tunnel</p>
@@ -919,6 +970,9 @@ HTML_TEMPLATE = """
                 input_placeholder: '输入指令...（可粘贴图片/上传文件/录音）',
                 send_btn: '发送',
                 cancel_btn: '终止',
+                busy_btn: '系统占用中',
+                new_system_msg: '有新的系统消息',
+                click_refresh: '点击刷新',
                 no_response: '（无响应）',
                 thinking_stopped: '⚠️ 已终止思考',
                 login_expired: '⚠️ 登录已过期，请重新登录',
@@ -934,10 +988,11 @@ HTML_TEMPLATE = """
                 max_files: '最多上传3个文件',
                 max_audios: '最多上传2个音频',
                 audio_too_large: '音频过大，上限 25MB',
+                video_too_large: '视频过大，上限 50MB',
                 pdf_too_large: 'PDF过大，上限 10MB',
                 file_too_large: '文件过大，上限 512KB',
                 unsupported_type: '不支持的文件类型',
-                supported_types: '支持: txt, md, csv, json, py, js, pdf, mp3, wav 等',
+                supported_types: '支持: txt, md, csv, json, py, js, pdf, mp3, wav, avi, mp4 等',
                 
                 // 录音
                 recording_title: '录音',
@@ -1078,6 +1133,9 @@ HTML_TEMPLATE = """
                 input_placeholder: 'Enter command... (paste images/upload files/record audio)',
                 send_btn: 'Send',
                 cancel_btn: 'Stop',
+                busy_btn: 'System Busy',
+                new_system_msg: 'New system message',
+                click_refresh: 'Click to refresh',
                 no_response: '(No response)',
                 thinking_stopped: '⚠️ Thinking stopped',
                 login_expired: '⚠️ Session expired, please login again',
@@ -1093,10 +1151,11 @@ HTML_TEMPLATE = """
                 max_files: 'Maximum 3 files',
                 max_audios: 'Maximum 2 audio files',
                 audio_too_large: 'Audio too large, limit 25MB',
+                video_too_large: 'Video too large, limit 50MB',
                 pdf_too_large: 'PDF too large, limit 10MB',
                 file_too_large: 'File too large, limit 512KB',
                 unsupported_type: 'Unsupported file type',
-                supported_types: 'Supported: txt, md, csv, json, py, js, pdf, mp3, wav, etc.',
+                supported_types: 'Supported: txt, md, csv, json, py, js, pdf, mp3, wav, avi, mp4, etc.',
                 
                 // Recording
                 recording_title: 'Record',
@@ -1264,9 +1323,11 @@ HTML_TEMPLATE = """
         function getAuthToken() { return sessionStorage.getItem('authToken') || ''; }
         const TEXT_EXTENSIONS = new Set(['.txt','.md','.csv','.json','.xml','.yaml','.yml','.log','.py','.js','.ts','.html','.css','.java','.c','.cpp','.h','.go','.rs','.sh','.bat','.ini','.toml','.cfg','.conf','.sql','.r','.rb']);
         const AUDIO_EXTENSIONS = new Set(['.mp3','.wav','.ogg','.m4a','.webm','.flac','.aac']);
+        const VIDEO_EXTENSIONS = new Set(['.avi','.mp4','.mkv','.mov']);
         const MAX_FILE_SIZE = 512 * 1024; // 512KB per text file
         const MAX_PDF_SIZE = 10 * 1024 * 1024; // 10MB per PDF
         const MAX_AUDIO_SIZE = 25 * 1024 * 1024; // 25MB per audio
+        const MAX_VIDEO_SIZE = 50 * 1024 * 1024; // 50MB per video
         const MAX_IMAGE_SIZE = 10 * 1024 * 1024; // 压缩目标：10MB
         const MAX_IMAGE_DIMENSION = 2048; // 最大边长
 
@@ -1326,6 +1387,16 @@ HTML_TEMPLATE = """
                     reader.onload = (e) => {
                         pendingAudios.push({ base64: e.target.result, name: file.name, format: fmt });
                         renderAudioPreviews();
+                    };
+                    reader.readAsDataURL(file);
+                } else if (file.type.startsWith('video/') || VIDEO_EXTENSIONS.has('.' + file.name.split('.').pop().toLowerCase())) {
+                    // 视频文件：以 dataURL 形式存入 pendingFiles，type='media'
+                    if (file.size > MAX_VIDEO_SIZE) { alert(`${file.name}: ${t('video_too_large')} (${(file.size/1024/1024).toFixed(1)}MB)`); continue; }
+                    if (pendingFiles.length >= 3) { alert(t('max_files')); break; }
+                    const reader = new FileReader();
+                    reader.onload = (e) => {
+                        pendingFiles.push({ name: file.name, content: e.target.result, type: 'media' });
+                        renderFilePreviews();
                     };
                     reader.readAsDataURL(file);
                 } else if (file.name.toLowerCase().endsWith('.pdf') || file.type === 'application/pdf') {
@@ -1524,7 +1595,7 @@ HTML_TEMPLATE = """
             area.style.display = 'flex';
             area.innerHTML = pendingFiles.map((f, i) => `
                 <div class="file-preview-item">
-                    <span class="file-icon">📄</span>
+                    <span class="file-icon">${f.type === 'media' ? '🎬' : '📄'}</span>
                     <span class="file-name" title="${escapeHtml(f.name)}">${escapeHtml(f.name)}</span>
                     <button class="remove-btn" onclick="removeFile(${i})">&times;</button>
                 </div>
@@ -1851,8 +1922,9 @@ HTML_TEMPLATE = """
             }
         }
 
-        async function switchToSession(sessionId) {
-            if (sessionId === currentSessionId) { closeSessionSidebar(); return; }
+        async function switchToSession(sessionId, force = false) {
+            if (!force && sessionId === currentSessionId) { closeSessionSidebar(); return; }
+            hideNewMsgBanner();
             currentSessionId = sessionId;
             sessionStorage.setItem('sessionId', sessionId);
             updateSessionDisplay();
@@ -1939,6 +2011,21 @@ HTML_TEMPLATE = """
                 chatBox.innerHTML = `
                     <div class="text-xs text-red-400 text-center py-4">${t('history_error')}: ${e.message}</div>`;
             }
+
+            // 切换 session 后立即检查一次 busy 状态
+            try {
+                const sr = await fetch('/proxy_session_status', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ session_id: sessionId })
+                });
+                const sd = await sr.json();
+                if (sd.busy) {
+                    setSystemBusyUI(true);
+                } else {
+                    setSystemBusyUI(false);
+                }
+            } catch(e) {}
         }
 
         // ===== 登录逻辑 =====
@@ -2132,15 +2219,52 @@ HTML_TEMPLATE = """
         const inputField = document.getElementById('user-input');
         const sendBtn = document.getElementById('send-btn');
         const cancelBtn = document.getElementById('cancel-btn');
+        const busyBtn = document.getElementById('busy-btn');
+        const refreshChatBtn = document.getElementById('refresh-chat-btn');
+        let _hasUnreadSystemMsg = 0;  // 0=无未读, 1=有未读
 
+        function showNewMsgBanner() {
+            if (_hasUnreadSystemMsg) return;
+            _hasUnreadSystemMsg = 1;
+            refreshChatBtn.classList.add('has-new');
+        }
+
+        function hideNewMsgBanner() {
+            _hasUnreadSystemMsg = 0;
+            refreshChatBtn.classList.remove('has-new');
+        }
+
+        function handleNewMsgRefresh() {
+            hideNewMsgBanner();
+            switchToSession(currentSessionId, true);
+        }
+
+        // 按钮三态：idle(发送) / streaming(终止) / busy(系统占用中)
         function setStreamingUI(streaming) {
             if (streaming) {
                 sendBtn.style.display = 'none';
                 cancelBtn.style.display = 'inline-block';
+                busyBtn.style.display = 'none';
                 inputField.disabled = true;
             } else {
                 sendBtn.style.display = 'inline-block';
                 cancelBtn.style.display = 'none';
+                busyBtn.style.display = 'none';
+                sendBtn.disabled = false;
+                inputField.disabled = false;
+            }
+        }
+
+        function setSystemBusyUI(busy) {
+            if (busy) {
+                sendBtn.style.display = 'none';
+                cancelBtn.style.display = 'none';
+                busyBtn.style.display = 'inline-flex';
+                inputField.disabled = true;
+            } else {
+                sendBtn.style.display = 'inline-block';
+                cancelBtn.style.display = 'none';
+                busyBtn.style.display = 'none';
                 sendBtn.disabled = false;
                 inputField.disabled = false;
             }
@@ -2546,6 +2670,7 @@ HTML_TEMPLATE = """
             } finally {
                 currentAbortController = null;
                 setStreamingUI(false);
+                hideNewMsgBanner();
             }
         }
 
@@ -2971,10 +3096,14 @@ HTML_TEMPLATE = """
                         body: JSON.stringify({ session_id: currentSessionId })
                     });
                     const data = await resp.json();
-                    if (data.has_new_messages) {
-                        // 有系统触发的新消息，自动刷新历史
-                        console.log('[SessionStatus] New system messages detected, refreshing...');
-                        switchToSession(currentSessionId);
+
+                    // --- 系统占用状态 ---
+                    if (data.busy) {
+                        setSystemBusyUI(true);
+                    } else if (busyBtn.style.display !== 'none') {
+                        // busy → 不busy：恢复按钮，显示刷新横幅
+                        setSystemBusyUI(false);
+                        showNewMsgBanner();
                     }
                 } catch(e) {
                     // 静默忽略
@@ -4581,4 +4710,4 @@ def proxy_oasis_purge_all_topics():
 
 
 if __name__ == "__main__":
-    app.run(host="127.0.0.1", port=int(os.getenv("PORT_FRONTEND", "51209")), debug=False, threaded=True)
+    app.run(host="0.0.0.0", port=int(os.getenv("PORT_FRONTEND", "51209")), debug=False, threaded=True)

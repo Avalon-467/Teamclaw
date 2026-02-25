@@ -655,28 +655,52 @@ class MiniTimeAgent:
         """
         将所有 HumanMessage 中的多模态 content（list 格式）转为纯文本。
         - type:"text" 的 part 保留文本
-        - type:"file" 替换为 "[用户上传了文件: {filename}]"
+        - type:"file" 中的媒体文件（视频/音频）保留原始 file part
+        - type:"file" 中的其他文件替换为 "[用户上传了文件: {filename}]"
         - type:"image_url" 替换为 "[用户上传了图片]"
+        - type:"input_audio" 替换为 "[用户发送了语音]"
         - 其他未知 type 丢弃
         """
+        _MEDIA_EXTS = {".avi", ".mp4", ".mkv", ".mov", ".webm", ".mp3", ".wav", ".flac", ".ogg", ".aac"}
+
         result = []
         for msg in messages:
             if isinstance(msg, HumanMessage) and isinstance(msg.content, list):
-                text_parts = []
+                new_parts = []  # 可能混合 str 和 dict（保留的 file part）
                 for part in msg.content:
                     if not isinstance(part, dict):
-                        text_parts.append(str(part))
+                        new_parts.append(str(part))
                         continue
                     ptype = part.get("type", "")
                     if ptype == "text":
-                        text_parts.append(part.get("text", ""))
+                        new_parts.append(part.get("text", ""))
                     elif ptype == "file":
                         fname = part.get("file", {}).get("filename", "附件")
-                        text_parts.append(f"[用户上传了文件: {fname}]")
+                        ext = os.path.splitext(fname)[1].lower() if fname else ""
+                        if ext in _MEDIA_EXTS:
+                            # 媒体文件：保留原始 file part
+                            new_parts.append(part)
+                        else:
+                            new_parts.append(f"[用户上传了文件: {fname}]")
                     elif ptype == "image_url":
-                        text_parts.append("[用户上传了图片]")
-                combined = "\n".join(t for t in text_parts if t)
-                result.append(HumanMessage(content=combined or "(空消息)"))
+                        new_parts.append("[用户上传了图片]")
+                    elif ptype == "input_audio":
+                        new_parts.append("[用户发送了语音]")
+
+                # 如果只剩纯文本，合并为 str；否则保持 list 格式
+                has_dict = any(isinstance(p, dict) for p in new_parts)
+                if has_dict:
+                    # 保持 content list 格式，把纯文本 wrap 成 text part
+                    content_list = []
+                    for p in new_parts:
+                        if isinstance(p, dict):
+                            content_list.append(p)
+                        elif p:
+                            content_list.append({"type": "text", "text": p})
+                    result.append(HumanMessage(content=content_list or [{"type": "text", "text": "(空消息)"}]))
+                else:
+                    combined = "\n".join(p for p in new_parts if isinstance(p, str) and p)
+                    result.append(HumanMessage(content=combined or "(空消息)"))
             else:
                 result.append(msg)
         return result
