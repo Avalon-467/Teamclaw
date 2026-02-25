@@ -339,6 +339,47 @@ HTML_TEMPLATE = """
         .group-empty-state .empty-icon { font-size: 48px; margin-bottom: 12px; }
         .group-empty-state .empty-text { font-size: 14px; }
 
+        /* @ Mention popup */
+        .mention-popup {
+            display: none; position: absolute; bottom: 100%; left: 0; right: 0;
+            background: white; border: 1px solid #e5e7eb; border-radius: 12px;
+            box-shadow: 0 -4px 16px rgba(0,0,0,0.1); max-height: 220px; overflow-y: auto;
+            margin-bottom: 6px; z-index: 100; padding: 6px 0;
+        }
+        .mention-popup.show { display: block; }
+        .mention-popup .mention-title {
+            padding: 6px 14px; font-size: 11px; font-weight: 600; color: #9ca3af;
+        }
+        .mention-popup .mention-item {
+            display: flex; align-items: center; padding: 8px 14px; cursor: pointer;
+            transition: background 0.15s; gap: 8px; font-size: 13px;
+        }
+        .mention-popup .mention-item:hover { background: #f3f4f6; }
+        .mention-popup .mention-item.selected { background: #eff6ff; }
+        .mention-popup .mention-item .mention-check {
+            width: 18px; height: 18px; border-radius: 4px; border: 2px solid #d1d5db;
+            display: flex; align-items: center; justify-content: center; flex-shrink: 0;
+            transition: all 0.15s; font-size: 11px; color: white;
+        }
+        .mention-popup .mention-item.selected .mention-check {
+            background: #2563eb; border-color: #2563eb;
+        }
+        .mention-popup .mention-item .mention-name {
+            flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #374151;
+        }
+        .mention-popup .mention-confirm {
+            margin: 6px 10px; padding: 6px; border: none; border-radius: 8px;
+            background: #2563eb; color: white; font-size: 12px; font-weight: 600;
+            cursor: pointer; width: calc(100% - 20px); transition: background 0.15s;
+        }
+        .mention-popup .mention-confirm:hover { background: #1d4ed8; }
+        .mention-tag {
+            display: inline-block; background: #dbeafe; color: #1e40af; border-radius: 4px;
+            padding: 0 4px; font-size: 12px; font-weight: 500; margin-right: 2px;
+        }
+        .group-msg .mention-tag { background: rgba(37,99,235,0.15); color: #1e40af; font-weight: 600; }
+        .group-msg.self .mention-tag { background: rgba(255,255,255,0.25); color: white; }
+
         @media (max-width: 768px) {
             .group-list-sidebar {
                 width: 100% !important; border-right: none;
@@ -702,8 +743,13 @@ HTML_TEMPLATE = """
                             </div>
                         </div>
                         <div id="group-messages-box" class="group-messages-box"></div>
-                        <div class="group-input-area">
-                            <textarea id="group-input" rows="1" placeholder="发送消息..." data-i18n-placeholder="group_input_placeholder" onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();sendGroupMessage();}"></textarea>
+                        <div class="group-input-area" style="position:relative;">
+                            <div class="mention-popup" id="mention-popup">
+                                <div class="mention-title">@ 选择要通知的 Agent</div>
+                                <div id="mention-list"></div>
+                                <button class="mention-confirm" onclick="confirmMention()">确认</button>
+                            </div>
+                            <textarea id="group-input" rows="1" placeholder="发送消息... 输入@选择Agent" data-i18n-placeholder="group_input_placeholder" onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();sendGroupMessage();}" oninput="onGroupInputChange(event)"></textarea>
                             <button onclick="sendGroupMessage()" class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-xl font-bold text-sm flex-shrink-0" data-i18n="send_btn">发送</button>
                         </div>
                     </div>
@@ -2931,6 +2977,88 @@ HTML_TEMPLATE = """
             return name;
         }
 
+        // === @ Mention 功能 ===
+        let mentionSelectedIds = [];  // 被 @ 选中的 agent session_id 列表
+        let currentGroupMembers = []; // 当前群的 agent 成员缓存
+
+        function onGroupInputChange(e) {
+            const input = document.getElementById('group-input');
+            const val = input.value;
+            const cursorPos = input.selectionStart;
+            // 检测光标前一个字符是否刚输入了 @
+            if (cursorPos > 0 && val[cursorPos - 1] === '@') {
+                showMentionPopup();
+            }
+        }
+
+        function showMentionPopup() {
+            const popup = document.getElementById('mention-popup');
+            const listEl = document.getElementById('mention-list');
+            // 从 groupSenderTitles 构建 agent 列表
+            const agents = [];
+            for (const [key, title] of Object.entries(groupSenderTitles)) {
+                agents.push({ id: key, title: title });
+            }
+            if (agents.length === 0) {
+                listEl.innerHTML = '<div style="padding:10px 14px;font-size:12px;color:#9ca3af;">群内暂无 Agent 成员</div>';
+                popup.classList.add('show');
+                return;
+            }
+            currentGroupMembers = agents;
+            listEl.innerHTML = agents.map(a => {
+                const sel = mentionSelectedIds.includes(a.id) ? ' selected' : '';
+                const check = mentionSelectedIds.includes(a.id) ? '✓' : '';
+                return `<div class="mention-item${sel}" data-id="${a.id}" onclick="toggleMentionItem(this, '${a.id}')">
+                    <div class="mention-check">${check}</div>
+                    <div class="mention-name" title="${a.title}">${a.title}</div>
+                </div>`;
+            }).join('');
+            popup.classList.add('show');
+        }
+
+        function toggleMentionItem(el, agentId) {
+            const idx = mentionSelectedIds.indexOf(agentId);
+            if (idx >= 0) {
+                mentionSelectedIds.splice(idx, 1);
+                el.classList.remove('selected');
+                el.querySelector('.mention-check').textContent = '';
+            } else {
+                mentionSelectedIds.push(agentId);
+                el.classList.add('selected');
+                el.querySelector('.mention-check').textContent = '✓';
+            }
+        }
+
+        function confirmMention() {
+            const popup = document.getElementById('mention-popup');
+            popup.classList.remove('show');
+            const input = document.getElementById('group-input');
+            // 删掉输入框里刚输入的 @，替换为 @name 标签
+            let val = input.value;
+            // 找到最后一个 @ 的位置并替换
+            const lastAt = val.lastIndexOf('@');
+            if (lastAt >= 0) {
+                const before = val.slice(0, lastAt);
+                const after = val.slice(lastAt + 1);
+                const tags = mentionSelectedIds.map(id => '@' + (groupSenderTitles[id] || id)).join(' ');
+                input.value = before + tags + ' ' + after;
+            }
+            input.focus();
+        }
+
+        function hideMentionPopup() {
+            document.getElementById('mention-popup').classList.remove('show');
+        }
+
+        // 点击输入区域外关闭弹层
+        document.addEventListener('click', function(e) {
+            const popup = document.getElementById('mention-popup');
+            const inputArea = document.querySelector('.group-input-area');
+            if (popup && inputArea && !inputArea.contains(e.target)) {
+                popup.classList.remove('show');
+            }
+        });
+
         function switchPage(page) {
             currentPage = page;
             // Update tabs
@@ -3147,16 +3275,24 @@ HTML_TEMPLATE = """
             const input = document.getElementById('group-input');
             const text = input.value.trim();
             if (!text || !currentGroupId) return;
+
+            // 收集 mentions：从 mentionSelectedIds 中取出被 @ 的 agent
+            const mentions = mentionSelectedIds.length > 0 ? [...mentionSelectedIds] : null;
+            // 发送后清空 mention 选中状态
+            mentionSelectedIds = [];
+            hideMentionPopup();
             input.value = '';
 
             try {
+                const body = { content: text };
+                if (mentions) body.mentions = mentions;
                 const resp = await fetch(`/proxy_groups/${currentGroupId}/messages`, {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',
                         'Authorization': 'Bearer ' + getAuthToken()
                     },
-                    body: JSON.stringify({ content: text })
+                    body: JSON.stringify(body)
                 });
                 const result = await resp.json();
                 const realId = result.id || (groupLastMsgId + 1);
