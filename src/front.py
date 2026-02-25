@@ -1108,7 +1108,7 @@ HTML_TEMPLATE = """
                             <div id="orch-canvas-hint" style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);text-align:center;color:#9ca3af;pointer-events:none;z-index:1;">
                                 <div style="font-size:40px;margin-bottom:8px;">🎯</div>
                                 <div style="font-size:14px;font-weight:500;color:#6b7280;">拖入专家开始编排</div>
-                                <div style="font-size:11px;margin-top:6px;color:#9ca3af;">滚轮缩放 | 空格+拖动平移 | 拖入专家开始编排</div>
+                                <div style="font-size:11px;margin-top:6px;color:#9ca3af;">拖入专家开始编排</div>
                             </div>
                         </div>
                         <div class="orch-nav-controls">
@@ -4291,8 +4291,6 @@ HTML_TEMPLATE = """
         zoom: 1,
         panX: 0,
         panY: 0,
-        panning: false,
-        spaceDown: false,
     };
 
     // ── Zoom / Pan helpers ──
@@ -4707,15 +4705,8 @@ HTML_TEMPLATE = """
             } catch(err) {}
         });
 
-        // ── Mousedown: selection rect OR start panning ──
+        // ── Mousedown: selection rect ──
         canvas.addEventListener('mousedown', e => {
-            // Middle-button or Space+left → start panning
-            if (e.button === 1 || (e.button === 0 && orch.spaceDown)) {
-                e.preventDefault();
-                orch.panning = { lastX: e.clientX, lastY: e.clientY };
-                canvas.style.cursor = 'grabbing';
-                return;
-            }
             const inner = document.getElementById('orch-canvas-inner');
             if (e.target === canvas || e.target === inner || e.target.id === 'orch-canvas-hint') {
                 orchClearSelection();
@@ -4724,16 +4715,8 @@ HTML_TEMPLATE = """
             }
         });
 
-        // ── Mousemove: drag nodes / connect / select / pan ──
+        // ── Mousemove: drag nodes / connect / select ──
         canvas.addEventListener('mousemove', e => {
-            if (orch.panning) {
-                orch.panX += e.clientX - orch.panning.lastX;
-                orch.panY += e.clientY - orch.panning.lastY;
-                orch.panning.lastX = e.clientX;
-                orch.panning.lastY = e.clientY;
-                orchApplyTransform();
-                return;
-            }
             if (orch.dragging) {
                 const d = orch.dragging;
                 const cp = orchClientToCanvas(e.clientX, e.clientY);
@@ -4767,7 +4750,6 @@ HTML_TEMPLATE = """
 
         // ── Mouseup ──
         canvas.addEventListener('mouseup', e => {
-            if (orch.panning) { orch.panning = false; canvas.style.cursor = ''; return; }
             if (orch.dragging) { orch.dragging = null; orchUpdateYaml(); }
             if (orch.connecting) { orch.connecting = null; orchRemoveTempLine(); }
             if (orch.selecting) {
@@ -4783,31 +4765,6 @@ HTML_TEMPLATE = """
             }
         });
 
-        // ── Wheel zoom (Ctrl+wheel or pinch) ──
-        canvas.addEventListener('wheel', e => {
-            e.preventDefault();
-            const area = canvas;
-            const rect = area.getBoundingClientRect();
-            // Pointer position relative to canvas viewport
-            const mx = e.clientX - rect.left;
-            const my = e.clientY - rect.top;
-            // Old canvas-space position under pointer
-            const oldX = (mx - orch.panX) / orch.zoom;
-            const oldY = (my - orch.panY) / orch.zoom;
-            // Apply zoom
-            const delta = e.deltaY > 0 ? -0.08 : 0.08;
-            orch.zoom = Math.min(3, Math.max(0.15, orch.zoom + delta));
-            // Adjust pan so the point under pointer stays fixed
-            orch.panX = mx - oldX * orch.zoom;
-            orch.panY = my - oldY * orch.zoom;
-            orchApplyTransform();
-        }, { passive: false });
-
-        // Stop panning if mouse leaves canvas
-        canvas.addEventListener('mouseleave', () => {
-            if (orch.panning) { orch.panning = false; canvas.style.cursor = ''; }
-        });
-
         // ── Context menu ──
         canvas.addEventListener('contextmenu', e => {
             e.preventDefault();
@@ -4816,11 +4773,6 @@ HTML_TEMPLATE = """
 
         // ── Keyboard shortcuts ──
         document.addEventListener('keydown', e => {
-            if (e.code === 'Space' && currentPage === 'orchestrate' && document.activeElement.tagName !== 'INPUT' && document.activeElement.tagName !== 'TEXTAREA') {
-                e.preventDefault();
-                orch.spaceDown = true;
-                canvas.style.cursor = 'grab';
-            }
             if (currentPage !== 'orchestrate') return;
             if (e.key === 'Delete' || e.key === 'Backspace') {
                 if (document.activeElement.tagName === 'INPUT' || document.activeElement.tagName === 'TEXTAREA') return;
@@ -4836,12 +4788,7 @@ HTML_TEMPLATE = """
             }
             if (e.key === 'Escape') { orchClearSelection(); orchHideContextMenu(); }
         });
-        document.addEventListener('keyup', e => {
-            if (e.code === 'Space') {
-                orch.spaceDown = false;
-                if (!orch.panning) canvas.style.cursor = '';
-            }
-        });
+        document.addEventListener('keyup', e => {});
     }
 
     function orchShowContextMenu(x, y, targetNode) {
