@@ -4750,9 +4750,13 @@ HTML_TEMPLATE = """
             if (res.agent_yaml) {
                 yamlEl.textContent = res.agent_yaml;
                 if (res.validation?.valid) {
-                    statusEl.textContent = `✅ 有效 YAML — ${res.validation.steps} 步骤 [${res.validation.step_types.join(', ')}]`;
+                    let statusMsg = `✅ 有效 YAML — ${res.validation.steps} 步骤 [${res.validation.step_types.join(', ')}]`;
+                    if (res.saved_file && !res.saved_file.startsWith('save_error')) {
+                        statusMsg += ` | 💾 已保存: ${res.saved_file}`;
+                    }
+                    statusEl.textContent = statusMsg;
                     statusEl.style.cssText = 'color:#16a34a;background:#f0fdf4;border-color:#86efac;';
-                    orchToast('Agent 生成了有效的 YAML! ✅');
+                    orchToast(res.saved_file ? 'YAML 已生成并保存! ✅' : 'Agent 生成了有效的 YAML! ✅');
                 } else {
                     statusEl.textContent = `⚠️ YAML 校验问题: ${res.validation?.error||''}`;
                     statusEl.style.cssText = 'color:#d97706;background:#fffbeb;border-color:#fbbf24;';
@@ -5813,7 +5817,24 @@ def proxy_visual_agent_generate_yaml():
         agent_yaml = _vis_extract_yaml(agent_reply) if _vis_extract_yaml else agent_reply
         validation = _vis_validate_yaml(agent_yaml) if _vis_validate_yaml else {"valid": False, "error": "validator unavailable"}
 
-        return jsonify({"prompt": prompt, "agent_yaml": agent_yaml, "agent_reply_raw": agent_reply, "validation": validation})
+        # Auto-save valid YAML to user's oasis/yaml directory
+        saved_path = None
+        if validation.get("valid"):
+            try:
+                import time as _time
+                yaml_dir = os.path.join(root_dir, "data", "user_files", user_id, "oasis", "yaml")
+                os.makedirs(yaml_dir, exist_ok=True)
+                fname = data.get("save_name") or f"orch_{_time.strftime('%Y%m%d_%H%M%S')}"
+                if not fname.endswith((".yaml", ".yml")):
+                    fname += ".yaml"
+                fpath = os.path.join(yaml_dir, fname)
+                with open(fpath, "w", encoding="utf-8") as _yf:
+                    _yf.write(f"# Auto-generated from visual orchestrator\n{agent_yaml}")
+                saved_path = fname
+            except Exception as save_err:
+                saved_path = f"save_error: {save_err}"
+
+        return jsonify({"prompt": prompt, "agent_yaml": agent_yaml, "agent_reply_raw": agent_reply, "validation": validation, "saved_file": saved_path})
 
     except requests.exceptions.ConnectionError:
         prompt = _vis_build_llm_prompt(data) if _vis_build_llm_prompt else ""
