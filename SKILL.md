@@ -146,6 +146,49 @@ POST http://127.0.0.1:51202/topics
 {"question":"讨论主题","user_id":"system","max_rounds":3,"discussion":true,"schedule_yaml":"...","callback_url":"http://127.0.0.1:51200/system_trigger","callback_session_id":"my-session"}
 ```
 
+## 案例配置参考
+
+以下是一份实际运行的配置示例（敏感信息已脱敏）：
+
+```bash
+bash selfskill/scripts/run.sh configure --init
+bash selfskill/scripts/run.sh configure --batch \
+  LLM_API_KEY=sk-xxxxxxxxxxxxxxxxxxxxxxxxxxxx4c74 \
+  LLM_BASE_URL=https://deepseek.com \
+  LLM_MODEL=deepseek-chat \
+  LLM_VISION_SUPPORT=true \
+  TTS_MODEL=gemini-2.5-flash-preview-tts \
+  TTS_VOICE=charon \
+  PORT_AGENT=51200 \
+  PORT_SCHEDULER=51201 \
+  PORT_OASIS=51202 \
+  PORT_FRONTEND=51209 \
+  PORT_BARK=58010 \
+  OPENAI_STANDARD_MODE=false
+bash selfskill/scripts/run.sh add-user system <your-password>
+```
+
+配置完成后 `configure --show` 输出：
+
+```
+  PORT_SCHEDULER=51201
+  PORT_AGENT=51200
+  PORT_FRONTEND=51209
+  PORT_OASIS=51202
+  OASIS_BASE_URL=http://127.0.0.1:51202
+  PORT_BARK=58010
+  INTERNAL_TOKEN=f1aa****57e7          # 自动生成，勿泄露
+  LLM_API_KEY=sk-7****4c74
+  LLM_BASE_URL=https://deepseek.com
+  LLM_MODEL=deepseek-chat
+  LLM_VISION_SUPPORT=true
+  TTS_MODEL=gemini-2.5-flash-preview-tts
+  TTS_VOICE=charon
+  OPENAI_STANDARD_MODE=false
+```
+
+> 说明：`INTERNAL_TOKEN` 首次启动自动生成，`PUBLIC_DOMAIN` / `BARK_PUBLIC_URL` 由 tunnel 自动写入，无需手动配置。
+
 ## 典型使用流程
 
 ```bash
