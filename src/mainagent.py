@@ -831,6 +831,7 @@ async def system_trigger(req: SystemTriggerRequest, x_internal_token: str | None
     }
 
     async def _wait_and_invoke():
+        task_key = f"{req.user_id}#{req.session_id}"
         lock = await agent.get_thread_lock(thread_id)
         print(f"[SystemTrigger] ⏳ Waiting for lock on {thread_id} ...")
         async with lock:
@@ -840,13 +841,36 @@ async def system_trigger(req: SystemTriggerRequest, x_internal_token: str | None
                 await agent.agent_app.ainvoke(system_input, config)
                 agent.add_pending_system_message(thread_id)
                 print(f"[SystemTrigger] ✅ Done for {thread_id}")
+            except asyncio.CancelledError:
+                print(f"[SystemTrigger] 🛑 Cancelled for {thread_id}")
+                # 修复 checkpoint 中可能不完整的消息序列
+                try:
+                    snapshot = await agent.agent_app.aget_state(config)
+                    last_msgs = snapshot.values.get("messages", [])
+                    if last_msgs:
+                        last_msg = last_msgs[-1]
+                        if hasattr(last_msg, "tool_calls") and last_msg.tool_calls:
+                            tool_messages = [
+                                ToolMessage(
+                                    content="⚠️ 系统调用被用户终止",
+                                    tool_call_id=tc["id"],
+                                )
+                                for tc in last_msg.tool_calls
+                            ]
+                            await agent.agent_app.aupdate_state(config, {"messages": tool_messages})
+                except Exception:
+                    pass
             except Exception as e:
                 print(f"[SystemTrigger] ❌ Error for {thread_id}: {e}")
             finally:
                 agent.clear_thread_busy_source(thread_id)
+                agent.unregister_task(task_key)
 
     # fire-and-forget：立刻返回，graph 在后台异步执行
-    asyncio.create_task(_wait_and_invoke())
+    task_key = f"{req.user_id}#{req.session_id}"
+    await agent.cancel_task(task_key)  # 取消该会话可能正在运行的任务
+    task = asyncio.create_task(_wait_and_invoke())
+    agent.register_task(task_key, task)
     return {"status": "received", "message": f"系统触发已收到，用户 {req.user_id}"}
 
 
