@@ -101,13 +101,14 @@ class DiscussionEngine:
         bot_timeout: float | None = None,
         user_id: str = "anonymous",
         early_stop: bool = False,
+        discussion: bool | None = None,
     ):
         self.forum = forum
         self._cancelled = False
         self._early_stop = early_stop
+        self._discussion_override = discussion  # API-level override (None = use YAML)
 
         # ── Step 1: Parse schedule (required) ──
-        # Priority: schedule object > schedule_file > schedule_yaml
         self.schedule: Schedule | None = None
         if schedule:
             self.schedule = schedule
@@ -121,6 +122,12 @@ class DiscussionEngine:
                 "schedule_yaml or schedule_file is required. "
                 "For simple all-parallel, use: version: 1\\nrepeat: true\\nplan:\\n  - all_experts: true"
             )
+
+        # discussion mode: API override > YAML setting > default False
+        if self._discussion_override is not None:
+            self._discussion = self._discussion_override
+        else:
+            self._discussion = self.schedule.discussion
 
         # ── Step 2: Build expert pool from YAML ──
         experts_list: list[ExpertAgent | SessionExpert] = []
@@ -249,19 +256,33 @@ class DiscussionEngine:
     async def run(self):
         """Run the full discussion loop (called as a background task)."""
         self.forum.status = "discussing"
+        self.forum.discussion = self._discussion
+        self.forum.start_clock()
 
         session_count = sum(1 for e in self.experts if isinstance(e, SessionExpert))
         direct_count = len(self.experts) - session_count
+        mode_label = "discussion" if self._discussion else "execute"
         print(
             f"[OASIS] 🏛️ Discussion started: {self.forum.topic_id} "
             f"({len(self.experts)} experts [{direct_count} direct, {session_count} session], "
-            f"max {self.forum.max_rounds} rounds, mode=scheduled)"
+            f"max {self.forum.max_rounds} rounds, mode={mode_label})"
         )
 
         try:
             await self._run_scheduled()
 
-            self.forum.conclusion = await self._summarize()
+            if self._discussion:
+                self.forum.conclusion = await self._summarize()
+            else:
+                # Execute mode: just collect outputs, no LLM summary
+                all_posts = await self.forum.browse()
+                if all_posts:
+                    self.forum.conclusion = "\n\n".join(
+                        f"【{p.author}】\n{p.content}" for p in all_posts
+                    )
+                else:
+                    self.forum.conclusion = "执行完成，无输出。"
+            self.forum.log_event("conclude", detail="Discussion concluded")
             self.forum.status = "concluded"
             print(f"[OASIS] ✅ Discussion concluded: {self.forum.topic_id}")
 
@@ -278,18 +299,21 @@ class DiscussionEngine:
     async def _run_scheduled(self):
         """Execute the schedule."""
         steps = self.schedule.steps
+        # In execute mode, early_stop is meaningless (no votes)
+        can_early_stop = self._early_stop and self._discussion
 
         if self.schedule.repeat:
             for round_num in range(self.forum.max_rounds):
                 self._check_cancelled()
                 self.forum.current_round = round_num + 1
+                self.forum.log_event("round", detail=f"Round {self.forum.current_round}/{self.forum.max_rounds}")
                 print(f"[OASIS] 📢 Round {self.forum.current_round}/{self.forum.max_rounds}")
 
                 for step in steps:
                     self._check_cancelled()
                     await self._execute_step(step)
 
-                if self._early_stop and round_num >= 1 and await self._consensus_reached():
+                if can_early_stop and round_num >= 1 and await self._consensus_reached():
                     print(f"[OASIS] 🤝 Consensus reached at round {self.forum.current_round}")
                     break
         else:
@@ -297,18 +321,22 @@ class DiscussionEngine:
                 self._check_cancelled()
                 self.forum.current_round = step_idx + 1
                 self.forum.max_rounds = len(steps)
+                self.forum.log_event("round", detail=f"Step {step_idx + 1}/{len(steps)}")
                 print(f"[OASIS] 📢 Step {step_idx + 1}/{len(steps)}")
 
                 await self._execute_step(step)
 
-                if self._early_stop and step_idx >= 1 and await self._consensus_reached():
+                if can_early_stop and step_idx >= 1 and await self._consensus_reached():
                     print(f"[OASIS] 🤝 Consensus reached at step {step_idx + 1}")
                     break
 
     async def _execute_step(self, step: ScheduleStep):
         """Execute a single schedule step."""
+        disc = self._discussion
+
         if step.step_type == StepType.MANUAL:
             print(f"  [OASIS] 📝 Manual post by {step.manual_author}")
+            self.forum.log_event("manual_post", agent=step.manual_author)
             await self.forum.publish(
                 author=step.manual_author,
                 content=step.manual_content,
@@ -317,8 +345,17 @@ class DiscussionEngine:
 
         elif step.step_type == StepType.ALL:
             print(f"  [OASIS] 👥 All experts speak")
+            for expert in self.experts:
+                self.forum.log_event("agent_call", agent=expert.name)
+
+            async def _tracked_participate(expert):
+                try:
+                    await expert.participate(self.forum, discussion=disc)
+                finally:
+                    self.forum.log_event("agent_done", agent=expert.name)
+
             await asyncio.gather(
-                *[expert.participate(self.forum) for expert in self.experts],
+                *[_tracked_participate(e) for e in self.experts],
                 return_exceptions=True,
             )
 
@@ -327,17 +364,25 @@ class DiscussionEngine:
             if agents:
                 instr = step.instructions.get(step.expert_names[0], "")
                 print(f"  [OASIS] 🎤 {agents[0].name} speaks" + (f" (instruction: {instr[:40]}...)" if instr else ""))
-                await agents[0].participate(self.forum, instruction=instr)
+                self.forum.log_event("agent_call", agent=agents[0].name)
+                await agents[0].participate(self.forum, instruction=instr, discussion=disc)
+                self.forum.log_event("agent_done", agent=agents[0].name)
 
         elif step.step_type == StepType.PARALLEL:
             agents = self._resolve_experts(step.expert_names)
             if agents:
                 names = ", ".join(a.name for a in agents)
                 print(f"  [OASIS] 🎤 Parallel: {names}")
-                # Match instructions by original YAML name
+                for agent in agents:
+                    self.forum.log_event("agent_call", agent=agent.name)
+
                 async def _run_with_instr(agent, yaml_name):
                     instr = step.instructions.get(yaml_name, "")
-                    await agent.participate(self.forum, instruction=instr)
+                    try:
+                        await agent.participate(self.forum, instruction=instr, discussion=disc)
+                    finally:
+                        self.forum.log_event("agent_done", agent=agent.name)
+
                 await asyncio.gather(
                     *[_run_with_instr(a, n) for a, n in zip(agents, step.expert_names)],
                     return_exceptions=True,

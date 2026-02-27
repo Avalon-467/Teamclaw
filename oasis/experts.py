@@ -310,8 +310,29 @@ class ExpertAgent:
         self.tag = tag
         self.llm = _get_llm(temperature)
 
-    async def participate(self, forum: DiscussionForum, instruction: str = ""):
+    async def participate(self, forum: DiscussionForum, instruction: str = "", discussion: bool = True):
         others = await forum.browse(viewer=self.name, exclude_self=True)
+
+        if not discussion:
+            # ── Execute mode: just run the task, no discussion format ──
+            task_prompt = f"你是「{self.title}」。{self.persona}\n\n" if self.persona else ""
+            task_prompt += f"任务主题: {forum.question}\n"
+            if instruction:
+                task_prompt += f"\n执行指令: {instruction}\n"
+            if others:
+                task_prompt += f"\n前序 agent 的执行结果:\n{_format_posts(others)}\n"
+            task_prompt += "\n请直接执行任务并返回结果。"
+
+            try:
+                resp = await self.llm.ainvoke([HumanMessage(content=task_prompt)])
+                text = extract_text(resp.content)
+                await forum.publish(author=self.name, content=text.strip()[:2000])
+                print(f"  [OASIS] ✅ {self.name} 执行完成")
+            except Exception as e:
+                print(f"  [OASIS] ❌ {self.name} error: {e}")
+            return
+
+        # ── Discussion mode (original) ──
         posts_text = _format_posts(others) if others else "(还没有其他人发言，你来开启讨论吧)"
         prompt = _build_discuss_prompt(self.title, self.persona, forum.question, posts_text)
         if instruction:
@@ -389,14 +410,70 @@ class SessionExpert:
     def _auth_header(self) -> dict:
         return {"Authorization": f"Bearer {self._internal_token}:{self._user_id}"}
 
-    async def participate(self, forum: DiscussionForum, instruction: str = ""):
+    async def participate(self, forum: DiscussionForum, instruction: str = "", discussion: bool = True):
         """
-        Participate in one round of discussion using the session.
+        Participate in one round.
 
-        - oasis session (#oasis# in sid): inject persona identity on first call
-        - regular session: no identity injection, just send discussion context
-        Subsequent calls only send incremental new posts.
+        discussion=True: forum discussion mode (JSON reply/vote)
+        discussion=False: execute mode — agent just runs the task, output logged to forum
         """
+        others = await forum.browse(viewer=self.name, exclude_self=True)
+
+        if not discussion:
+            # ── Execute mode: send task directly, no JSON format requirement ──
+            new_posts = [p for p in others if p.id not in self._seen_post_ids]
+            self._seen_post_ids.update(p.id for p in others)
+
+            messages = []
+            if not self._initialized:
+                # First call
+                task_parts = []
+                if self.is_oasis and self.persona:
+                    messages.append({"role": "system", "content": f"你是「{self.title}」。{self.persona}"})
+                task_parts.append(f"任务主题: {forum.question}")
+                if instruction:
+                    task_parts.append(f"\n执行指令: {instruction}")
+                if others:
+                    task_parts.append(f"\n前序 agent 的执行结果:\n{_format_posts(others)}")
+                task_parts.append("\n请直接执行任务并返回结果。")
+                messages.append({"role": "user", "content": "\n".join(task_parts)})
+                self._initialized = True
+            else:
+                # Subsequent calls
+                ctx_parts = [f"【第 {forum.current_round} 轮】"]
+                if instruction:
+                    ctx_parts.append(f"执行指令: {instruction}")
+                if new_posts:
+                    ctx_parts.append(f"其他 agent 的新结果:\n{_format_posts(new_posts)}")
+                ctx_parts.append("请继续执行任务并返回结果。")
+                messages.append({"role": "user", "content": "\n".join(ctx_parts)})
+
+            body: dict = {
+                "model": "mini-timebot",
+                "messages": messages,
+                "stream": False,
+                "session_id": self.session_id,
+            }
+            if self.enabled_tools is not None:
+                body["enabled_tools"] = self.enabled_tools
+
+            try:
+                async with httpx.AsyncClient(timeout=httpx.Timeout(timeout=self.timeout)) as client:
+                    resp = await client.post(
+                        self._bot_url, json=body, headers=self._auth_header(),
+                    )
+                if resp.status_code != 200:
+                    print(f"  [OASIS] ❌ {self.name} bot API error {resp.status_code}: {resp.text[:200]}")
+                    return
+                data = resp.json()
+                raw_content = data["choices"][0]["message"]["content"]
+                await forum.publish(author=self.name, content=raw_content.strip()[:2000])
+                print(f"  [OASIS] ✅ {self.name} 执行完成")
+            except Exception as e:
+                print(f"  [OASIS] ❌ {self.name} error: {e}")
+            return
+
+        # ── Discussion mode (original) ──
         others = await forum.browse(viewer=self.name, exclude_self=True)
 
         new_posts = [p for p in others if p.id not in self._seen_post_ids]

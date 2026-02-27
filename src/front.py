@@ -3244,7 +3244,7 @@ HTML_TEMPLATE = """
             btns += `<button onclick="deleteOasisTopic('${detail.topic_id}')" class="oasis-detail-action-btn delete">🗑 ${t('oasis_delete')}</button>`;
             actionsEl.innerHTML = btns;
 
-            renderPosts(detail.posts || []);
+            renderPosts(detail.posts || [], detail.timeline || [], detail.discussion !== false);
 
             // Show/hide conclusion
             const conclusionArea = document.getElementById('oasis-conclusion-area');
@@ -3256,10 +3256,18 @@ HTML_TEMPLATE = """
             }
         }
 
-        function renderPosts(posts) {
+        function fmtElapsed(sec) {
+            if (sec === undefined || sec === null) return '';
+            const s = Math.round(sec);
+            if (s < 60) return 'T+' + s + 's';
+            const m = Math.floor(s / 60);
+            return 'T+' + m + 'm' + (s % 60) + 's';
+        }
+
+        function renderPosts(posts, timeline, isDiscussion) {
             const box = document.getElementById('oasis-posts-box');
 
-            if (posts.length === 0) {
+            if (posts.length === 0 && (!timeline || timeline.length === 0)) {
                 box.innerHTML = `
                     <div class="text-center text-gray-400 text-sm py-8">
                         <div class="text-2xl mb-2">💭</div>
@@ -3268,7 +3276,66 @@ HTML_TEMPLATE = """
                 return;
             }
 
-            box.innerHTML = posts.map(p => {
+            if (!isDiscussion) {
+                // ── 执行模式：只展示 timeline 事件通知 ──
+                if (!timeline || timeline.length === 0) {
+                    box.innerHTML = `
+                        <div class="text-center text-gray-400 text-sm py-8">
+                            <div class="text-2xl mb-2">⏳</div>
+                            <p>等待执行...</p>
+                        </div>`;
+                    return;
+                }
+
+                box.innerHTML = timeline.map(ev => {
+                    const evIcons = {start:'🚀', round:'📢', agent_call:'⏳', agent_done:'✅', conclude:'🏁', manual_post:'📝'};
+                    const icon = evIcons[ev.event] || '⏱';
+                    let label = '';
+                    if (ev.event === 'agent_call') {
+                        label = ev.agent + ' 开始执行...';
+                    } else if (ev.event === 'agent_done') {
+                        label = ev.agent + ' 执行完成';
+                    } else {
+                        label = ev.agent ? ev.agent + (ev.detail ? ' · ' + ev.detail : '') : (ev.detail || ev.event);
+                    }
+                    return `
+                        <div class="flex items-center space-x-2 py-1 px-2">
+                            <span class="text-[10px] font-mono text-blue-500 whitespace-nowrap">${fmtElapsed(ev.elapsed)}</span>
+                            <span class="text-xs text-gray-400">${icon} ${escapeHtml(label)}</span>
+                        </div>`;
+                }).join('');
+
+                box.scrollTop = box.scrollHeight;
+                return;
+            }
+
+            // ── 讨论模式：原有完整渲染 ──
+            // Build merged timeline: interleave timeline events and posts by elapsed
+            const items = [];
+            if (timeline) {
+                for (const ev of timeline) {
+                    items.push({type: 'event', elapsed: ev.elapsed, data: ev});
+                }
+            }
+            for (const p of posts) {
+                items.push({type: 'post', elapsed: p.elapsed || 0, data: p});
+            }
+            items.sort((a, b) => a.elapsed - b.elapsed);
+
+            box.innerHTML = items.map(item => {
+                if (item.type === 'event') {
+                    const ev = item.data;
+                    const evIcons = {start:'🚀', round:'📢', agent_call:'⏳', agent_done:'✅', conclude:'🏁', manual_post:'📝'};
+                    const icon = evIcons[ev.event] || '⏱';
+                    const label = ev.agent ? ev.agent + (ev.detail ? ' · ' + ev.detail : '') : (ev.detail || ev.event);
+                    return `
+                        <div class="flex items-center space-x-2 py-1 px-2">
+                            <span class="text-[10px] font-mono text-blue-500 whitespace-nowrap">${fmtElapsed(ev.elapsed)}</span>
+                            <span class="text-xs text-gray-400">${icon} ${escapeHtml(label)}</span>
+                        </div>`;
+                }
+                // Post
+                const p = item.data;
                 const avatar = getExpertAvatar(p.author);
                 const isReply = p.reply_to !== null && p.reply_to !== undefined;
                 const totalVotes = p.upvotes + p.downvotes;
@@ -3282,6 +3349,7 @@ HTML_TEMPLATE = """
                                 <div class="flex items-center justify-between">
                                     <span class="text-xs font-semibold text-gray-700">${escapeHtml(p.author)}</span>
                                     <div class="flex items-center space-x-2 text-[10px] text-gray-400">
+                                        <span class="font-mono text-blue-500">${fmtElapsed(p.elapsed)}</span>
                                         ${isReply ? '<span>↩️ #' + p.reply_to + '</span>' : ''}
                                         <span>#${p.id}</span>
                                     </div>
@@ -3310,6 +3378,7 @@ HTML_TEMPLATE = """
         function startDetailPolling(topicId) {
             stopOasisPolling();
             let lastPostCount = 0;
+            let lastTimelineCount = 0;
             let errorCount = 0;
             oasisPollingTimer = setInterval(async () => {
                 if (oasisCurrentTopicId !== topicId) {
@@ -3330,11 +3399,13 @@ HTML_TEMPLATE = """
                     errorCount = 0;
                     const detail = await resp.json();
                     
-                    // Only re-render if posts changed
+                    // Re-render if posts or timeline changed
                     const currentPostCount = (detail.posts || []).length;
-                    if (currentPostCount !== lastPostCount || detail.status !== 'discussing') {
+                    const currentTimelineCount = (detail.timeline || []).length;
+                    if (currentPostCount !== lastPostCount || currentTimelineCount !== lastTimelineCount || detail.status !== 'discussing') {
                         renderTopicDetail(detail);
                         lastPostCount = currentPostCount;
+                        lastTimelineCount = currentTimelineCount;
                     }
 
                     // Stop polling when discussion ends

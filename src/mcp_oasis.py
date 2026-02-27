@@ -338,9 +338,19 @@ async def post_to_oasis(
     schedule_file: str = "",
     detach: bool = False,
     notify_session: str = "",
+    discussion: bool = False,
 ) -> str:
     """
-    Submit a question or work task to the OASIS forum for multi-expert discussion.
+    Submit a question or work task to the OASIS forum for multi-expert discussion or execution.
+
+    Two modes:
+      - discussion=False (default): Execute mode. Agents run tasks sequentially/in parallel per workflow,
+        no discussion/voting. Each agent receives the question + instruction + previous agents' outputs
+        as context, executes its task, and returns results. Ideal for task automation (e.g. game control).
+      - discussion=True: Forum discussion mode. Experts discuss, reply, vote in JSON format.
+    
+    Note: discussion can also be set in YAML via "discussion: true/false". 
+    If not set here (default False), the YAML setting is used. Setting it here overrides the YAML.
 
     Expert pool is built entirely from schedule YAML expert names.
     Either schedule_file or schedule_yaml must be provided (at least one).
@@ -392,6 +402,9 @@ async def post_to_oasis(
             are resolved under data/user_files/{user}/oasis/yaml/. Takes priority over schedule_yaml.
         detach: If True, return immediately with topic_id. Use check_oasis_discussion later.
         notify_session: (auto-injected) Session ID for completion notification.
+        discussion: If False (default), execute mode — agents just run tasks without discussion format.
+            If True, forum discussion mode with JSON reply/vote.
+            Can also be set in YAML via "discussion: true". When False (default), YAML setting is respected.
 
     Returns:
         The final conclusion, or (if detach=True) the topic_id for later retrieval
@@ -409,6 +422,12 @@ async def post_to_oasis(
                 "user_id": effective_user,
                 "max_rounds": max_rounds,
             }
+            # Only send discussion when explicitly set to True (discussion mode)
+            # so YAML's own "discussion:" setting is respected by default
+            if discussion:
+                body["discussion"] = True
+            else:
+                body["discussion"] = False
             if detach:
                 port = os.getenv("PORT_AGENT", "51200")
                 body["callback_url"] = f"http://127.0.0.1:{port}/system_trigger"
