@@ -141,8 +141,8 @@ HTML_TEMPLATE = """
         .chat-container { flex: 1; min-height: 0; overflow-y: auto; }
         .markdown-body pre { background: #1e1e1e; padding: 1rem; border-radius: 0.5rem; margin: 0.5rem 0; overflow-x: auto; }
         .markdown-body code { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; font-size: 0.9em; }
-        .message-user { border-radius: 1.25rem 1.25rem 0.2rem 1.25rem; }
-        .message-agent { border-radius: 1.25rem 1.25rem 1.25rem 0.2rem; }
+        .message-user { border-radius: 1.25rem 1.25rem 0.2rem 1.25rem; max-width: min(85%, 800px); }
+        .message-agent { border-radius: 1.25rem 1.25rem 1.25rem 0.2rem; max-width: min(85%, 800px); }
         /* 流式工具调用指示器 */
         .stream-tool-indicator {
             display: inline-flex; align-items: center; gap: 6px;
@@ -664,7 +664,7 @@ HTML_TEMPLATE = """
         }
 
         .main-layout { display: flex; height: var(--app-height, 100vh); max-width: 100%; overflow: hidden; }
-        .chat-main { flex: 1; min-width: 0; max-width: 900px; display: flex; flex-direction: column; height: var(--app-height, 100vh); overflow: hidden; }
+        .chat-main { flex: 1; min-width: 0; display: flex; flex-direction: column; height: var(--app-height, 100vh); overflow: hidden; }
 
         /* === Session sidebar === */
         .session-sidebar {
@@ -2255,6 +2255,9 @@ HTML_TEMPLATE = """
         async function switchToSession(sessionId, force = false) {
             if (!force && sessionId === currentSessionId) { closeSessionSidebar(); return; }
             hideNewMsgBanner();
+            // 切换前先重置按钮到 idle 状态（避免旧 session 的 streaming/busy 状态残留）
+            setStreamingUI(false);
+            setSystemBusyUI(false);
             currentSessionId = sessionId;
             sessionStorage.setItem('sessionId', sessionId);
             updateSessionDisplay();
@@ -2382,12 +2385,17 @@ HTML_TEMPLATE = """
             loginBtn.textContent = t('login_verifying');
 
             try {
+                const controller = new AbortController();
+                const timeout = setTimeout(() => controller.abort(), 15000);
                 const resp = await fetch("/proxy_login", {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ user_id: name, password: password })
+                    body: JSON.stringify({ user_id: name, password: password }),
+                    signal: controller.signal
                 });
-                const data = await resp.json();
+                clearTimeout(timeout);
+                let data;
+                try { data = await resp.json(); } catch (_) { data = { error: 'Invalid server response' }; }
                 if (!resp.ok) {
                     errorDiv.textContent = data.detail || data.error || t('login_error_failed');
                     errorDiv.classList.remove('hidden');
@@ -2409,7 +2417,11 @@ HTML_TEMPLATE = """
                 refreshOasisTopics(); // Load OASIS topics after login
                 startHistoryPolling();
             } catch (e) {
-                errorDiv.textContent = t('login_error_network') + ': ' + e.message;
+                if (e.name === 'AbortError') {
+                    errorDiv.textContent = '连接超时，请确认后端服务已启动后重试';
+                } else {
+                    errorDiv.textContent = t('login_error_network') + ': ' + e.message;
+                }
                 errorDiv.classList.remove('hidden');
             } finally {
                 loginBtn.disabled = false;
@@ -4326,6 +4338,15 @@ HTML_TEMPLATE = """
         orchLoadSessionAgents();
         orchSetupCanvas();
         orchSetupSettings();
+        // Bind manual injection card events (dragstart + dblclick)
+        const mc = document.getElementById('orch-manual-card');
+        if (mc) {
+            mc.addEventListener('dragstart', e => {
+                e.dataTransfer.setData('application/json', JSON.stringify({type:'manual', name:'手动注入', tag:'manual', emoji:'📝', temperature:0}));
+                e.dataTransfer.effectAllowed = 'copy';
+            });
+            mc.addEventListener('dblclick', () => orchAddNodeCenter({type:'manual', name:'手动注入', tag:'manual', emoji:'📝', temperature:0}));
+        }
     }
 
     // ── Load experts (public + custom) ──
@@ -5332,8 +5353,8 @@ def manifest():
 def service_worker():
     """Serve Service Worker for PWA offline support and caching."""
     sw_code = """
-// Teamclaw Service Worker
-const CACHE_NAME = 'teamclaw-v1';
+// Teamclaw Service Worker v3
+const CACHE_NAME = 'teamclaw-v3';
 const PRECACHE_URLS = ['/'];
 
 self.addEventListener('install', event => {
@@ -5352,23 +5373,26 @@ self.addEventListener('activate', event => {
 });
 
 self.addEventListener('fetch', event => {
-    // Network-first strategy for API calls, cache-first for static assets
-    if (event.request.url.includes('/proxy_') || event.request.url.includes('/ask') || event.request.url.includes('/v1/')) {
-        event.respondWith(
-            fetch(event.request).catch(() => caches.match(event.request))
-        );
-    } else {
-        event.respondWith(
-            caches.match(event.request).then(cached => {
-                const fetched = fetch(event.request).then(response => {
+    // CRITICAL: Only handle GET requests. Non-GET (POST, PUT, DELETE) must pass through directly.
+    if (event.request.method !== 'GET') return;
+
+    // API GET requests also pass through without SW interference
+    const url = event.request.url;
+    if (url.includes('/proxy_') || url.includes('/ask') || url.includes('/v1/') || url.includes('/api/')) return;
+
+    // Cache-first for static GET assets only
+    event.respondWith(
+        caches.match(event.request).then(cached => {
+            const fetched = fetch(event.request).then(response => {
+                if (response.ok) {
                     const clone = response.clone();
                     caches.open(CACHE_NAME).then(cache => cache.put(event.request, clone));
-                    return response;
-                }).catch(() => cached);
-                return cached || fetched;
-            })
-        );
-    }
+                }
+                return response;
+            }).catch(() => cached);
+            return cached || fetched;
+        })
+    );
 });
 """
     return app.response_class(
