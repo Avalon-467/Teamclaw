@@ -346,11 +346,11 @@ async def stream_topic(topic_id: str, user_id: str = Query(...)):
 
             await asyncio.sleep(1)
 
-        if forum.conclusion:
-            if forum.discussion:
+        if forum.discussion:
+            if forum.conclusion:
                 yield f"data: \n🏆 === 讨论结论 ===\n{forum.conclusion}\n\n"
-            else:
-                yield f"data: \n🏆 === 执行结果 ===\n{forum.conclusion}\n\n"
+        else:
+            yield f"data: ✅ 已完成\n\n"
         yield "data: [DONE]\n\n"
 
     return StreamingResponse(

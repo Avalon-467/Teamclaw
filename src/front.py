@@ -1644,6 +1644,7 @@ HTML_TEMPLATE = """
         let currentUserId = null;
         let currentSessionId = null;
         let currentAbortController = null;
+        let cancelTargetSessionId = null;  // 终止按钮绑定的会话ID
         let pendingImages = []; // [{base64: "data:image/...", name: "file.jpg"}, ...]
         let pendingFiles = [];  // [{name: "data.csv", content: "...(text content)"}, ...]
         let pendingAudios = []; // [{base64: "data:audio/...", name: "recording.wav", format: "wav"}, ...]
@@ -2259,6 +2260,7 @@ HTML_TEMPLATE = """
             setStreamingUI(false);
             setSystemBusyUI(false);
             currentSessionId = sessionId;
+            cancelTargetSessionId = null;  // 重置终止目标
             sessionStorage.setItem('sessionId', sessionId);
             updateSessionDisplay();
             closeSessionSidebar();
@@ -2588,31 +2590,36 @@ HTML_TEMPLATE = """
                 cancelBtn.style.display = 'inline-block';
                 busyBtn.style.display = 'none';
                 inputField.disabled = true;
+                cancelTargetSessionId = currentSessionId;
             } else {
                 sendBtn.style.display = 'inline-block';
                 cancelBtn.style.display = 'none';
                 busyBtn.style.display = 'none';
                 sendBtn.disabled = false;
                 inputField.disabled = false;
+                cancelTargetSessionId = null;
             }
         }
 
         function setSystemBusyUI(busy) {
             if (busy) {
                 sendBtn.style.display = 'none';
-                cancelBtn.style.display = 'none';
-                busyBtn.style.display = 'inline-flex';
+                cancelBtn.style.display = 'inline-block';
+                busyBtn.style.display = 'none';
                 inputField.disabled = true;
+                cancelTargetSessionId = currentSessionId;
             } else {
                 sendBtn.style.display = 'inline-block';
                 cancelBtn.style.display = 'none';
                 busyBtn.style.display = 'none';
                 sendBtn.disabled = false;
                 inputField.disabled = false;
+                cancelTargetSessionId = null;
             }
         }
 
         async function handleCancel() {
+            const targetSession = cancelTargetSessionId || currentSessionId;
             if (currentAbortController) {
                 currentAbortController.abort();
                 currentAbortController = null;
@@ -2621,9 +2628,12 @@ HTML_TEMPLATE = """
                 await fetch("/proxy_cancel", {
                     method: 'POST',
                     headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({ session_id: currentSessionId })
+                    body: JSON.stringify({ session_id: targetSession })
                 });
             } catch(e) { /* ignore */ }
+            // 恢复 UI（无论是用户流式还是系统调用被终止）
+            setStreamingUI(false);
+            setSystemBusyUI(false);
         }
 
         // ===== TTS 朗读功能 =====
@@ -3246,9 +3256,10 @@ HTML_TEMPLATE = """
 
             renderPosts(detail.posts || [], detail.timeline || [], detail.discussion !== false);
 
-            // Show/hide conclusion
+            // Show/hide conclusion (执行模式下不显示 conclusion)
             const conclusionArea = document.getElementById('oasis-conclusion-area');
-            if (detail.conclusion && detail.status === 'concluded') {
+            const isDiscussion = detail.discussion !== false;
+            if (isDiscussion && detail.conclusion && detail.status === 'concluded') {
                 document.getElementById('oasis-conclusion-text').textContent = detail.conclusion;
                 conclusionArea.style.display = 'block';
             } else {
@@ -3309,11 +3320,12 @@ HTML_TEMPLATE = """
                 return;
             }
 
-            // ── 讨论模式：原有完整渲染 ──
-            // Build merged timeline: interleave timeline events and posts by elapsed
+            // ── 讨论模式：timeline 事件（绿色卡片）+ 帖子混排 ──
             const items = [];
             if (timeline) {
                 for (const ev of timeline) {
+                    // 讨论模式下不显示 agent_done
+                    if (ev.event === 'agent_done') continue;
                     items.push({type: 'event', elapsed: ev.elapsed, data: ev});
                 }
             }
@@ -3325,13 +3337,19 @@ HTML_TEMPLATE = """
             box.innerHTML = items.map(item => {
                 if (item.type === 'event') {
                     const ev = item.data;
-                    const evIcons = {start:'🚀', round:'📢', agent_call:'⏳', agent_done:'✅', conclude:'🏁', manual_post:'📝'};
+                    const evIcons = {start:'🚀', round:'📢', agent_call:'⏳', conclude:'🏁', manual_post:'📝'};
                     const icon = evIcons[ev.event] || '⏱';
                     const label = ev.agent ? ev.agent + (ev.detail ? ' · ' + ev.detail : '') : (ev.detail || ev.event);
                     return `
-                        <div class="flex items-center space-x-2 py-1 px-2">
-                            <span class="text-[10px] font-mono text-blue-500 whitespace-nowrap">${fmtElapsed(ev.elapsed)}</span>
-                            <span class="text-xs text-gray-400">${icon} ${escapeHtml(label)}</span>
+                        <div class="oasis-post bg-green-50 rounded-xl p-3 border border-green-200 shadow-sm">
+                            <div class="flex items-start space-x-2">
+                                <div class="flex-1 min-w-0">
+                                    <div class="flex items-center justify-between">
+                                        <span class="text-xs font-semibold text-green-700">${icon} ${escapeHtml(label)}</span>
+                                        <span class="text-[10px] font-mono text-green-500">${fmtElapsed(ev.elapsed)}</span>
+                                    </div>
+                                </div>
+                            </div>
                         </div>`;
                 }
                 // Post
