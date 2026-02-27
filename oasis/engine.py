@@ -127,6 +127,8 @@ class DiscussionEngine:
 
         yaml_names = extract_expert_names(self.schedule)
         seen: set[str] = set()
+        # Map YAML original names → expert (built during pool construction)
+        yaml_to_expert: dict[str, ExpertAgent | SessionExpert] = {}
         for full_name in yaml_names:
             if full_name in seen:
                 continue
@@ -142,18 +144,19 @@ class DiscussionEngine:
             working_name = full_name[:-4] if force_new else full_name  # strip "#new"
 
             first, sid = working_name.split("#", 1)
+            expert: ExpertAgent | SessionExpert
             if sid.startswith("temp#"):
                 # e.g. "creative#temp#1" → ExpertAgent with explicit temp_id
                 config = self._lookup_by_tag(first, user_id)
                 expert_name = config["name"] if config else first
                 persona = config.get("persona", "") if config else ""
                 temp_num = sid.split("#", 1)[1]
-                experts_list.append(ExpertAgent(
+                expert = ExpertAgent(
                     name=expert_name,
                     persona=persona,
                     temp_id=int(temp_num) if temp_num.isdigit() else None,
                     tag=first,
-                ))
+                )
             elif "#oasis#" in sid or sid.startswith("oasis#"):
                 # e.g. "creative#oasis#ab12cd34" → SessionExpert (oasis)
                 config = self._lookup_by_tag(first, user_id)
@@ -165,7 +168,7 @@ class DiscussionEngine:
                     print(f"  [OASIS] 🆕 #new: '{full_name}' → new session '{first}#{actual_sid}'")
                 else:
                     actual_sid = sid
-                experts_list.append(SessionExpert(
+                expert = SessionExpert(
                     name=expert_name,
                     session_id=f"{first}#{actual_sid}",
                     user_id=user_id,
@@ -174,7 +177,7 @@ class DiscussionEngine:
                     enabled_tools=bot_enabled_tools,
                     timeout=bot_timeout,
                     tag=first,
-                ))
+                )
             else:
                 # e.g. "助手#default" → SessionExpert (regular agent, no injection)
                 if force_new:
@@ -182,7 +185,7 @@ class DiscussionEngine:
                     print(f"  [OASIS] 🆕 #new: '{full_name}' → new session '{actual_sid}'")
                 else:
                     actual_sid = sid
-                experts_list.append(SessionExpert(
+                expert = SessionExpert(
                     name=first,
                     session_id=actual_sid,
                     user_id=user_id,
@@ -190,32 +193,25 @@ class DiscussionEngine:
                     bot_base_url=bot_base_url,
                     enabled_tools=bot_enabled_tools,
                     timeout=bot_timeout,
-                ))
+                )
+
+            experts_list.append(expert)
+            # Register YAML original name → expert immediately (handles #new correctly)
+            yaml_to_expert[full_name] = expert
 
         self.experts = experts_list
 
-        # Build lookup map: register by full name, title, tag, and session_id
+        # Build lookup map: YAML original names first (highest priority for scheduling),
+        # then register by internal name, title, tag, session_id as shortcuts
         self._expert_map: dict[str, ExpertAgent | SessionExpert] = {}
-        # Also register YAML original names for scheduled lookup
-        self._yaml_name_map: dict[str, ExpertAgent | SessionExpert] = {}
+        self._expert_map.update(yaml_to_expert)
         for e in self.experts:
-            self._expert_map[e.name] = e          # "创意专家#temp#1" or "创意专家#creative#oasis#ab12"
-            if e.title not in self._expert_map:
-                self._expert_map[e.title] = e     # title shortcut (first-come wins)
-            if e.tag and e.tag not in self._expert_map:
-                self._expert_map[e.tag] = e       # tag shortcut
-            if hasattr(e, "session_id") and e.session_id not in self._expert_map:
-                self._expert_map[e.session_id] = e  # session_id shortcut
-
-        # Map original YAML names (e.g. "creative#temp#1") to experts
-        for full_name in extract_expert_names(self.schedule):
-            if full_name not in self._expert_map:
-                # Try matching by tag + session_id pattern
-                first = full_name.split("#", 1)[0] if "#" in full_name else full_name
-                for e in self.experts:
-                    if e.tag == first or (hasattr(e, "session_id") and e.session_id == full_name):
-                        self._expert_map[full_name] = e
-                        break
+            self._expert_map.setdefault(e.name, e)       # "创意专家#creative#oasis#e7f3a2b1"
+            self._expert_map.setdefault(e.title, e)      # "创意专家" (first-come wins)
+            if e.tag:
+                self._expert_map.setdefault(e.tag, e)    # "creative" (first-come wins)
+            if hasattr(e, "session_id"):
+                self._expert_map.setdefault(e.session_id, e)  # session_id shortcut
 
         self.summarizer = _get_summarizer()
 

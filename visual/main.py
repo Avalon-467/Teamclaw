@@ -275,11 +275,25 @@ def layout_to_yaml(data: dict) -> str:
         if e["source"] not in grouped_node_ids and e["target"] not in grouped_node_ids
     ]
 
+    # Track which node IDs have been consumed by edges/clusters
+    edge_consumed_ids: set = set()
+
     if workflow_edges:
         ordered_ids = _topological_sort_edges(workflow_edges, node_map)
         for nid in ordered_ids:
             node = node_map.get(nid)
-            if node:
+            if not node:
+                continue
+            edge_consumed_ids.add(nid)
+            if node.get("type") == "manual":
+                # Manual node in workflow → emit as manual step (not expert)
+                plan.append({
+                    "manual": {
+                        "author": node.get("author", "主持人"),
+                        "content": node.get("content", ""),
+                    }
+                })
+            else:
                 plan.append({"expert": _node_yaml_name(node, use_bot_session)})
     else:
         # Step 3: Process remaining ungrouped, unconnected nodes
@@ -303,8 +317,8 @@ def layout_to_yaml(data: dict) -> str:
                     for n in sorted_nodes:
                         plan.append({"expert": _node_yaml_name(n, use_bot_session)})
 
-    # Step 4: Process manual injection nodes
-    manual_nodes = [n for n in nodes if n.get("type") == "manual" and n["id"] not in grouped_node_ids]
+    # Step 4: Process manual injection nodes (skip those already consumed by edges)
+    manual_nodes = [n for n in nodes if n.get("type") == "manual" and n["id"] not in grouped_node_ids and n["id"] not in edge_consumed_ids]
     for mn in manual_nodes:
         plan.append({
             "manual": {

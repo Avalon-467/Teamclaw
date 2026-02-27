@@ -227,7 +227,12 @@ class MiniTimeAgent:
         skills_manifest = []
         try:
             with open(manifest_path, "r", encoding="utf-8") as f:
-                skills_manifest = json.load(f)
+                raw = json.load(f)
+                # 兼容两种格式：直接列表 [...] 或 {"skills": [...]}
+                if isinstance(raw, list):
+                    skills_manifest = raw
+                elif isinstance(raw, dict):
+                    skills_manifest = raw.get("skills", [])
         except (FileNotFoundError, json.JSONDecodeError):
             pass
 
@@ -239,6 +244,8 @@ class MiniTimeAgent:
         if skills_manifest:
             skill_lines.append("可用技能：")
             for skill in skills_manifest:
+                if not isinstance(skill, dict):
+                    continue
                 skill_name = skill.get("name", "未命名技能")
                 skill_desc = skill.get("description", "无描述")
                 skill_file = skill.get("file", "")
