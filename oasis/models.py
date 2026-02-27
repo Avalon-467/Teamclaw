@@ -37,6 +37,7 @@ class CreateTopicRequest(BaseModel):
     bot_enabled_tools: Optional[list[str]] = None
     bot_timeout: Optional[float] = None
     early_stop: bool = False
+    discussion: Optional[bool] = None  # None=use YAML setting; True=forum discussion; False=execute mode
     # Callback: when discussion concludes, POST result to this URL via /system_trigger
     callback_url: Optional[str] = None
     callback_session_id: Optional[str] = None
@@ -51,6 +52,15 @@ class PostInfo(BaseModel):
     upvotes: int = 0
     downvotes: int = 0
     timestamp: float
+    elapsed: float = 0.0
+
+
+class TimelineEventInfo(BaseModel):
+    """A single timeline event."""
+    elapsed: float
+    event: str
+    agent: str = ""
+    detail: str = ""
 
 
 class TopicDetail(BaseModel):
@@ -62,6 +72,8 @@ class TopicDetail(BaseModel):
     current_round: int
     max_rounds: int
     posts: list[PostInfo]
+    timeline: list[TimelineEventInfo] = []
+    discussion: bool = True
     conclusion: Optional[str] = None
 
 

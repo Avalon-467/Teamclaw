@@ -15,6 +15,7 @@ scenarios, a minimal YAML suffices:
 Schedule YAML format:
   version: 1
   repeat: true          # true = 每轮重复整个 plan; false = plan 只执行一次
+  discussion: false     # true = 论坛讨论模式(JSON回复/投票); false = 执行模式(agent直接执行任务，默认)
   plan:
     # 指定专家发言（按名称匹配）
     # 名称格式直接对应 engine 的专家类型（必须含 '#'）：
@@ -80,6 +81,7 @@ class Schedule:
     """Parsed schedule with steps and config."""
     steps: list[ScheduleStep]
     repeat: bool = False  # True = repeat plan each round; False = run once
+    discussion: bool = False  # True = forum discussion mode (JSON reply/vote); False = execute mode (agents just run tasks)
 
 
 def parse_schedule(yaml_content: str) -> Schedule:
@@ -97,6 +99,7 @@ def parse_schedule(yaml_content: str) -> Schedule:
         raise ValueError("'plan' must be a list of steps")
 
     repeat = bool(data.get("repeat", False))
+    discussion = bool(data.get("discussion", False))
 
     steps: list[ScheduleStep] = []
     for i, item in enumerate(plan):
@@ -152,7 +155,7 @@ def parse_schedule(yaml_content: str) -> Schedule:
         else:
             raise ValueError(f"Step {i}: unknown step type, keys={list(item.keys())}")
 
-    return Schedule(steps=steps, repeat=repeat)
+    return Schedule(steps=steps, repeat=repeat, discussion=discussion)
 
 
 def load_schedule_file(path: str) -> Schedule:

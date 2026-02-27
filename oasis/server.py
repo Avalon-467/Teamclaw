@@ -39,6 +39,7 @@ from oasis.models import (
     TopicDetail,
     TopicSummary,
     PostInfo,
+    TimelineEventInfo,
     DiscussionStatus,
 )
 from oasis.forum import DiscussionForum
@@ -159,6 +160,7 @@ async def create_topic(req: CreateTopicRequest):
         bot_timeout=req.bot_timeout,
         user_id=req.user_id,
         early_stop=req.early_stop,
+        discussion=req.discussion,
     )
     engine.callback_url = req.callback_url
     engine.callback_session_id = req.callback_session_id
@@ -277,9 +279,20 @@ async def get_topic(topic_id: str, user_id: str = Query(...)):
                 upvotes=p.upvotes,
                 downvotes=p.downvotes,
                 timestamp=p.timestamp,
+                elapsed=p.elapsed,
             )
             for p in posts
         ],
+        timeline=[
+            TimelineEventInfo(
+                elapsed=e.elapsed,
+                event=e.event,
+                agent=e.agent,
+                detail=e.detail,
+            )
+            for e in forum.timeline
+        ],
+        discussion=forum.discussion,
         conclusion=forum.conclusion,
     )
 
@@ -293,27 +306,51 @@ async def stream_topic(topic_id: str, user_id: str = Query(...)):
     async def event_generator():
         last_count = 0
         last_round = 0
+        last_timeline_idx = 0      # 已发送的 timeline 事件索引
 
         while forum.status in ("pending", "discussing"):
-            posts = await forum.browse()
+            if forum.discussion:
+                # ── 讨论模式：原有逻辑，按帖子轮询 ──
+                posts = await forum.browse()
 
-            if forum.current_round > last_round:
-                last_round = forum.current_round
-                yield f"data: 📢 === 第 {last_round} 轮讨论 ===\n\n"
+                if forum.current_round > last_round:
+                    last_round = forum.current_round
+                    yield f"data: 📢 === 第 {last_round} 轮讨论 ===\n\n"
 
-            if len(posts) > last_count:
-                for p in posts[last_count:]:
-                    prefix = f"↳回复#{p.reply_to}" if p.reply_to else "📌"
-                    yield (
-                        f"data: {prefix} [{p.author}] "
-                        f"(👍{p.upvotes}): {p.content}\n\n"
-                    )
-                last_count = len(posts)
+                if len(posts) > last_count:
+                    for p in posts[last_count:]:
+                        prefix = f"↳回复#{p.reply_to}" if p.reply_to else "📌"
+                        yield (
+                            f"data: {prefix} [{p.author}] "
+                            f"(👍{p.upvotes}): {p.content}\n\n"
+                        )
+                    last_count = len(posts)
+            else:
+                # ── 执行模式：timeline 事件当普通消息发送 ──
+                tl = forum.timeline
+
+                while last_timeline_idx < len(tl):
+                    ev = tl[last_timeline_idx]
+                    last_timeline_idx += 1
+
+                    if ev.event == "start":
+                        yield f"data: 🚀 执行开始\n\n"
+                    elif ev.event == "round":
+                        yield f"data: 📢 {ev.detail}\n\n"
+                    elif ev.event == "agent_call":
+                        yield f"data: ⏳ {ev.agent} 开始执行...\n\n"
+                    elif ev.event == "agent_done":
+                        yield f"data: ✅ {ev.agent} 执行完成\n\n"
+                    elif ev.event == "conclude":
+                        yield f"data: 🏁 执行完成\n\n"
 
             await asyncio.sleep(1)
 
         if forum.conclusion:
-            yield f"data: \n🏆 === 讨论结论 ===\n{forum.conclusion}\n\n"
+            if forum.discussion:
+                yield f"data: \n🏆 === 讨论结论 ===\n{forum.conclusion}\n\n"
+            else:
+                yield f"data: \n🏆 === 执行结果 ===\n{forum.conclusion}\n\n"
         yield "data: [DONE]\n\n"
 
     return StreamingResponse(

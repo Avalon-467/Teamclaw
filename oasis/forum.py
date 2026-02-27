@@ -15,6 +15,23 @@ DISCUSSIONS_DIR = os.path.join(_project_root, "data", "oasis_discussions")
 
 
 @dataclass
+class TimelineEvent:
+    """A timestamped event in the discussion lifecycle."""
+    elapsed: float          # seconds since discussion started
+    event: str              # e.g. "start", "agent_call", "agent_done", "round", "conclude"
+    agent: str = ""         # expert name (if applicable)
+    detail: str = ""        # extra info
+
+    def to_dict(self) -> dict:
+        return {"elapsed": round(self.elapsed, 2), "event": self.event,
+                "agent": self.agent, "detail": self.detail}
+
+    @classmethod
+    def from_dict(cls, d: dict) -> "TimelineEvent":
+        return cls(**d)
+
+
+@dataclass
 class Post:
     """A single post / reply in a discussion thread."""
     id: int
@@ -24,6 +41,7 @@ class Post:
     upvotes: int = 0
     downvotes: int = 0
     timestamp: float = field(default_factory=time.time)
+    elapsed: float = 0.0    # seconds since discussion started
     voters: dict[str, str] = field(default_factory=dict)  # voter_name -> "up"/"down"
 
     def to_dict(self) -> dict:
@@ -31,12 +49,15 @@ class Post:
             "id": self.id, "author": self.author, "content": self.content,
             "reply_to": self.reply_to, "upvotes": self.upvotes,
             "downvotes": self.downvotes, "timestamp": self.timestamp,
+            "elapsed": round(self.elapsed, 2),
             "voters": self.voters,
         }
 
     @classmethod
     def from_dict(cls, d: dict) -> "Post":
-        return cls(**d)
+        d2 = dict(d)
+        d2.setdefault("elapsed", 0.0)
+        return cls(**d2)
 
 
 class DiscussionForum:
@@ -52,11 +73,33 @@ class DiscussionForum:
         self.max_rounds = max_rounds
         self.current_round = 0
         self.posts: list[Post] = []
+        self.timeline: list[TimelineEvent] = []
         self.conclusion: str | None = None
         self.status = "pending"
+        self.discussion: bool = True    # True=讨论模式, False=执行模式
         self.created_at = time.time()
+        self._start_time: float = 0.0   # set when discussion actually starts
         self._lock = asyncio.Lock()
         self._counter = 0
+
+    def start_clock(self):
+        """Mark the discussion start time (T=0 for all elapsed calculations)."""
+        self._start_time = time.time()
+        self.log_event("start", detail="Discussion started")
+
+    def elapsed(self) -> float:
+        """Seconds since start_clock(), or 0 if not started."""
+        if self._start_time <= 0:
+            return 0.0
+        return time.time() - self._start_time
+
+    def log_event(self, event: str, agent: str = "", detail: str = ""):
+        """Append a timestamped event to the timeline."""
+        ev = TimelineEvent(elapsed=self.elapsed(), event=event, agent=agent, detail=detail)
+        self.timeline.append(ev)
+        print(f"  [OASIS] ⏱ T+{ev.elapsed:.1f}s  {event}"
+              + (f"  [{agent}]" if agent else "")
+              + (f"  {detail}" if detail else ""))
 
     # ── Serialisation ──
 
@@ -68,8 +111,10 @@ class DiscussionForum:
             "max_rounds": self.max_rounds,
             "current_round": self.current_round,
             "posts": [p.to_dict() for p in self.posts],
+            "timeline": [e.to_dict() for e in self.timeline],
             "conclusion": self.conclusion,
             "status": self.status,
+            "discussion": self.discussion,
             "created_at": self.created_at,
         }
 
@@ -84,8 +129,10 @@ class DiscussionForum:
         forum.current_round = d.get("current_round", 0)
         forum.conclusion = d.get("conclusion")
         forum.status = d.get("status", "concluded")
+        forum.discussion = d.get("discussion", True)
         forum.created_at = d.get("created_at", 0)
         forum.posts = [Post.from_dict(p) for p in d.get("posts", [])]
+        forum.timeline = [TimelineEvent.from_dict(e) for e in d.get("timeline", [])]
         forum._counter = max((p.id for p in forum.posts), default=0)
         return forum
 
@@ -133,6 +180,7 @@ class DiscussionForum:
                 author=author,
                 content=content,
                 reply_to=reply_to,
+                elapsed=self.elapsed(),
             )
             self.posts.append(post)
             return post
