@@ -6,9 +6,11 @@
 
 <a id="english"></a>
 
-# Mini TimeBot
+# Teamclaw (Mini TimeBot)
 
 > **OpenAI-compatible AI Agent with a built-in programmable multi-expert orchestration engine and one-click public deployment.**
+>
+> **Skill Mode:** This repository is designed to run and be documented in a Skill-oriented workflow (see `SKILL.md`).
 
 Mini TimeBot exposes a standard `/v1/chat/completions` endpoint that any OpenAI-compatible client can call directly. Internally it integrates the **OASIS orchestration engine** — using YAML schedule definitions to flexibly compose expert roles, speaking orders, and collaboration patterns, breaking complex problems into multi-perspective debates, voting consensus, and automated summaries.
 

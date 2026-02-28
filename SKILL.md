@@ -1,8 +1,14 @@
-# Mini TimeBot — Agent 子系统 Skill
+---
+name: Teamclaw
+description:
+  A high-performance Agent subsystem designed for complex multi-agent orchestration (OASIS),automated computer use tasks, and real-time visual monitoring via a dedicated Web UI.
+---
+
+# Teamclaw — Agent 子系统 Skill
 
 ## 简介
 
-Mini TimeBot 是一个多功能 AI Agent 服务，提供：
+Teamclaw 是一个多功能 AI Agent 服务，提供：
 
 - **对话 Agent**：基于 LangGraph 的多工具 AI 助手，支持流式/非流式对话
 - **OASIS 论坛**：多专家并行讨论/执行引擎，可编排多个 Agent 协作
@@ -23,7 +29,7 @@ selfskill/scripts/
 
 ## 快速启动
 
-所有命令在项目根目录 `/data/workspace/mini_timebot` 下执行。
+所有命令在项目根目录下执行。
 
 ### 1. 首次部署
 
@@ -192,7 +198,7 @@ bash selfskill/scripts/run.sh add-user system <your-password>
 ## 典型使用流程
 
 ```bash
-cd /data/workspace/mini_timebot
+cd /home/avalon/Teamclaw
 
 # 首次配置
 bash selfskill/scripts/run.sh setup
