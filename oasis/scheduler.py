@@ -22,15 +22,30 @@ Schedule YAML format:
     #   "tag#temp#N"          → ExpertAgent (tag 查预设获取 name/persona)
     #   "tag#oasis#随机ID"    → SessionExpert (oasis, tag 查预设获取 name/persona)
     #   "标题#session_id"     → SessionExpert (普通 agent, 不注入)
+    #   "name#ext#id"         → ExternalExpert (直连外部 OpenAI 兼容 API)
     #   任何 session 名 + "#new" → 强制创建全新 session（ID 替换为随机 UUID）
     - expert: "critical#temp#1"
       instruction: "请重点分析技术风险"    # 可选：给专家的具体指令
+
+    # 外部 agent（直连 OpenAI 兼容 API，不经过本地 agent）
+    - expert: "分析师#ext#analyst"
+      api_url: "https://api.deepseek.com"    # 必填：外部服务 base URL
+      api_key: "sk-xxx"                      # 必填：外部服务 API key
+      model: "deepseek-chat"                 # 可选：模型名，默认 gpt-3.5-turbo
+      headers:                               # 可选：额外 HTTP headers
+        X-Custom-Auth: "token123"
+      instruction: "从数据角度分析"           # 可选
 
     # 多个专家同时并行发言
     - parallel:
         - expert: "创意专家"
           instruction: "从创新角度提出方案"
         - expert: "数据分析师"
+        # 外部 agent 也可以在 parallel 中使用
+        - expert: "GPT4专家#ext#gpt4"
+          api_url: "https://api.openai.com"
+          api_key: "sk-xxx"
+          model: "gpt-4"
 
     # 手动注入一条帖子（不经过 LLM）
     - manual:
@@ -74,6 +89,8 @@ class ScheduleStep:
     manual_author: str = ""                                  # for MANUAL
     manual_content: str = ""                                 # for MANUAL
     manual_reply_to: Optional[int] = None                    # for MANUAL
+    # External agent config: expert_name → {api_url, api_key, model}
+    external_configs: dict[str, dict] = field(default_factory=dict)
 
 
 @dataclass
@@ -82,6 +99,28 @@ class Schedule:
     steps: list[ScheduleStep]
     repeat: bool = False  # True = repeat plan each round; False = run once
     discussion: bool = False  # True = forum discussion mode (JSON reply/vote); False = execute mode (agents just run tasks)
+
+
+def _extract_external_config(item: dict) -> dict:
+    """Extract external agent config fields from a YAML step item.
+
+    Supports:
+      api_url: "https://api.example.com"      # external API base URL
+      api_key: "sk-xxx"                        # API key
+      model: "gpt-4"                           # model name
+      headers:                                 # extra HTTP headers (key: value)
+        X-Custom-Header: "value"
+    """
+    cfg: dict = {}
+    if "api_url" in item:
+        cfg["api_url"] = str(item["api_url"])
+    if "api_key" in item:
+        cfg["api_key"] = str(item["api_key"])
+    if "model" in item:
+        cfg["model"] = str(item["model"])
+    if "headers" in item and isinstance(item["headers"], dict):
+        cfg["headers"] = {str(k): str(v) for k, v in item["headers"].items()}
+    return cfg
 
 
 def parse_schedule(yaml_content: str) -> Schedule:
@@ -109,23 +148,30 @@ def parse_schedule(yaml_content: str) -> Schedule:
         if "expert" in item:
             expert_name = str(item["expert"])
             instr_map = {}
+            ext_configs = {}
             if "instruction" in item:
                 instr_map[expert_name] = str(item["instruction"])
+            if "api_url" in item or "headers" in item:
+                ext_configs[expert_name] = _extract_external_config(item)
             steps.append(ScheduleStep(
                 step_type=StepType.EXPERT,
                 expert_names=[expert_name],
                 instructions=instr_map,
+                external_configs=ext_configs,
             ))
 
         elif "parallel" in item:
             names = []
             instr_map = {}
+            ext_configs = {}
             for sub in item["parallel"]:
                 if isinstance(sub, dict) and "expert" in sub:
                     ename = str(sub["expert"])
                     names.append(ename)
                     if "instruction" in sub:
                         instr_map[ename] = str(sub["instruction"])
+                    if "api_url" in sub or "headers" in sub:
+                        ext_configs[ename] = _extract_external_config(sub)
                 elif isinstance(sub, str):
                     names.append(sub)
                 else:
@@ -136,6 +182,7 @@ def parse_schedule(yaml_content: str) -> Schedule:
                 step_type=StepType.PARALLEL,
                 expert_names=names,
                 instructions=instr_map,
+                external_configs=ext_configs,
             ))
 
         elif "all_experts" in item:
@@ -180,3 +227,17 @@ def extract_expert_names(schedule: Schedule) -> list[str]:
                     seen.add(name)
                     result.append(name)
     return result
+
+
+def collect_external_configs(schedule: Schedule) -> dict[str, dict]:
+    """Collect all external agent configs from schedule steps.
+
+    Returns a dict mapping expert_name → {api_url, api_key?, model?}.
+    If an expert appears in multiple steps with different configs, the first one wins.
+    """
+    configs: dict[str, dict] = {}
+    for step in schedule.steps:
+        for name, cfg in step.external_configs.items():
+            if name not in configs:
+                configs[name] = cfg
+    return configs

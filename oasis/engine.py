@@ -4,11 +4,14 @@ OASIS Forum - Discussion Engine
 Manages the full lifecycle of a discussion:
   Round loop -> scheduled/parallel expert participation -> consensus check -> summarize
 
-Two expert backends:
+Three expert backends:
   1. ExpertAgent  — direct LLM (stateless, name="title#temp#N")
   2. SessionExpert — existing bot session (stateful, name="title#session_id")
      - "#oasis#" in session_id → oasis-managed, first-round identity injection
      - other session_id → regular agent, no identity injection
+  3. ExternalExpert — external OpenAI-compatible API (name="title#ext#id")
+     - Directly calls external endpoints (DeepSeek, GPT-4, Ollama, etc)
+     - Configured per-expert via YAML: api_url, api_key, model
 
 Expert pool sourcing (YAML-only, schedule_file or schedule_yaml required):
   Pool is built entirely from YAML expert names (deduplicated).
@@ -16,6 +19,7 @@ Expert pool sourcing (YAML-only, schedule_file or schedule_yaml required):
   Names MUST contain '#' to specify type:
     "tag#temp#N"              → ExpertAgent (tag looked up in presets for name/persona)
     "tag#oasis#<random_id>"  → SessionExpert (oasis, tag→name/persona from presets)
+    "name#ext#<id>"          → ExternalExpert (requires api_url in YAML)
     "title#<session_id>"     → SessionExpert (regular agent, no injection)
   Names without '#' are skipped with a warning.
 
@@ -53,8 +57,8 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(__file__)), "src
 from llm_factory import create_chat_model, extract_text
 
 from oasis.forum import DiscussionForum
-from oasis.experts import ExpertAgent, SessionExpert, get_all_experts
-from oasis.scheduler import Schedule, ScheduleStep, StepType, parse_schedule, load_schedule_file, extract_expert_names
+from oasis.experts import ExpertAgent, SessionExpert, ExternalExpert, get_all_experts
+from oasis.scheduler import Schedule, ScheduleStep, StepType, parse_schedule, load_schedule_file, extract_expert_names, collect_external_configs
 
 # 加载总结 prompt 模板（模块级别，导入时执行一次）
 _prompts_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data", "prompts")
@@ -86,6 +90,7 @@ class DiscussionEngine:
       Expert pool is built entirely from YAML expert names (deduplicated).
       "tag#temp#N"          → ExpertAgent (tag→name/persona from presets)
       "tag#oasis#id"        → SessionExpert (oasis, tag→name/persona)
+      "name#ext#id"         → ExternalExpert (api_url/api_key/model from YAML)
       "title#session_id"    → SessionExpert (regular, no injection)
       Any name + "#new"     → force fresh session (id replaced with random UUID)
     """
@@ -130,12 +135,13 @@ class DiscussionEngine:
             self._discussion = self.schedule.discussion
 
         # ── Step 2: Build expert pool from YAML ──
-        experts_list: list[ExpertAgent | SessionExpert] = []
+        experts_list: list[ExpertAgent | SessionExpert | ExternalExpert] = []
 
         yaml_names = extract_expert_names(self.schedule)
+        ext_configs = collect_external_configs(self.schedule)
         seen: set[str] = set()
         # Map YAML original names → expert (built during pool construction)
-        yaml_to_expert: dict[str, ExpertAgent | SessionExpert] = {}
+        yaml_to_expert: dict[str, ExpertAgent | SessionExpert | ExternalExpert] = {}
         for full_name in yaml_names:
             if full_name in seen:
                 continue
@@ -143,7 +149,7 @@ class DiscussionEngine:
 
             if "#" not in full_name:
                 print(f"  [OASIS] ⚠️ YAML expert name '{full_name}' has no '#', skipping. "
-                      f"Use 'tag#temp#N' or 'tag#oasis#id' or 'title#session_id'.")
+                      f"Use 'tag#temp#N' or 'tag#oasis#id' or 'name#ext#id' or 'title#session_id'.")
                 continue
 
             # Handle #new suffix: strip it and generate a random session part
@@ -151,8 +157,33 @@ class DiscussionEngine:
             working_name = full_name[:-4] if force_new else full_name  # strip "#new"
 
             first, sid = working_name.split("#", 1)
-            expert: ExpertAgent | SessionExpert
-            if sid.startswith("temp#"):
+            expert: ExpertAgent | SessionExpert | ExternalExpert
+            if sid.startswith("ext#"):
+                # e.g. "分析师#ext#analyst" → ExternalExpert
+                ext_id = sid.split("#", 1)[1]
+                if force_new:
+                    ext_id = uuid.uuid4().hex[:8]
+                    print(f"  [OASIS] 🆕 #new: '{full_name}' → new external session '{ext_id}'")
+                cfg = ext_configs.get(full_name, {})
+                if not cfg.get("api_url"):
+                    print(f"  [OASIS] ⚠️ External expert '{full_name}' missing 'api_url' in YAML, skipping.")
+                    continue
+                config = self._lookup_by_tag(first, user_id)
+                expert_name = config["name"] if config else first
+                persona = config.get("persona", "") if config else ""
+                expert = ExternalExpert(
+                    name=expert_name,
+                    ext_id=ext_id,
+                    api_url=cfg["api_url"],
+                    api_key=cfg.get("api_key", ""),
+                    model=cfg.get("model", "gpt-3.5-turbo"),
+                    persona=persona,
+                    timeout=bot_timeout,
+                    tag=first,
+                    extra_headers=cfg.get("headers"),
+                )
+                print(f"  [OASIS] 🌐 External expert: {expert.name} → {cfg['api_url']}")
+            elif sid.startswith("temp#"):
                 # e.g. "creative#temp#1" → ExpertAgent with explicit temp_id
                 config = self._lookup_by_tag(first, user_id)
                 expert_name = config["name"] if config else first
@@ -175,6 +206,7 @@ class DiscussionEngine:
                     print(f"  [OASIS] 🆕 #new: '{full_name}' → new session '{first}#{actual_sid}'")
                 else:
                     actual_sid = sid
+                cfg = ext_configs.get(full_name, {})
                 expert = SessionExpert(
                     name=expert_name,
                     session_id=f"{first}#{actual_sid}",
@@ -184,6 +216,7 @@ class DiscussionEngine:
                     enabled_tools=bot_enabled_tools,
                     timeout=bot_timeout,
                     tag=first,
+                    extra_headers=cfg.get("headers"),
                 )
             else:
                 # e.g. "助手#default" → SessionExpert (regular agent, no injection)
@@ -192,6 +225,7 @@ class DiscussionEngine:
                     print(f"  [OASIS] 🆕 #new: '{full_name}' → new session '{actual_sid}'")
                 else:
                     actual_sid = sid
+                cfg = ext_configs.get(full_name, {})
                 expert = SessionExpert(
                     name=first,
                     session_id=actual_sid,
@@ -200,6 +234,7 @@ class DiscussionEngine:
                     bot_base_url=bot_base_url,
                     enabled_tools=bot_enabled_tools,
                     timeout=bot_timeout,
+                    extra_headers=cfg.get("headers"),
                 )
 
             experts_list.append(expert)
@@ -210,7 +245,7 @@ class DiscussionEngine:
 
         # Build lookup map: YAML original names first (highest priority for scheduling),
         # then register by internal name, title, tag, session_id as shortcuts
-        self._expert_map: dict[str, ExpertAgent | SessionExpert] = {}
+        self._expert_map: dict[str, ExpertAgent | SessionExpert | ExternalExpert] = {}
         self._expert_map.update(yaml_to_expert)
         for e in self.experts:
             self._expert_map.setdefault(e.name, e)       # "创意专家#creative#oasis#e7f3a2b1"
@@ -219,6 +254,8 @@ class DiscussionEngine:
                 self._expert_map.setdefault(e.tag, e)    # "creative" (first-come wins)
             if hasattr(e, "session_id"):
                 self._expert_map.setdefault(e.session_id, e)  # session_id shortcut
+            if hasattr(e, "ext_id"):
+                self._expert_map.setdefault(e.ext_id, e)  # ext_id shortcut
 
         self.summarizer = _get_summarizer()
 
@@ -260,11 +297,12 @@ class DiscussionEngine:
         self.forum.start_clock()
 
         session_count = sum(1 for e in self.experts if isinstance(e, SessionExpert))
-        direct_count = len(self.experts) - session_count
+        external_count = sum(1 for e in self.experts if isinstance(e, ExternalExpert))
+        direct_count = len(self.experts) - session_count - external_count
         mode_label = "discussion" if self._discussion else "execute"
         print(
             f"[OASIS] 🏛️ Discussion started: {self.forum.topic_id} "
-            f"({len(self.experts)} experts [{direct_count} direct, {session_count} session], "
+            f"({len(self.experts)} experts [{direct_count} direct, {session_count} session, {external_count} external], "
             f"max {self.forum.max_rounds} rounds, mode={mode_label})"
         )
 

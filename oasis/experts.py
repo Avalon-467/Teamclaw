@@ -1,7 +1,7 @@
 """
 OASIS Forum - Expert Agent definitions
 
-Two expert backends:
+Three expert backends:
   1. ExpertAgent  — direct LLM call (stateless, single-shot)
      name = "display_name#temp#N" (display_name from preset by tag)
   2. SessionExpert — calls mini_timebot's /v1/chat/completions endpoint
@@ -10,6 +10,15 @@ Two expert backends:
        identity injection (tag → name/persona from preset configs)
      - other session_id (e.g. "助手#default") → regular agent,
        no identity injection, relies on session's own system prompt
+  3. ExternalExpert — direct call to any external OpenAI-compatible API
+     name = "display_name#ext#id"
+     Connects to external endpoints (DeepSeek, GPT-4, Moonshot, Ollama, etc)
+     with their own URL and API key. External service is assumed stateful
+     (holds conversation history server-side); only incremental context is sent.
+     To integrate with OpenClaw sessions, pass x-openclaw-session-key
+     via the YAML headers field, e.g.:
+       headers:
+         x-openclaw-session-key: "my-session-id"
 
 Expert pool is built from schedule_yaml or schedule_file (YAML-only mode).
 schedule_file takes priority if both provided.
@@ -388,6 +397,7 @@ class SessionExpert:
         enabled_tools: list[str] | None = None,
         timeout: float | None = None,
         tag: str = "",
+        extra_headers: dict[str, str] | None = None,
     ):
         self.title = name
         self.session_id = session_id
@@ -396,6 +406,7 @@ class SessionExpert:
         self.is_oasis = "#oasis#" in session_id
         self.timeout = timeout
         self.tag = tag
+        self._extra_headers = extra_headers or {}
 
         port = os.getenv("PORT_AGENT", "51200")
         self._bot_url = (bot_base_url or f"http://127.0.0.1:{port}") + "/v1/chat/completions"
@@ -408,7 +419,9 @@ class SessionExpert:
         self._seen_post_ids: set[int] = set()
 
     def _auth_header(self) -> dict:
-        return {"Authorization": f"Bearer {self._internal_token}:{self._user_id}"}
+        h = {"Authorization": f"Bearer {self._internal_token}:{self._user_id}"}
+        h.update(self._extra_headers)
+        return h
 
     async def participate(self, forum: DiscussionForum, instruction: str = "", discussion: bool = True):
         """
@@ -577,3 +590,187 @@ class SessionExpert:
                 pass
         except Exception as e:
             print(f"  [OASIS] ❌ {self.name} error: {e}")
+
+
+# ======================================================================
+# Backend 3: ExternalExpert — direct call to external OpenAI-compatible API
+#   name = "title#ext#id"
+#   Does NOT go through local mini_timebot agent.
+#   Calls external api_url directly using httpx + OpenAI chat format.
+#   To adapt OpenClaw sessions, set x-openclaw-session-key in YAML headers.
+# ======================================================================
+
+class ExternalExpert:
+    """
+    Expert backed by an external OpenAI-compatible API.
+
+    Unlike SessionExpert (which calls the local mini_timebot agent),
+    ExternalExpert directly calls any OpenAI-compatible endpoint (DeepSeek,
+    GPT-4, Moonshot, Ollama, another mini_timebot instance, etc).
+
+    The external service is assumed to be **stateful** (maintaining its own
+    conversation history server-side, e.g. via x-openclaw-session-key or
+    similar session tracking headers). Therefore this class sends only
+    incremental context: first call sends full forum state + identity;
+    subsequent calls send only new posts since last participation.
+    No local message history is accumulated.
+
+    Features:
+      - Incremental context (first call = full, subsequent = delta only)
+      - Identity injection via system prompt on first call (persona from presets)
+      - Works in both discussion mode (JSON reply/vote) and execute mode
+      - Supports custom headers via YAML for service-specific needs
+        (e.g. x-openclaw-session-key for OpenClaw session routing)
+
+    The external service does NOT need to support session_id or any
+    non-standard fields — just standard /v1/chat/completions.
+    """
+
+    def __init__(
+        self,
+        name: str,
+        ext_id: str,
+        api_url: str,
+        api_key: str = "",
+        model: str = "gpt-3.5-turbo",
+        persona: str = "",
+        timeout: float | None = None,
+        tag: str = "",
+        extra_headers: dict[str, str] | None = None,
+    ):
+        self.title = name
+        self.ext_id = ext_id
+        self.name = f"{name}#ext#{ext_id}"
+        self.persona = persona
+        self.timeout = timeout or 120.0
+        self.tag = tag
+        self.model = model
+        self._extra_headers = extra_headers or {}
+
+        # Normalize api_url: strip trailing slash, build full URL
+        api_url = api_url.rstrip("/")
+        if not api_url.endswith("/v1/chat/completions"):
+            if not api_url.endswith("/v1"):
+                api_url += "/v1"
+            api_url += "/chat/completions"
+        self._api_url = api_url
+        self._api_key = api_key
+
+        # Track state for incremental context (external service holds history)
+        self._initialized = False
+        self._seen_post_ids: set[int] = set()
+
+    def _headers(self) -> dict:
+        h = {"Content-Type": "application/json"}
+        if self._api_key:
+            h["Authorization"] = f"Bearer {self._api_key}"
+        h.update(self._extra_headers)
+        return h
+
+    async def _call_api(self, messages: list[dict]) -> str:
+        """Send messages to external API and return the assistant response text."""
+        body = {
+            "model": self.model,
+            "messages": messages,
+            "stream": False,
+        }
+        async with httpx.AsyncClient(timeout=httpx.Timeout(timeout=self.timeout)) as client:
+            resp = await client.post(self._api_url, json=body, headers=self._headers())
+        if resp.status_code != 200:
+            raise RuntimeError(f"External API error {resp.status_code}: {resp.text[:300]}")
+        data = resp.json()
+        return data["choices"][0]["message"]["content"]
+
+    async def participate(self, forum: DiscussionForum, instruction: str = "", discussion: bool = True):
+        others = await forum.browse(viewer=self.name, exclude_self=True)
+
+        if not discussion:
+            # ── Execute mode ──
+            new_posts = [p for p in others if p.id not in self._seen_post_ids]
+            self._seen_post_ids.update(p.id for p in others)
+
+            messages: list[dict] = []
+            if not self._initialized:
+                if self.persona:
+                    messages.append({"role": "system", "content": f"你是「{self.title}」。{self.persona}"})
+                task_parts = [f"任务主题: {forum.question}"]
+                if instruction:
+                    task_parts.append(f"\n执行指令: {instruction}")
+                if others:
+                    task_parts.append(f"\n前序 agent 的执行结果:\n{_format_posts(others)}")
+                task_parts.append("\n请直接执行任务并返回结果。")
+                messages.append({"role": "user", "content": "\n".join(task_parts)})
+                self._initialized = True
+            else:
+                ctx_parts = [f"【第 {forum.current_round} 轮】"]
+                if instruction:
+                    ctx_parts.append(f"执行指令: {instruction}")
+                if new_posts:
+                    ctx_parts.append(f"其他 agent 的新结果:\n{_format_posts(new_posts)}")
+                ctx_parts.append("请继续执行任务并返回结果。")
+                messages.append({"role": "user", "content": "\n".join(ctx_parts)})
+
+            try:
+                reply = await self._call_api(messages)
+                await forum.publish(author=self.name, content=reply.strip()[:2000])
+                print(f"  [OASIS] ✅ {self.name} (external) 执行完成")
+            except Exception as e:
+                print(f"  [OASIS] ❌ {self.name} (external) error: {e}")
+            return
+
+        # ── Discussion mode ──
+        new_posts = [p for p in others if p.id not in self._seen_post_ids]
+        self._seen_post_ids.update(p.id for p in others)
+
+        messages: list[dict] = []
+        if not self._initialized:
+            posts_text = _format_posts(others) if others else "(还没有其他人发言，你来开启讨论吧)"
+            system_prompt, user_prompt = _build_discuss_prompt(
+                self.title, self.persona, forum.question, posts_text, split=True,
+            )
+            if instruction:
+                user_prompt += f"\n\n📋 本轮你的专项指令：{instruction}\n请在回复中重点关注和执行这个指令。"
+            messages.append({"role": "system", "content": system_prompt})
+            messages.append({"role": "user", "content": user_prompt})
+            self._initialized = True
+        else:
+            if new_posts:
+                new_text = _format_posts(new_posts)
+                prompt = (
+                    f"【第 {forum.current_round} 轮讨论更新】\n"
+                    f"以下是自你上次发言后的 {len(new_posts)} 条新帖子：\n\n"
+                    f"{new_text}\n\n"
+                    "请基于这些新观点以及你之前看到的讨论内容，以 JSON 格式回复：\n"
+                    "{\n"
+                    '  "reply_to": <某个帖子ID>,\n'
+                    '  "content": "你的观点（200字以内）",\n'
+                    '  "votes": [{"post_id": <ID>, "direction": "up或down"}]\n'
+                    "}"
+                )
+            else:
+                prompt = (
+                    f"【第 {forum.current_round} 轮讨论更新】\n"
+                    "本轮没有新的帖子。如果你有新的想法或补充，可以继续发言；"
+                    "如果没有，回复一个空 content 即可。\n"
+                    "{\n"
+                    '  "reply_to": null,\n'
+                    '  "content": "",\n'
+                    '  "votes": []\n'
+                    "}"
+                )
+            if instruction:
+                prompt += f"\n\n📋 本轮你的专项指令：{instruction}\n请在回复中重点关注和执行这个指令。"
+            messages.append({"role": "user", "content": prompt})
+
+        try:
+            reply = await self._call_api(messages)
+            result = _parse_expert_response(reply)
+            await _apply_response(result, self.name, forum, others)
+        except json.JSONDecodeError as e:
+            print(f"  [OASIS] ⚠️ {self.name} (external) JSON parse error: {e}")
+            try:
+                await forum.publish(author=self.name, content=reply.strip()[:300])
+            except Exception:
+                pass
+        except Exception as e:
+            print(f"  [OASIS] ❌ {self.name} (external) error: {e}")
