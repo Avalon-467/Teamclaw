@@ -22,6 +22,9 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 import httpx
 import uvicorn
+import aiosqlite
+import yaml as _yaml
+import json
 
 from dotenv import load_dotenv
 
@@ -44,6 +47,17 @@ from oasis.models import (
 )
 from oasis.forum import DiscussionForum
 from oasis.engine import DiscussionEngine
+
+# Ensure src/ is importable for helper reuse
+_src_path = os.path.join(_project_root, "src")
+if _src_path not in sys.path:
+    sys.path.insert(0, _src_path)
+try:
+    from mcp_oasis import _yaml_to_layout_data, _save_layout
+except Exception:
+    # Fallback: define minimal wrappers if import fails
+    _yaml_to_layout_data = None
+    _save_layout = None
 
 
 # --- In-memory storage ---
@@ -432,6 +446,184 @@ async def list_experts(user_id: str = ""):
             for c in configs
         ]
     }
+
+
+@app.get("/sessions/oasis")
+async def list_oasis_sessions(user_id: str = Query("")):
+    """List all oasis-managed sessions by scanning the agent checkpoint DB.
+
+    Query param: user_id (optional). If provided, only sessions for that user are returned.
+    """
+    db_path = os.path.join(_project_root, "data", "agent_memory.db")
+    if not os.path.exists(db_path):
+        return {"sessions": []}
+
+    prefix = f"{user_id}#" if user_id else None
+    sessions = []
+    try:
+        async with aiosqlite.connect(db_path) as db:
+            if prefix:
+                cursor = await db.execute(
+                    "SELECT DISTINCT thread_id FROM checkpoints WHERE thread_id LIKE ? ORDER BY thread_id",
+                    (f"{prefix}%#oasis%",),
+                )
+            else:
+                cursor = await db.execute(
+                    "SELECT DISTINCT thread_id FROM checkpoints WHERE thread_id LIKE ? ORDER BY thread_id",
+                    (f"%#oasis%",),
+                )
+            rows = await cursor.fetchall()
+            for (thread_id,) in rows:
+                # thread_id format: "user#session_id"
+                if "#" in thread_id:
+                    user_part, sid = thread_id.split("#", 1)
+                else:
+                    user_part = ""
+                    sid = thread_id
+                tag = sid.split("#")[0] if "#" in sid else sid
+
+                # get latest checkpoint message count
+                ckpt_cursor = await db.execute(
+                    "SELECT type, checkpoint FROM checkpoints WHERE thread_id = ? ORDER BY ROWID DESC LIMIT 1",
+                    (thread_id,),
+                )
+                ckpt_row = await ckpt_cursor.fetchone()
+                msg_count = 0
+                if ckpt_row:
+                    try:
+                        # Try to decode JSON-like checkpoint; conservative approach
+                        ckpt_blob = ckpt_row[1]
+                        if isinstance(ckpt_blob, (bytes, bytearray)):
+                            ckpt_blob = ckpt_blob.decode('utf-8', errors='ignore')
+                        ckpt_data = json.loads(ckpt_blob) if isinstance(ckpt_blob, str) else {}
+                        messages = ckpt_data.get("channel_values", {}).get("messages", [])
+                        msg_count = len(messages)
+                    except Exception:
+                        msg_count = 0
+
+                sessions.append({
+                    "user_id": user_part,
+                    "session_id": sid,
+                    "tag": tag,
+                    "message_count": msg_count,
+                })
+    except Exception as e:
+        raise HTTPException(500, f"扫描 session 失败: {e}")
+
+    return {"sessions": sessions}
+
+
+class WorkflowSaveRequest(BaseModel):
+    user_id: str
+    name: str
+    schedule_yaml: str
+    description: str = ""
+    save_layout: bool = True
+
+
+@app.post("/workflows")
+async def save_workflow(req: WorkflowSaveRequest):
+    """Save a YAML workflow under data/user_files/{user}/oasis/yaml/ and optionally generate layout."""
+    user = req.user_id
+    name = req.name
+    if not name.endswith((".yaml", ".yml")):
+        name += ".yaml"
+
+    # validate YAML
+    try:
+        data = _yaml.safe_load(req.schedule_yaml)
+        if not isinstance(data, dict) or "plan" not in data:
+            raise ValueError("must contain 'plan'")
+    except Exception as e:
+        raise HTTPException(400, f"YAML 解析失败: {e}")
+
+    yaml_dir = os.path.join(_project_root, "data", "user_files", user, "oasis", "yaml")
+    os.makedirs(yaml_dir, exist_ok=True)
+    filepath = os.path.join(yaml_dir, name)
+    content = (f"# {req.description}\n" if req.description else "") + req.schedule_yaml
+    try:
+        with open(filepath, "w", encoding="utf-8") as f:
+            f.write(content)
+    except Exception as e:
+        raise HTTPException(500, f"保存失败: {e}")
+
+    result = {"status": "ok", "file": name, "path": filepath}
+
+    if req.save_layout:
+        if _yaml_to_layout_data is None or _save_layout is None:
+            result["layout_warning"] = "layout 功能暂不可用"
+        else:
+            try:
+                layout = _yaml_to_layout_data(req.schedule_yaml)
+                layout_path = _save_layout(layout, name.replace('.yaml',''), user)
+                result["layout"] = os.path.basename(layout_path)
+            except Exception as e:
+                result["layout_warning"] = f"layout 生成失败: {e}"
+
+    return result
+
+
+@app.get("/workflows")
+async def list_workflows(user_id: str = Query(...)):
+    yaml_dir = os.path.join(_project_root, "data", "user_files", user_id, "oasis", "yaml")
+    if not os.path.isdir(yaml_dir):
+        return {"workflows": []}
+    files = sorted(f for f in os.listdir(yaml_dir) if f.endswith((".yaml", ".yml")))
+    items = []
+    for fname in files:
+        fpath = os.path.join(yaml_dir, fname)
+        desc = ""
+        try:
+            with open(fpath, "r", encoding="utf-8") as f:
+                first = f.readline().strip()
+                if first.startswith("#"):
+                    desc = first.lstrip("# ")
+        except Exception:
+            pass
+        items.append({"file": fname, "description": desc})
+    return {"workflows": items}
+
+
+class LayoutFromYamlRequest(BaseModel):
+    user_id: str
+    yaml_source: str
+    layout_name: str = ""
+
+
+@app.post("/layouts/from-yaml")
+async def layouts_from_yaml(req: LayoutFromYamlRequest):
+    """Generate a layout from YAML (either saved filename or raw YAML) and save layout JSON."""
+    user = req.user_id
+    yaml_src = req.yaml_source
+    yaml_content = ""
+    source_name = ""
+    if "\n" not in yaml_src and yaml_src.strip().endswith(('.yaml', '.yml')):
+        yaml_dir = os.path.join(_project_root, "data", "user_files", user, "oasis", "yaml")
+        fpath = os.path.join(yaml_dir, yaml_src.strip())
+        if not os.path.isfile(fpath):
+            raise HTTPException(404, f"YAML 文件不存在: {yaml_src}")
+        with open(fpath, "r", encoding="utf-8") as f:
+            yaml_content = f.read()
+        source_name = yaml_src.replace('.yaml','').replace('.yml','')
+    else:
+        yaml_content = yaml_src
+        source_name = "converted"
+
+    if _yaml_to_layout_data is None or _save_layout is None:
+        raise HTTPException(500, "layout 功能不可用（缺少实现）")
+
+    try:
+        layout = _yaml_to_layout_data(yaml_content)
+    except Exception as e:
+        raise HTTPException(400, f"YAML 转换失败: {e}")
+
+    save_name = req.layout_name or source_name
+    try:
+        path = _save_layout(layout, save_name, user)
+    except Exception as e:
+        raise HTTPException(500, f"Layout 保存失败: {e}")
+
+    return {"status": "ok", "layout": os.path.basename(path), "path": path}
 
 
 class UserExpertRequest(BaseModel):

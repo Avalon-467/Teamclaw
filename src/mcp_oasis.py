@@ -257,72 +257,40 @@ async def list_oasis_sessions(username: str = "") -> str:
         Formatted list of oasis sessions with tag, session_id and message count
     """
     effective_user = username or _FALLBACK_USER
-
-    if not os.path.exists(_DB_PATH):
-        return "📭 暂无 oasis 专家 session（数据库不存在）"
-
-    prefix = f"{effective_user}#"
-    sessions = []
-
+    # Prefer calling OASIS HTTP API so both MCP and curl can access sessions
     try:
-        async with aiosqlite.connect(_DB_PATH) as db:
-            cursor = await db.execute(
-                "SELECT DISTINCT thread_id FROM checkpoints "
-                "WHERE thread_id LIKE ? ORDER BY thread_id",
-                (f"{prefix}%#oasis#%",),
-            )
-            rows = await cursor.fetchall()
+        async with httpx.AsyncClient(timeout=30) as client:
+            resp = await client.get(f"{OASIS_BASE_URL}/sessions/oasis", params={"user_id": effective_user})
+            if resp.status_code != 200:
+                return f"❌ 查询失败: {resp.text}"
+            data = resp.json()
+            sessions = data.get("sessions", [])
 
-            for (thread_id,) in rows:
-                sid = thread_id[len(prefix):]  # strip "user#" prefix → session_id
-                tag = sid.split("#")[0] if "#" in sid else sid
-
-                # Get message count from latest checkpoint
-                ckpt_cursor = await db.execute(
-                    "SELECT type, checkpoint FROM checkpoints "
-                    "WHERE thread_id = ? ORDER BY ROWID DESC LIMIT 1",
-                    (thread_id,),
+            if not sessions:
+                return (
+                    "📭 暂无 oasis 专家 session。\n\n"
+                    "💡 无需预创建。在 schedule_yaml 中使用\n"
+                    "   \"tag#oasis#随机ID\" 格式的名称即可，首次使用时自动创建。\n"
+                    "   加 \"#new\" 后缀可确保创建全新 session。"
                 )
-                ckpt_row = await ckpt_cursor.fetchone()
-                msg_count = 0
-                if ckpt_row:
-                    try:
-                        ckpt_data = _serde.loads_typed((ckpt_row[0], ckpt_row[1]))
-                        messages = ckpt_data.get("channel_values", {}).get("messages", [])
-                        msg_count = len(messages)
-                    except Exception:
-                        pass
 
-                sessions.append({
-                    "session_id": sid,
-                    "tag": tag,
-                    "message_count": msg_count,
-                })
+            lines = [f"🏛️ OASIS 专家 Sessions — 共 {len(sessions)} 个\n"]
+            for s in sessions:
+                lines.append(
+                    f"  • Tag: {s.get('tag')}\n"
+                    f"    Session ID: {s.get('session_id')}\n"
+                    f"    消息数: {s.get('message_count')}"
+                )
 
+            lines.append(
+                "\n💡 在 schedule_yaml 中使用 session_id 即可让这些专家参与讨论。"
+                "\n   也可在 schedule_yaml 中精确指定发言顺序。"
+            )
+            return "\n".join(lines)
+    except httpx.ConnectError:
+        return _CONN_ERR
     except Exception as e:
-        return f"❌ 查询失败: {str(e)}"
-
-    if not sessions:
-        return (
-            "📭 暂无 oasis 专家 session。\n\n"
-            "💡 无需预创建。在 schedule_yaml 中使用\n"
-            "   \"tag#oasis#随机ID\" 格式的名称即可，首次使用时自动创建。\n"
-            "   加 \"#new\" 后缀可确保创建全新 session。"
-        )
-
-    lines = [f"🏛️ OASIS 专家 Sessions — 共 {len(sessions)} 个\n"]
-    for s in sessions:
-        lines.append(
-            f"  • Tag: {s['tag']}\n"
-            f"    Session ID: {s['session_id']}\n"
-            f"    消息数: {s['message_count']}"
-        )
-
-    lines.append(
-        "\n💡 在 schedule_yaml 中使用 session_id 即可让这些专家参与讨论。"
-        "\n   也可在 schedule_yaml 中精确指定发言顺序。"
-    )
-    return "\n".join(lines)
+        return f"❌ 查询失败: {e}"
 
 
 # ======================================================================
@@ -664,55 +632,33 @@ async def set_oasis_workflow(
         Confirmation with the saved file path
     """
     effective_user = username or _FALLBACK_USER
-
-    if not name.endswith((".yaml", ".yml")):
-        name += ".yaml"
-
-    # Validate YAML syntax before saving
+    # Proxy to OASIS HTTP API
     try:
-        data = _yaml.safe_load(schedule_yaml)
-        if not isinstance(data, dict) or "plan" not in data:
-            return "❌ 无效的 workflow YAML：必须包含 'plan' 键"
-    except Exception as e:
-        return f"❌ YAML 解析错误: {e}"
-
-    yaml_dir = os.path.join(
-        os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-        "data", "user_files", effective_user, "oasis", "yaml",
-    )
-    os.makedirs(yaml_dir, exist_ok=True)
-    filepath = os.path.join(yaml_dir, name)
-
-    content = ""
-    if description:
-        content += f"# {description}\n"
-    content += schedule_yaml
-
-    try:
-        with open(filepath, "w", encoding="utf-8") as f:
-            f.write(content)
+        async with httpx.AsyncClient(timeout=30) as client:
+            payload = {
+                "user_id": effective_user,
+                "name": name,
+                "schedule_yaml": schedule_yaml,
+                "description": description,
+                "save_layout": save_layout,
+            }
+            resp = await client.post(f"{OASIS_BASE_URL}/workflows", json=payload)
+            if resp.status_code != 200:
+                return f"❌ 保存失败: {resp.text}"
+            data = resp.json()
+            lines = ["✅ Workflow 已保存"]
+            lines.append(f"  文件: {data.get('file')}")
+            lines.append(f"  路径: {data.get('path')}")
+            if data.get("layout"):
+                lines.append(f"  📐 Layout: {data.get('layout')}")
+            if data.get("layout_warning"):
+                lines.append(f"  ⚠️ {data.get('layout_warning')}")
+            lines.append(f"\n💡 使用方式: post_to_oasis(schedule_file=\"{data.get('file')}\", ...)")
+            return "\n".join(lines)
+    except httpx.ConnectError:
+        return _CONN_ERR
     except Exception as e:
         return f"❌ 保存失败: {e}"
-
-    result_lines = [
-        f"✅ Workflow 已保存",
-        f"  文件: {name}",
-        f"  路径: {filepath}",
-    ]
-
-    # Auto-generate layout
-    if save_layout:
-        layout_name = name.replace(".yaml", "").replace(".yml", "")
-        try:
-            layout = _yaml_to_layout_data(schedule_yaml)
-            layout_path = _save_layout(layout, layout_name, effective_user)
-            n_nodes = len(layout["nodes"])
-            result_lines.append(f"  📐 Layout: {os.path.basename(layout_path)} ({n_nodes}个节点)")
-        except Exception as e:
-            result_lines.append(f"  ⚠️ Layout 生成失败: {e}")
-
-    result_lines.append(f"\n💡 使用方式: post_to_oasis(schedule_file=\"{name}\", ...)")
-    return "\n".join(result_lines)
 
 
 @mcp.tool()
@@ -727,33 +673,25 @@ async def list_oasis_workflows(username: str = "") -> str:
         List of saved workflow files with preview
     """
     effective_user = username or _FALLBACK_USER
-    yaml_dir = os.path.join(
-        os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-        "data", "user_files", effective_user, "oasis", "yaml",
-    )
-
-    if not os.path.isdir(yaml_dir):
-        return "📭 暂无保存的 workflow"
-
-    files = sorted(
-        f for f in os.listdir(yaml_dir) if f.endswith((".yaml", ".yml"))
-    )
-    if not files:
-        return "📭 暂无保存的 workflow"
-
-    lines = [f"📋 已保存的 OASIS Workflows — 共 {len(files)} 个\n"]
-    for fname in files:
-        fpath = os.path.join(yaml_dir, fname)
-        try:
-            with open(fpath, "r", encoding="utf-8") as f:
-                first_line = f.readline().strip()
-            desc = first_line.lstrip("# ") if first_line.startswith("#") else ""
-            lines.append(f"  • {fname}" + (f"  — {desc}" if desc else ""))
-        except Exception:
-            lines.append(f"  • {fname}")
-
-    lines.append(f"\n💡 使用: post_to_oasis(schedule_file=\"文件名\", ...)")
-    return "\n".join(lines)
+    try:
+        async with httpx.AsyncClient(timeout=30) as client:
+            resp = await client.get(f"{OASIS_BASE_URL}/workflows", params={"user_id": effective_user})
+            if resp.status_code != 200:
+                return f"❌ 查询失败: {resp.text}"
+            data = resp.json()
+            files = data.get("workflows", [])
+            if not files:
+                return "📭 暂无保存的 workflow"
+            lines = [f"📋 已保存的 OASIS Workflows — 共 {len(files)} 个\n"]
+            for it in files:
+                desc = it.get("description", "")
+                lines.append(f"  • {it.get('file')}" + (f"  — {desc}" if desc else ""))
+            lines.append(f"\n💡 使用: post_to_oasis(schedule_file=\"文件名\", ...)")
+            return "\n".join(lines)
+    except httpx.ConnectError:
+        return _CONN_ERR
+    except Exception as e:
+        return f"❌ 查询失败: {e}"
 
 
 # ======================================================================
@@ -1059,53 +997,25 @@ async def yaml_to_layout(
     """
     effective_user = username or _FALLBACK_USER
 
-    # Determine if yaml_source is a filename or raw YAML
-    yaml_content = ""
-    source_name = ""
-
-    if "\n" not in yaml_source and yaml_source.strip().endswith((".yaml", ".yml")):
-        # Treat as filename
-        yaml_dir = os.path.join(
-            os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-            "data", "user_files", effective_user, "oasis", "yaml",
-        )
-        fpath = os.path.join(yaml_dir, yaml_source.strip())
-        if not os.path.isfile(fpath):
-            return f"❌ 找不到 YAML 文件: {yaml_source}"
-        with open(fpath, "r", encoding="utf-8") as f:
-            yaml_content = f.read()
-        source_name = yaml_source.replace(".yaml", "").replace(".yml", "")
-    else:
-        yaml_content = yaml_source
-        source_name = "converted"
-
+    # Use OASIS HTTP API for layout generation so curl can call it too
     try:
-        layout = _yaml_to_layout_data(yaml_content)
+        async with httpx.AsyncClient(timeout=60) as client:
+            payload = {
+                "user_id": effective_user,
+                "yaml_source": yaml_source,
+                "layout_name": layout_name,
+            }
+            resp = await client.post(f"{OASIS_BASE_URL}/layouts/from-yaml", json=payload)
+            if resp.status_code != 200:
+                return f"❌ 转换失败: {resp.text}"
+            data = resp.json()
+            return (
+                f"✅ Layout 已生成并保存\n  文件: {data.get('layout')}\n  路径: {data.get('path')}"
+            )
+    except httpx.ConnectError:
+        return _CONN_ERR
     except Exception as e:
-        return f"❌ YAML 转换失败: {e}"
-
-    save_name = layout_name or source_name
-    try:
-        filepath = _save_layout(layout, save_name, effective_user)
-    except Exception as e:
-        return f"❌ Layout 保存失败: {e}"
-
-    n_nodes = len(layout["nodes"])
-    n_edges = len(layout["edges"])
-    n_groups = len(layout["groups"])
-    node_summary = ", ".join(
-        f"{n['emoji']}{n['name']}#{n['instance']}" for n in layout["nodes"][:8]
-    )
-    if len(layout["nodes"]) > 8:
-        node_summary += f" ...共{n_nodes}个"
-
-    return (
-        f"✅ Layout 已生成并保存\n"
-        f"  文件: {os.path.basename(filepath)}\n"
-        f"  节点: {n_nodes} | 连线: {n_edges} | 分组: {n_groups}\n"
-        f"  专家: {node_summary}\n\n"
-        f"💡 在编排器中点击「加载布局」即可查看和编辑此 layout。"
-    )
+        return f"❌ 转换失败: {e}"
 
 
 if __name__ == "__main__":
