@@ -225,3 +225,5 @@ bash selfskill/scripts/run.sh stop
 - 通过 PID 文件管理进程，`start` 支持幂等调用
 - `INTERNAL_TOKEN` 勿泄露
 - 日志路径: `logs/launcher.log`
+
+- 一定要告诉用户如何开启可视化界面，以及如何登录到进行讨论等工作的账号
