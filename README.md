@@ -844,6 +844,12 @@ python scripts/tunnel.py
 | `/topics/{id}/conclusion` | GET | 阻塞等待讨论结论 |
 | `/experts` | GET | 列出专家（公共 + 用户自定义） |
 | `/experts/user` | POST/PUT/DELETE | 用户自定义专家 CRUD |
+|
+| **新增：Workflow & Layout 管理** |
+| `/sessions/oasis` | GET | 列出 OASIS 管理的专家会话（含 `#oasis#` 的 session） |
+| `/workflows` | POST | 保存 YAML workflow（可选生成 layout） |
+| `/workflows` | GET | 列出用户保存的 workflows |
+| `/layouts/from-yaml` | POST | 从 YAML 生成并保存 layout JSON |
 
 ---
 
@@ -854,6 +860,93 @@ python scripts/tunnel.py
 - **请求验证**：每次 `/ask` 都重新验证密码
 - **内部鉴权**：服务间通信通过 `INTERNAL_TOKEN`（自动生成 64 字符 hex）
 - **用户隔离**：对话记忆、文件存储、自定义专家均按 `user_id` 隔离
+
+### 外部 curl 参与 OASIS 服务器（完整方法）
+
+OASIS 服务器（端口 51202）除了供 MCP 工具调用外，也支持直接 curl 操作，便于外部脚本或调试。所有接口均使用 `user_id` 参数进行用户隔离。
+
+#### 1. 专家管理
+```bash
+# 列出所有专家（公共 + 用户自定义）
+curl 'http://127.0.0.1:51202/experts?user_id=xinyuan'
+
+# 创建自定义专家
+curl -X POST 'http://127.0.0.1:51202/experts/user' \
+  -H 'Content-Type: application/json' \
+  -d '{"user_id":"xinyuan","name":"产品经理","tag":"pm","persona":"你是一个经验丰富的产品经理，擅长需求分析和产品规划","temperature":0.7}'
+
+# 更新自定义专家
+curl -X PUT 'http://127.0.0.1:51202/experts/user/pm' \
+  -H 'Content-Type: application/json' \
+  -d '{"user_id":"xinyuan","persona":"更新后的专家描述"}'
+
+# 删除自定义专家
+curl -X DELETE 'http://127.0.0.1:51202/experts/user/pm?user_id=xinyuan'
+```
+
+#### 2. 会话管理
+```bash
+# 列出 OASIS 管理的专家会话（含 #oasis# 的 session）
+curl 'http://127.0.0.1:51202/sessions/oasis?user_id=xinyuan'
+```
+
+#### 3. Workflow 管理
+```bash
+# 列出用户保存的 workflows
+curl 'http://127.0.0.1:51202/workflows?user_id=xinyuan'
+
+# 保存 workflow（自动生成 layout）
+curl -X POST 'http://127.0.0.1:51202/workflows' \
+  -H 'Content-Type: application/json' \
+  -d '{"user_id":"xinyuan","name":"trio_discussion","schedule_yaml":"version:1\nplan:\n - expert: \"creative#temp#1\"","description":"三人讨论","save_layout":true}'
+```
+
+#### 4. Layout 生成
+```bash
+# 从 YAML 生成 layout
+curl -X POST 'http://127.0.0.1:51202/layouts/from-yaml' \
+  -H 'Content-Type: application/json' \
+  -d '{"user_id":"xinyuan","yaml_source":"version:1\nplan:\n - expert: \"creative#temp#1\"","layout_name":"trio_layout"}'
+```
+
+#### 5. 讨论/执行
+```bash
+# 创建讨论话题（同步等待结论）
+curl -X POST 'http://127.0.0.1:51202/topics' \
+  -H 'Content-Type: application/json' \
+  -d '{"user_id":"xinyuan","question":"讨论主题","max_rounds":3,"schedule_yaml":"version:1\nplan:\n - expert: \"creative#temp#1\"","discussion":true}'
+
+# 创建讨论话题（异步，返回 topic_id）
+curl -X POST 'http://127.0.0.1:51202/topics' \
+  -H 'Content-Type: application/json' \
+  -d '{"user_id":"xinyuan","question":"讨论主题","max_rounds":3,"schedule_yaml":"version:1\nplan:\n - expert: \"creative#temp#1\"","discussion":true,"callback_url":"http://127.0.0.1:51200/system_trigger","callback_session_id":"my-session"}'
+
+# 查看讨论详情
+curl 'http://127.0.0.1:51202/topics/{topic_id}?user_id=xinyuan'
+
+# 获取讨论结论（阻塞等待）
+curl 'http://127.0.0.1:51202/topics/{topic_id}/conclusion?user_id=xinyuan&timeout=300'
+
+# 取消讨论
+curl -X DELETE 'http://127.0.0.1:51202/topics/{topic_id}?user_id=xinyuan'
+
+# 列出所有讨论话题
+curl 'http://127.0.0.1:51202/topics?user_id=xinyuan'
+```
+
+#### 6. 实时流
+```bash
+# SSE 实时更新流（讨论模式）
+curl 'http://127.0.0.1:51202/topics/{topic_id}/stream?user_id=xinyuan'
+```
+
+**保存位置：**
+- Workflows: `data/user_files/{user}/oasis/yaml/{file}.yaml`
+- Layouts: `data/visual_layouts/{user}/{name}.json`
+- 用户自定义专家: `data/oasis_user_experts/{user}.json`
+- 讨论记录: `data/oasis_topics/{user}/{topic_id}.json`
+
+**注意：** 这些接口与 MCP 工具 `list_oasis_experts`、`add_oasis_expert`、`update_oasis_expert`、`delete_oasis_expert`、`list_oasis_sessions`、`set_oasis_workflow`、`list_oasis_workflows`、`yaml_to_layout`、`post_to_oasis`、`check_oasis_discussion`、`cancel_oasis_discussion`、`list_oasis_topics` 共享同一后端实现，确保行为一致。
 
 ---
 
