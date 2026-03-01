@@ -227,7 +227,7 @@ version: 1
 plan:
   - expert: "分析师#ext#analyst"
     api_url: "https://api.deepseek.com"          # 必填：外部 API 的 base URL（自动补全为 /v1/chat/completions）
-    api_key: "sk-xxx"                             # 可选：API key → Authorization: Bearer <key>
+    api_key: "sk-xxx"                             # 必填：API key → Authorization: Bearer <key>
     model: "deepseek-chat"                        # 可选：模型名，默认 gpt-3.5-turbo
     headers:                                      # 可选：自定义 HTTP 请求头（key-value 字典）
       X-Custom-Header: "value"
@@ -249,9 +249,10 @@ OpenClaw 是一个本地运行的 OpenAI 兼容 Agent 服务。在 `.env` 中设
 ```bash
 # 配置 OpenClaw endpoint（默认地址如下）
 bash selfskill/scripts/run.sh configure --batch \
-  OPENCLAW_API_URL=http://127.0.0.1:23001/v1/chat/completions \
+  OPENCLAW_API_URL=http://127.0.0.1:18789/v1/chat/completions \
   OPENCLAW_API_KEY=your-openclaw-key-if-needed
 ```
+注意在yaml文件的url只需要http://127.0.0.1:18789
 
 **OpenClaw 的 `model` 字段格式：**
 
@@ -313,8 +314,10 @@ OASIS Server（端口 51202）可以**独立于 Agent 主服务使用**。外部
 ```
 POST http://127.0.0.1:51202/topics
 
-{"question":"讨论主题","user_id":"system","max_rounds":3,"discussion":true,"schedule_yaml":"...","callback_url":"http://127.0.0.1:51200/system_trigger","callback_session_id":"my-session"}
+{"question":"讨论主题","user_id":"system","max_rounds":3,"discussion":true,"schedule_file":"...","schedule_yaml":"...","callback_url":"http://127.0.0.1:51200/system_trigger","callback_session_id":"my-session"}
 ```
+
+注意优先使用schedule_yaml避免重复输入yaml，这是yaml工作流文件的绝对路径，一般在/XXXXX/Teamclaw/data/user_files/username下
 
 ### 外部 curl 参与 OASIS 服务器（完整方法）
 
