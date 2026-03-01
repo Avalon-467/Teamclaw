@@ -144,6 +144,140 @@ POST /cancel
 {"user_id":"<user_id>","session_id":"<session_id>"}
 ```
 
+## OASIS 四类智能体
+
+OASIS 支持 **四种类型的智能体**，通过 `schedule_yaml` 中专家的 `name` 格式区分：
+
+| # | 类型 | Name 格式 | 引擎类 | 说明 |
+|---|------|-----------|--------|------|
+| 1 | **Direct LLM** | `tag#temp#N` | `ExpertAgent` | 无状态单次 LLM 调用。每轮读取所有帖子 → 一次 LLM 调用 → 发布 + 投票。无跨轮记忆。`tag` 映射到预设专家名/人设，`N` 是实例编号（同一专家可多副本）。 |
+| 2 | **Oasis Session** | `tag#oasis#id` | `SessionExpert` (oasis) | OASIS 管理的有状态 bot session。`tag` 映射到预设专家，首轮注入人设为 system prompt。Bot 跨轮保留对话记忆（增量上下文）。`id` 可为任意字符串，新 ID 首次使用时自动创建 session。 |
+| 3 | **Regular Agent** | `Title#session_id` | `SessionExpert` (regular) | 连接到已有的 agent session（如 `助手#default`、`Coder#my-project`）。不注入身份——session 自身的 system prompt 定义 agent。适合将个人 bot session 带入讨论。 |
+| 4 | **External API** | `tag#ext#id` | `ExternalExpert` | 直接调用任意 OpenAI 兼容外部 API（DeepSeek、GPT-4、Ollama、另一个 mini_timebot 实例等）。不经过本地 agent。外部服务假定有状态。支持通过 YAML `headers` 字段自定义请求头。 |
+
+### Session ID 格式
+
+```
+tag#temp#N           → ExpertAgent   (无状态, 直连LLM)
+tag#oasis#<id>       → SessionExpert (oasis管理, 有状态bot)
+Title#session_id     → SessionExpert (普通agent session)
+tag#ext#<id>         → ExternalExpert (外部API)
+```
+
+**特殊后缀：**
+- 在任意 session 名末尾追加 `#new` 可强制创建**全新 session**（ID 替换为随机 UUID，确保不复用）：
+  - `creative#oasis#abc#new` → `#new` 被剥离，ID 替换为 UUID
+  - `助手#my-session#new` → 同样处理
+
+**Oasis session 约定：**
+- Oasis session 通过 `session_id` 中的 `#oasis#` 标识（如 `creative#oasis#ab12cd34`）
+- 存储在普通 Agent checkpoint DB（`data/agent_memory.db`）中，无独立存储
+- 首次使用时自动创建，无需预创建
+- `tag` 部分映射到预设专家配置以查找人设
+
+### YAML 示例
+
+```yaml
+version: 1
+plan:
+  # Type 1: Direct LLM（无状态，快速）
+  - expert: "creative#temp#1"
+  - expert: "critical#temp#2"
+
+  # Type 2: Oasis session（有状态，有记忆）
+  - expert: "data#oasis#analysis01"
+  - expert: "synthesis#oasis#new#new"   # 强制全新session
+
+  # Type 3: Regular agent session（你现有的bot）
+  - expert: "助手#default"
+  - expert: "Coder#my-project"
+
+  # Type 4: External API（DeepSeek, GPT-4等）
+  - expert: "deepseek#ext#ds1"
+
+  # 并行执行
+  - parallel:
+      - expert: "creative#temp#1"
+        instruction: "从创新角度分析"
+      - expert: "critical#temp#2"
+        instruction: "从风险角度分析"
+
+  # 全员发言 + 手动注入
+  - all_experts: true
+  - manual:
+      author: "主持人"
+      content: "请聚焦可行性"
+```
+
+### External API (Type 4) 详细配置
+
+Type 4 外部 agent 支持在 YAML 步骤中提供额外配置字段：
+
+```yaml
+version: 1
+plan:
+  - expert: "分析师#ext#analyst"
+    api_url: "https://api.deepseek.com"          # 必填：外部 API 的 base URL（自动补全为 /v1/chat/completions）
+    api_key: "sk-xxx"                             # 可选：API key → Authorization: Bearer <key>
+    model: "deepseek-chat"                        # 可选：模型名，默认 gpt-3.5-turbo
+    headers:                                      # 可选：自定义 HTTP 请求头（key-value 字典）
+      x-openclaw-session-key: "my-session-id"
+      X-Custom-Header: "value"
+```
+
+**配置字段说明：**
+
+| 字段 | 必填 | 说明 |
+|------|------|------|
+| `api_url` | ✅ | 外部 API 地址，自动补全路径为 `/v1/chat/completions` |
+| `api_key` | ❌ | 放到 `Authorization: Bearer <key>` header 中 |
+| `model` | ❌ | 默认 `gpt-3.5-turbo` |
+| `headers` | ❌ | 任意 key-value 字典，合并到 HTTP 请求头 |
+
+**`x-openclaw-session-key` 的用途：**
+当外部服务是 OpenClaw 时，该 header 告诉服务端使用哪个 session，从而实现**跨轮对话记忆**。前端编排面板拖拽 OpenClaw session 时会自动设置此 header。
+
+**请求头组装逻辑：**
+最终发出的请求头 = `Content-Type: application/json` + `Authorization: Bearer <api_key>`（如有） + YAML `headers` 中自定义的所有键值对。
+
+---
+
+## 独立使用 OASIS Server
+
+OASIS Server（端口 51202）可以**独立于 Agent 主服务使用**。外部脚本、其他服务、或手动 curl 均可直接操作 OASIS 的全部功能，无需通过 MCP 工具或 Agent 对话。
+
+**独立使用场景：**
+- 从外部脚本自动发起多专家讨论/执行
+- 调试 workflow 编排
+- 将 OASIS 作为微服务集成到其他系统
+- 管理专家、会话、workflow 等资源
+
+**前提条件：**
+- OASIS 服务已启动（`bash selfskill/scripts/run.sh start` 会同时启动所有服务）
+- 所有接口使用 `user_id` 参数进行用户隔离（无需 Authorization header）
+
+**API 概览：**
+
+| 功能 | 方法 | 路径 |
+|------|------|------|
+| 列出专家 | GET | `/experts?user_id=xxx` |
+| 创建自定义专家 | POST | `/experts/user` |
+| 更新/删除自定义专家 | PUT/DELETE | `/experts/user/{tag}` |
+| 列出 oasis sessions | GET | `/sessions/oasis?user_id=xxx` |
+| 保存 workflow | POST | `/workflows` |
+| 列出 workflows | GET | `/workflows?user_id=xxx` |
+| YAML → Layout | POST | `/layouts/from-yaml` |
+| 创建讨论/执行 | POST | `/topics` |
+| 查看讨论详情 | GET | `/topics/{topic_id}?user_id=xxx` |
+| 获取结论（阻塞） | GET | `/topics/{topic_id}/conclusion?user_id=xxx&timeout=300` |
+| SSE 实时流 | GET | `/topics/{topic_id}/stream?user_id=xxx` |
+| 取消讨论 | DELETE | `/topics/{topic_id}?user_id=xxx` |
+| 列出所有话题 | GET | `/topics?user_id=xxx` |
+
+> 这些接口与 MCP 工具共享同一后端实现，行为完全一致。
+
+---
+
 ### OASIS 讨论/执行
 
 ```

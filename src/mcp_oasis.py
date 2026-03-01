@@ -88,7 +88,11 @@ async def list_oasis_experts(username: str = "") -> str:
 
             lines.append(
                 "\n💡 在 schedule_yaml 中使用 expert 的 tag 来指定参与者。"
-                "\n   格式: \"tag#temp#N\" (直连LLM)、\"tag#oasis#随机ID\" (有状态session)、\"标题#session_id\" (普通agent)。"
+                "\n   四种格式:"
+                "\n   • \"tag#temp#N\"         — 直连LLM，无状态"
+                "\n   • \"tag#oasis#随机ID\"   — 有状态session，跨轮记忆"
+                "\n   • \"标题#session_id\"    — 普通agent session"
+                "\n   • \"tag#ext#id\"         — 外部API（DeepSeek/GPT-4等）"
             )
             return "\n".join(lines)
 
@@ -325,15 +329,38 @@ async def post_to_oasis(
     If both are provided, schedule_file takes priority (file content is used, schedule_yaml is ignored).
     If the user already has a saved YAML workflow file, just use schedule_file — no need to write schedule_yaml again.
 
-    Expert name formats (must contain '#', engine parses by tag):
-      "creative#temp#1"       → ExpertAgent (tag→name/persona from presets, direct LLM)
-      "creative#oasis#ab12"   → SessionExpert (oasis, tag→name/persona, stateful bot)
-      "助手#default"          → SessionExpert (regular, no identity injection)
+    **Four Agent Types** (name must contain '#'; engine dispatches by format):
 
-    Session IDs can be anything new — new IDs auto-create new sessions on first use.
-    To explicitly ensure a brand-new session (avoid reusing existing), append "#new":
-      "creative#oasis#ab12#new"  → "#new" stripped, ID replaced with random UUID
-      "助手#my_session#new"      → "#new" stripped, ID replaced with random UUID
+      Type 1 — Direct LLM (stateless, fast):
+        "tag#temp#N"            → ExpertAgent. Stateless single-shot LLM call per round.
+                                  tag maps to preset expert name/persona; N is instance number.
+                                  Example: "creative#temp#1", "critical#temp#2"
+
+      Type 2 — Oasis Session (stateful, has memory):
+        "tag#oasis#id"          → SessionExpert (oasis-managed). Stateful bot session with
+                                  conversation memory across rounds. tag maps to preset persona
+                                  (injected as system prompt on first round). id can be any string;
+                                  new IDs auto-create sessions on first use.
+                                  Example: "data#oasis#analysis01", "synthesis#oasis#abc123"
+
+      Type 3 — Regular Agent Session (your existing bot):
+        "Title#session_id"      → SessionExpert (regular). Connects to an existing agent session.
+                                  No identity injection — the session's own system prompt defines it.
+                                  Useful for bringing personal bot sessions into discussions.
+                                  Example: "助手#default", "Coder#my-project"
+
+      Type 4 — External API (DeepSeek, GPT-4, Ollama, etc):
+        "tag#ext#id"            → ExternalExpert. Calls any external OpenAI-compatible API directly.
+                                  Does NOT go through the local agent. External service assumed stateful.
+                                  Supports custom headers via YAML `headers` field.
+                                  Example: "deepseek#ext#ds1"
+
+    Session ID conventions:
+      - New IDs auto-create sessions on first use (no pre-creation needed).
+      - Append "#new" to force a brand-new session (ID replaced with random UUID):
+          "creative#oasis#ab12#new"  → "#new" stripped, ID replaced with UUID
+          "助手#my_session#new"      → same treatment
+      - Oasis sessions identified by "#oasis#" in session_id, stored in Agent checkpoint DB.
 
     For simple all-parallel with all preset experts, use:
       version: 1
@@ -358,6 +385,8 @@ async def post_to_oasis(
                     - expert: "critical#temp#2"
                       instruction: "从风险角度分析"
                     - "data#temp#3"
+                - expert: "助手#default"
+                - expert: "deepseek#ext#ds1"
                 - all_experts: true
                 - manual:
                     author: "主持人"
