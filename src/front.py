@@ -4860,9 +4860,8 @@ orch_openclaw_sessions: '🦞 OpenClaw',
                 list.innerHTML = '<div style="padding:6px 10px;font-size:10px;color:#d1d5db;text-align:center;">No OpenClaw sessions</div>';
                 return;
             }
-            const defaultUrl = data.llm_base_url || '';
-            const defaultKey = data.llm_api_key || '';
-            const defaultModel = data.llm_model || '';
+            const openclawUrl = data.openclaw_api_url || '';
+            const openclawKey = data.openclaw_api_key || '';
             for (const s of data.sessions) {
                 const card = document.createElement('div');
                 card.className = 'orch-expert-card';
@@ -4871,8 +4870,8 @@ orch_openclaw_sessions: '🦞 OpenClaw',
                 card.innerHTML = `<span class="orch-emoji">🦞</span><div style="min-width:0;flex:1;"><div class="orch-name">${escapeHtml(title)}</div><div class="orch-tag" style="color:#10b981;font-family:monospace;">${s.channel||'unknown'} · ${s.model||''}</div></div><span class="orch-temp" style="font-size:9px;color:#9ca3af;">${s.contextTokens||0}tk</span>`;
                 const nodeData = {
                     type: 'external', name: title, tag: 'openclaw', emoji: '🦞', temperature: 0.7,
-                    api_url: defaultUrl, api_key: defaultKey,
-                    model: s.model || defaultModel,
+                    api_url: openclawUrl, api_key: openclawKey,
+                    model: s.model || '',
                     headers: {'x-openclaw-session-key': s.key}, ext_id: s.key || '1',
                     openclaw_session: s
                 };

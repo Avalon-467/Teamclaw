@@ -720,10 +720,9 @@ async def list_openclaw_sessions(filter: str = Query("")):
     return {
         "sessions": result,
         "available": True,
-        # Provide default LLM config so frontend can auto-fill external agent fields
-        "llm_base_url": os.getenv("LLM_BASE_URL", ""),
-        "llm_api_key": os.getenv("LLM_API_KEY", ""),
-        "llm_model": os.getenv("LLM_MODEL", ""),
+        # Provide OpenClaw-specific endpoint config for auto-fill when dragging into canvas
+        "openclaw_api_url": os.getenv("OPENCLAW_API_URL", ""),
+        "openclaw_api_key": os.getenv("OPENCLAW_API_KEY", ""),
     }
 
 
