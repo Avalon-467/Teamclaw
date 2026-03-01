@@ -189,12 +189,19 @@ def _node_yaml_name(node: dict, use_bot_session: bool = False) -> str:
     For expert nodes:
       - use_bot_session=False → "tag#temp#<instance>" (stateless ExpertAgent)
       - use_bot_session=True  → "tag#oasis#new"       (stateful SessionExpert)
+    For external nodes:
+      - "tag#ext#<ext_id>"  (external API agent)
     For session_agent nodes:
       - "title#session_id#<instance>" when instance > 1 (multiple uses of same session)
       - "title#session_id"            when instance == 1
     """
     inst = node.get("instance", 1)
     node_type = node.get("type", "expert")
+
+    if node_type == "external":
+        tag = node.get("tag", "custom")
+        ext_id = node.get("ext_id", "1")
+        return f"{tag}#ext#{ext_id}"
 
     if node_type == "session_agent":
         title = node.get("name", "Agent")
@@ -248,6 +255,17 @@ def layout_to_yaml(data: dict) -> str:
     use_bot_session = settings.get("use_bot_session", False)
     node_map = {n["id"]: n for n in nodes}
 
+    def _make_expert_step(node):
+        """Build a plan step dict for an expert/external node."""
+        step = {"expert": _node_yaml_name(node, use_bot_session)}
+        if node.get("type") == "external":
+            for _ek in ("api_url", "api_key", "model"):
+                if node.get(_ek):
+                    step[_ek] = node[_ek]
+            if node.get("headers") and isinstance(node["headers"], dict):
+                step["headers"] = node["headers"]
+        return step
+
     plan = []
 
     # Step 1: Process explicit groups (user-drawn circles/clusters)
@@ -260,9 +278,17 @@ def layout_to_yaml(data: dict) -> str:
         if group_type == "all":
             plan.append({"all_experts": True})
         elif group_type == "parallel":
-            member_names = [_node_yaml_name(node_map[nid], use_bot_session) for nid in member_ids if nid in node_map]
-            if member_names:
-                plan.append({"parallel": member_names})
+            par_items = []
+            for nid in member_ids:
+                if nid not in node_map:
+                    continue
+                mn = node_map[nid]
+                if mn.get("type") == "external":
+                    par_items.append(_make_expert_step(mn))
+                else:
+                    par_items.append(_node_yaml_name(mn, use_bot_session))
+            if par_items:
+                plan.append({"parallel": par_items})
         elif group_type == "manual":
             content = group.get("content", "Please continue the discussion.")
             author = group.get("author", "主持人")
@@ -294,7 +320,7 @@ def layout_to_yaml(data: dict) -> str:
                     }
                 })
             else:
-                plan.append({"expert": _node_yaml_name(node, use_bot_session)})
+                plan.append(_make_expert_step(node))
     else:
         # Step 3: Process remaining ungrouped, unconnected nodes
         # Auto-detect spatial patterns
@@ -307,15 +333,21 @@ def layout_to_yaml(data: dict) -> str:
             for cluster in clusters:
                 if len(cluster) == 1:
                     # Single node → sequential expert step
-                    plan.append({"expert": _node_yaml_name(cluster[0], use_bot_session)})
+                    plan.append(_make_expert_step(cluster[0]))
                 elif _is_circular_arrangement(cluster):
                     # Circular arrangement → parallel (brainstorm)
-                    plan.append({"parallel": [_node_yaml_name(n, use_bot_session) for n in cluster]})
+                    par_items = []
+                    for cn in cluster:
+                        if cn.get("type") == "external":
+                            par_items.append(_make_expert_step(cn))
+                        else:
+                            par_items.append(_node_yaml_name(cn, use_bot_session))
+                    plan.append({"parallel": par_items})
                 else:
                     # Linear/scattered cluster → sort by x-coordinate for left-to-right order
                     sorted_nodes = sorted(cluster, key=lambda n: (n["x"], n["y"]))
                     for n in sorted_nodes:
-                        plan.append({"expert": _node_yaml_name(n, use_bot_session)})
+                        plan.append(_make_expert_step(n))
 
     # Step 4: Process manual injection nodes (skip those already consumed by edges)
     manual_nodes = [n for n in nodes if n.get("type") == "manual" and n["id"] not in grouped_node_ids and n["id"] not in edge_consumed_ids]
@@ -404,6 +436,8 @@ def _build_llm_prompt(data: dict) -> str:
         inst_label = f" [instance #{inst}]" if inst > 1 else ""
         if n.get("type") == "session_agent":
             expert_list_str += f"  {i}. {n['emoji']} {n['name']}{inst_label} [SESSION AGENT: session_id={n.get('session_id', '?')}] — existing agent with its own tools & memory\n"
+        elif n.get("type") == "external":
+            expert_list_str += f"  {i}. {n['emoji']} {n['name']}{inst_label} [EXTERNAL API: api_url={n.get('api_url', '?')}] — external OpenAI-compatible service\n"
         else:
             expert_list_str += f"  {i}. {n['emoji']} {n['name']}{inst_label} (tag: {n['tag']}, temperature: {n.get('temperature', 0.5)}, source: {n.get('source', 'public')})\n"
 

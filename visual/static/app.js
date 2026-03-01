@@ -438,16 +438,29 @@ function addNodeToCenter(data) {
 function renderNode(node) {
     const area = document.getElementById('canvas-area');
     const el = document.createElement('div');
-    el.className = 'canvas-node' + (node.type === 'manual' ? ' manual-node' : '');
+    el.className = 'canvas-node'
+        + (node.type === 'manual' ? ' manual-node' : '')
+        + (node.type === 'external' ? ' external-node' : '');
     el.id = 'node-' + node.id;
     el.style.left = node.x + 'px';
     el.style.top = node.y + 'px';
+
+    let tagLabel = node.tag;
+    if (node.type === 'external') {
+        tagLabel = `${node.tag} 🌐 ${node.api_url || 'ext'}`;
+        if (node.headers && typeof node.headers === 'object') {
+            const hdrParts = Object.entries(node.headers).map(([k, v]) => `${k}: ${v}`);
+            if (hdrParts.length) {
+                tagLabel += `\n${hdrParts.join('\n')}`;
+            }
+        }
+    }
 
     el.innerHTML = `
         <span class="node-emoji">${node.emoji}</span>
         <div class="node-info">
             <div class="node-name">${node.name}</div>
-            <div class="node-tag">${node.tag}</div>
+            <div class="node-tag">${tagLabel}</div>
         </div>
         <div class="node-delete" title="${i18n ? i18n('tip_remove') : 'Remove'}">×</div>
         <div class="port port-in" data-node="${node.id}" data-dir="in"></div>

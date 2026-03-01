@@ -755,6 +755,7 @@ def _parse_expert_name(raw: str) -> dict:
     Formats:
       tag#temp#N         → expert, instance=N
       tag#oasis#xxx      → expert (bot session)
+      tag#ext#id         → external (external API agent)
       Title#session_id   → session_agent
       Title#sid#N         → session_agent, instance=N
     """
@@ -782,6 +783,19 @@ def _parse_expert_name(raw: str) -> dict:
             "temperature": 0.5,
             "instance": 1,
             "session_id": "",
+        }
+
+    if len(parts) >= 3 and parts[1] == "ext":
+        ext_id = parts[2]
+        return {
+            "type": "external",
+            "tag": tag,
+            "name": _TAG_NAMES.get(tag, tag),
+            "emoji": "🌐",
+            "temperature": 0.5,
+            "instance": 1,
+            "session_id": "",
+            "ext_id": ext_id,
         }
 
     # session_agent: Title#session_id or Title#session_id#N
@@ -844,6 +858,13 @@ def _yaml_to_layout_data(yaml_str: str) -> dict:
                 "content": step.get("instruction", ""),
                 "source": "",
             }
+            # Carry external agent config fields into the layout node
+            if info.get("type") == "external":
+                for _ek in ("api_url", "api_key", "model"):
+                    if _ek in step:
+                        node[_ek] = step[_ek]
+                if "headers" in step and isinstance(step["headers"], dict):
+                    node["headers"] = step["headers"]
             nodes.append(node)
             if prev_node_id:
                 edges.append({"id": f"oe{eid}", "source": prev_node_id, "target": node_id})
@@ -881,6 +902,13 @@ def _yaml_to_layout_data(yaml_str: str) -> dict:
                     "content": instruction,
                     "source": "",
                 }
+                # Carry external agent config fields into parallel layout nodes
+                if info.get("type") == "external" and isinstance(item, dict):
+                    for _ek in ("api_url", "api_key", "model"):
+                        if _ek in item:
+                            node[_ek] = item[_ek]
+                    if "headers" in item and isinstance(item["headers"], dict):
+                        node["headers"] = item["headers"]
                 nodes.append(node)
                 group_node_ids.append(node_id)
                 y_offset += parallel_gap_y

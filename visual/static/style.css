@@ -160,10 +160,15 @@ body {
     background: linear-gradient(135deg, #2a1a3e, #3a2a4e);
     border-color: #9944cc;
 }
+.canvas-node.external-node {
+    background: linear-gradient(135deg, #1a2e3e, #1a3e2e);
+    border-color: #2ecc71;
+}
+.canvas-node.external-node:hover { border-color: #27ae60; box-shadow: 0 0 20px #2ecc7140; }
 .canvas-node .node-emoji { font-size: 22px; }
 .canvas-node .node-info { display: flex; flex-direction: column; }
 .canvas-node .node-name { font-weight: 600; font-size: 13px; white-space: nowrap; }
-.canvas-node .node-tag { font-size: 11px; color: #8888bb; }
+.canvas-node .node-tag { font-size: 11px; color: #8888bb; white-space: pre-line; word-break: break-all; }
 .canvas-node .node-delete {
     position: absolute;
     top: -8px; right: -8px;

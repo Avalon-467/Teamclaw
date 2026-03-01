@@ -4867,8 +4867,9 @@ orch_openclaw_sessions: '🦞 OpenClaw',
                 const title = s.key || 'Untitled';
                 card.innerHTML = `<span class="orch-emoji">🦞</span><div style="min-width:0;flex:1;"><div class="orch-name">${escapeHtml(title)}</div><div class="orch-tag" style="color:#10b981;font-family:monospace;">${s.channel||'unknown'} · ${s.model||''}</div></div><span class="orch-temp" style="font-size:9px;color:#9ca3af;">${s.contextTokens||0}tk</span>`;
                 const nodeData = {
-                    type: 'external_agent', name: title, tag: 'openclaw', emoji: '🦞', temperature: 0.7,
-                    api_url: '', headers: {'x-openclaw-session-key': s.key}, openclaw_session: s
+                    type: 'external', name: title, tag: 'openclaw', emoji: '🦞', temperature: 0.7,
+                    api_url: '', headers: {'x-openclaw-session-key': s.key}, ext_id: s.key || '1',
+                    openclaw_session: s
                 };
                 card.addEventListener('dragstart', e => {
                     e.dataTransfer.setData('application/json', JSON.stringify(nodeData));
@@ -4959,10 +4960,10 @@ orch_openclaw_sessions: '🦞 OpenClaw',
     // ── Node Management ──
     function orchNextInstance(data) {
         // Compute next instance number for this agent identity
-        const key = data.type === 'session_agent' ? ('sa:' + (data.session_id||'')) : ('ex:' + (data.tag||'custom'));
+        const key = data.type === 'session_agent' ? ('sa:' + (data.session_id||'')) : data.type === 'external' ? ('ext:' + (data.ext_id || data.tag||'custom')) : ('ex:' + (data.tag||'custom'));
         let maxInst = 0;
         orch.nodes.forEach(n => {
-            const nk = n.type === 'session_agent' ? ('sa:' + (n.session_id||'')) : ('ex:' + (n.tag||'custom'));
+            const nk = n.type === 'session_agent' ? ('sa:' + (n.session_id||'')) : n.type === 'external' ? ('ext:' + (n.ext_id || n.tag||'custom')) : ('ex:' + (n.tag||'custom'));
             if (nk === key && n.instance > maxInst) maxInst = n.instance;
         });
         return maxInst + 1;
@@ -4972,6 +4973,14 @@ orch_openclaw_sessions: '🦞 OpenClaw',
         const id = 'on' + orch.nid++;
         const inst = data.instance || orchNextInstance(data);
         const node = { id, name: data.name, tag: data.tag||'custom', emoji: data.emoji||'⭐', x: Math.round(x), y: Math.round(y), type: data.type||'expert', temperature: data.temperature||0.5, author: data.author||t('orch_default_author'), content: data.content||'', session_id: data.session_id||'', source: data.source||'', instance: inst };
+        // Preserve external agent extra fields
+        if (data.type === 'external') {
+            node.api_url = data.api_url || '';
+            node.ext_id = data.ext_id || '1';
+            if (data.headers && typeof data.headers === 'object') node.headers = data.headers;
+            if (data.api_key) node.api_key = data.api_key;
+            if (data.model) node.model = data.model;
+        }
         orch.nodes.push(node);
         orchRenderNode(node);
         orchUpdateYaml();
@@ -4994,15 +5003,29 @@ orch_openclaw_sessions: '🦞 OpenClaw',
         const area = document.getElementById('orch-canvas-inner');
         const el = document.createElement('div');
         const isSession = node.type === 'session_agent';
-        el.className = 'orch-node' + (node.type === 'manual' ? ' manual-type' : '') + (isSession ? ' session-type' : '');
+        const isExternal = node.type === 'external';
+        el.className = 'orch-node' + (node.type === 'manual' ? ' manual-type' : '') + (isSession ? ' session-type' : '') + (isExternal ? ' external-type' : '');
         el.id = 'onode-' + node.id;
         el.style.left = node.x + 'px';
         el.style.top = node.y + 'px';
         if (isSession) el.style.borderColor = '#6366f1';
+        if (isExternal) el.style.borderColor = '#2ecc71';
 
         const status = orch.sessionStatuses[node.tag] || orch.sessionStatuses[node.name] || 'idle';
         const instBadge = `<span style="display:inline-block;background:#2563eb;color:#fff;font-size:9px;font-weight:700;border-radius:50%;min-width:16px;height:16px;line-height:16px;text-align:center;margin-left:3px;flex-shrink:0;">${node.instance||1}</span>`;
-        const tagLine = isSession ? `<div class="orch-node-tag" style="color:#6366f1;font-family:monospace;">#${(node.session_id||'').slice(-8)}</div>` : `<div class="orch-node-tag">${escapeHtml(node.tag)}</div>`;
+        let tagLine;
+        if (isSession) {
+            tagLine = `<div class="orch-node-tag" style="color:#6366f1;font-family:monospace;">#${(node.session_id||'').slice(-8)}</div>`;
+        } else if (isExternal) {
+            let extDesc = `🌐 ${node.api_url || 'ext'}`;
+            if (node.headers && typeof node.headers === 'object') {
+                const hdrParts = Object.entries(node.headers).map(([k,v]) => `${k}: ${v}`);
+                if (hdrParts.length) extDesc += '\n' + hdrParts.join('\n');
+            }
+            tagLine = `<div class="orch-node-tag" style="color:#2ecc71;white-space:pre-line;word-break:break-all;font-size:9px;">${escapeHtml(extDesc)}</div>`;
+        } else {
+            tagLine = `<div class="orch-node-tag">${escapeHtml(node.tag)}</div>`;
+        }
         el.innerHTML = `
             <span class="orch-node-emoji">${node.emoji}</span>
             <div style="min-width:0;flex:1;"><div class="orch-node-name" style="display:flex;align-items:center;">${escapeHtml(node.name)}${instBadge}</div>${tagLine}</div>
