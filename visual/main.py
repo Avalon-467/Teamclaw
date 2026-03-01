@@ -614,6 +614,7 @@ def agent_generate_yaml():
                         "You are a YAML schedule generator for the OASIS expert orchestration engine. "
                         "Output ONLY valid YAML, no markdown fences, no explanations, no commentary. "
                         "The YAML must start with 'version: 1' and contain a 'plan:' section."
+                        "you should use mcp tool to set new yaml as workflow and save it layout"
                     ),
                 },
                 {
