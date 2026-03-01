@@ -4868,11 +4868,14 @@ orch_openclaw_sessions: '🦞 OpenClaw',
                 card.draggable = true;
                 const title = s.key || 'Untitled';
                 card.innerHTML = `<span class="orch-emoji">🦞</span><div style="min-width:0;flex:1;"><div class="orch-name">${escapeHtml(title)}</div><div class="orch-tag" style="color:#10b981;font-family:monospace;">${s.channel||'unknown'} · ${s.model||''}</div></div><span class="orch-temp" style="font-size:9px;color:#9ca3af;">${s.contextTokens||0}tk</span>`;
+                // s.key is already in full format like "agent:main:sessionName"
+                const sessionKey = s.key || 'default';
+                const modelStr = sessionKey.startsWith('agent:') ? sessionKey : ('agent:main:' + sessionKey);
                 const nodeData = {
                     type: 'external', name: title, tag: 'openclaw', emoji: '🦞', temperature: 0.7,
                     api_url: openclawUrl, api_key: openclawKey,
-                    model: 'agent:main:' + (s.key || 'default'),
-                    headers: {'x-openclaw-session-key': s.key}, ext_id: s.key || '1',
+                    model: modelStr,
+                    headers: {'x-openclaw-session-key': sessionKey}, ext_id: sessionKey,
                     openclaw_session: s
                 };
                 card.addEventListener('dragstart', e => {
