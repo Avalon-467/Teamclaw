@@ -4860,6 +4860,9 @@ orch_openclaw_sessions: '🦞 OpenClaw',
                 list.innerHTML = '<div style="padding:6px 10px;font-size:10px;color:#d1d5db;text-align:center;">No OpenClaw sessions</div>';
                 return;
             }
+            const defaultUrl = data.llm_base_url || '';
+            const defaultKey = data.llm_api_key || '';
+            const defaultModel = data.llm_model || '';
             for (const s of data.sessions) {
                 const card = document.createElement('div');
                 card.className = 'orch-expert-card';
@@ -4868,7 +4871,9 @@ orch_openclaw_sessions: '🦞 OpenClaw',
                 card.innerHTML = `<span class="orch-emoji">🦞</span><div style="min-width:0;flex:1;"><div class="orch-name">${escapeHtml(title)}</div><div class="orch-tag" style="color:#10b981;font-family:monospace;">${s.channel||'unknown'} · ${s.model||''}</div></div><span class="orch-temp" style="font-size:9px;color:#9ca3af;">${s.contextTokens||0}tk</span>`;
                 const nodeData = {
                     type: 'external', name: title, tag: 'openclaw', emoji: '🦞', temperature: 0.7,
-                    api_url: '', headers: {'x-openclaw-session-key': s.key}, ext_id: s.key || '1',
+                    api_url: defaultUrl, api_key: defaultKey,
+                    model: s.model || defaultModel,
+                    headers: {'x-openclaw-session-key': s.key}, ext_id: s.key || '1',
                     openclaw_session: s
                 };
                 card.addEventListener('dragstart', e => {
@@ -5017,7 +5022,13 @@ orch_openclaw_sessions: '🦞 OpenClaw',
         if (isSession) {
             tagLine = `<div class="orch-node-tag" style="color:#6366f1;font-family:monospace;">#${(node.session_id||'').slice(-8)}</div>`;
         } else if (isExternal) {
-            let extDesc = `🌐 ${node.api_url || 'ext'}`;
+            let extDesc = '';
+            if (node.api_url) {
+                extDesc = `🌐 ${node.api_url}`;
+                if (node.model) extDesc += '\\n📦 ' + node.model;
+            } else {
+                extDesc = '⚠️ Double-click to set URL';
+            }
             if (node.headers && typeof node.headers === 'object') {
                 const hdrParts = Object.entries(node.headers).map(([k,v]) => `${k}: ${v}`);
                 if (hdrParts.length) extDesc += '\\n' + hdrParts.join('\\n');
@@ -5073,7 +5084,7 @@ orch_openclaw_sessions: '🦞 OpenClaw',
             if (!orch.selectedNodes.has(node.id)) { orchClearSelection(); orchSelectNode(node.id); }
             orchShowContextMenu(e.clientX, e.clientY, node);
         });
-        el.addEventListener('dblclick', () => { if (node.type === 'manual') orchShowManualModal(node); });
+        el.addEventListener('dblclick', () => { if (node.type === 'manual') orchShowManualModal(node); else if (node.type === 'external') orchShowExternalModal(node); });
         area.appendChild(el);
     }
 
@@ -5360,6 +5371,52 @@ orch_openclaw_sessions: '🦞 OpenClaw',
             node.content = document.getElementById('orch-man-content').value;
         }
         document.getElementById('orch-manual-modal')?.remove();
+        orchUpdateYaml();
+    }
+
+    // ── External Agent Edit Modal ──
+    function orchShowExternalModal(node) {
+        const overlay = document.createElement('div');
+        overlay.className = 'orch-modal-overlay';
+        overlay.id = 'orch-external-modal';
+        const hdrs = (node.headers && typeof node.headers === 'object') ? JSON.stringify(node.headers, null, 2) : '';
+        overlay.innerHTML = `<div class="orch-modal" style="max-width:480px;">
+            <h3>🌐 ${escapeHtml(node.name)} — External Agent</h3>
+            <label style="font-size:11px;color:#9ca3af;margin-bottom:2px;display:block;">API URL *</label>
+            <input type="text" id="orch-ext-url" value="${escapeHtml(node.api_url||'')}" placeholder="https://api.example.com/v1" style="font-family:monospace;font-size:12px;">
+            <label style="font-size:11px;color:#9ca3af;margin-bottom:2px;margin-top:8px;display:block;">API Key</label>
+            <input type="text" id="orch-ext-key" value="${escapeHtml(node.api_key||'')}" placeholder="sk-xxx (optional)" style="font-family:monospace;font-size:12px;">
+            <label style="font-size:11px;color:#9ca3af;margin-bottom:2px;margin-top:8px;display:block;">Model</label>
+            <input type="text" id="orch-ext-model" value="${escapeHtml(node.model||'')}" placeholder="gpt-4 / deepseek-chat (optional)" style="font-family:monospace;font-size:12px;">
+            <label style="font-size:11px;color:#9ca3af;margin-bottom:2px;margin-top:8px;display:block;">Headers (JSON)</label>
+            <textarea id="orch-ext-headers" placeholder='{"X-Custom": "value"}' style="font-family:monospace;font-size:11px;min-height:60px;">${escapeHtml(hdrs)}</textarea>
+            <div class="orch-modal-btns">
+                <button onclick="document.getElementById('orch-external-modal').remove()">${t('orch_modal_cancel')}</button>
+                <button class="primary" onclick="orchSaveExternal('${node.id}')">${t('orch_modal_save')}</button>
+            </div>
+        </div>`;
+        document.body.appendChild(overlay);
+        overlay.addEventListener('click', e => { if (e.target === overlay) overlay.remove(); });
+    }
+    function orchSaveExternal(nodeId) {
+        const node = orch.nodes.find(n=>n.id===nodeId);
+        if (node) {
+            node.api_url = document.getElementById('orch-ext-url').value.trim();
+            node.api_key = document.getElementById('orch-ext-key').value.trim();
+            node.model = document.getElementById('orch-ext-model').value.trim();
+            const hdrsStr = document.getElementById('orch-ext-headers').value.trim();
+            if (hdrsStr) {
+                try { node.headers = JSON.parse(hdrsStr); } catch(e) { alert('Headers JSON parse error: ' + e.message); return; }
+            } else {
+                node.headers = {};
+            }
+            // Re-render node to update display
+            const el = document.getElementById('onode-' + nodeId);
+            if (el) el.remove();
+            orchRenderNode(node);
+            orchRedrawEdges();
+        }
+        document.getElementById('orch-external-modal')?.remove();
         orchUpdateYaml();
     }
 

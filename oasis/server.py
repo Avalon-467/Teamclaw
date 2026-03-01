@@ -717,7 +717,14 @@ async def list_openclaw_sessions(filter: str = Query("")):
         for s in sessions
     ]
 
-    return {"sessions": result, "available": True}
+    return {
+        "sessions": result,
+        "available": True,
+        # Provide default LLM config so frontend can auto-fill external agent fields
+        "llm_base_url": os.getenv("LLM_BASE_URL", ""),
+        "llm_api_key": os.getenv("LLM_API_KEY", ""),
+        "llm_model": os.getenv("LLM_MODEL", ""),
+    }
 
 
 # --- Entrypoint ---
