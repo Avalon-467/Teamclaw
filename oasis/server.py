@@ -651,7 +651,7 @@ async def delete_user_expert_route(tag: str, user_id: str = Query(...)):
 
 _OPENCLAW_SESSIONS_FILE = os.getenv(
     "OPENCLAW_SESSIONS_FILE",
-    "/projects/.moltbot/agents/main/sessions/sessions.json",
+    "",
 )
 
 
@@ -698,11 +698,15 @@ async def list_openclaw_sessions(filter: str = Query("")):
         for s in sessions
     ]
 
+    # Strip /v1/chat/completions suffix — canvas only needs the base URL
+    raw_url = os.getenv("OPENCLAW_API_URL", "")
+    base_url = raw_url.replace("/v1/chat/completions", "").rstrip("/")
+
     return {
         "sessions": result,
         "available": True,
         # Provide OpenClaw-specific endpoint config for auto-fill when dragging into canvas
-        "openclaw_api_url": os.getenv("OPENCLAW_API_URL", ""),
+        "openclaw_api_url": base_url,
         "openclaw_api_key": os.getenv("OPENCLAW_API_KEY", ""),
     }
 

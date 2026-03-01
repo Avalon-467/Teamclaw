@@ -91,6 +91,7 @@ bash selfskill/scripts/run.sh configure --batch TTS_MODEL=gemini-2.5-flash-previ
 | `TTS_VOICE` | TTS 声音（可选） | — |
 | `OPENCLAW_API_URL` | OpenClaw 后端服务地址（OpenAI 兼容格式） | `http://127.0.0.1:23001/v1/chat/completions` |
 | `OPENCLAW_API_KEY` | OpenClaw 后端服务的 API Key（可选） | — |
+| `OPENCLAW_SESSIONS_FILE` | OpenClaw sessions.json 文件路径（可选，不设置时跳过） | — |
 | `INTERNAL_TOKEN` | 内部通信密钥（自动生成） | 自动 |
 
 ## 端口与服务

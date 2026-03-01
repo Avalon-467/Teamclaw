@@ -4871,7 +4871,7 @@ orch_openclaw_sessions: '🦞 OpenClaw',
                 const nodeData = {
                     type: 'external', name: title, tag: 'openclaw', emoji: '🦞', temperature: 0.7,
                     api_url: openclawUrl, api_key: openclawKey,
-                    model: s.model || '',
+                    model: 'agent:main:' + (s.key || 'default'),
                     headers: {'x-openclaw-session-key': s.key}, ext_id: s.key || '1',
                     openclaw_session: s
                 };
