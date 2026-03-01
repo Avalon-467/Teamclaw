@@ -505,6 +505,12 @@ def _build_llm_prompt(data: dict) -> str:
     repeat_str = "true (repeat plan every round — good for debates/discussions)" if settings.get("repeat", True) else "false (execute plan once — good for task pipelines)"
     bot_session_str = "Stateful bot mode (experts have memory + tools, suitable for complex task execution)" if settings.get("use_bot_session", False) else "Stateless discussion mode (lightweight, no memory, suitable for debates/brainstorming)"
 
+    # ── Generate current rule YAML as reference ──
+    try:
+        current_rule_yaml = layout_to_yaml(data)
+    except Exception:
+        current_rule_yaml = ""
+
     # ── Build the final prompt ──
     prompt = f"""You are an OASIS schedule YAML generator. Based on the user's visual arrangement of expert agents on a canvas, generate an optimal OASIS-compatible YAML schedule.
 
@@ -553,6 +559,18 @@ plan:
 ### Settings:
 - repeat: {repeat_str}
 - Mode: {bot_session_str}
+
+## Current Rule YAML (Auto-generated Reference)
+
+**IMPORTANT**: The following YAML was auto-generated from the canvas layout using a rule-based algorithm.
+It contains the complete configuration for each agent (including api_url, headers, model, etc.),
+but the **agent ordering may NOT be correct** — the algorithm uses simple spatial heuristics (left-to-right, top-to-bottom)
+which may not reflect the user's intended execution order. Please use this as a REFERENCE for agent configurations
+and adjust the ordering based on the canvas relationships and spatial layout analysis above.
+
+```yaml
+{current_rule_yaml if current_rule_yaml else "# (no rule YAML could be generated)"}
+```
 
 ## Your Task
 
