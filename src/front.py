@@ -5020,7 +5020,7 @@ orch_openclaw_sessions: '🦞 OpenClaw',
             let extDesc = `🌐 ${node.api_url || 'ext'}`;
             if (node.headers && typeof node.headers === 'object') {
                 const hdrParts = Object.entries(node.headers).map(([k,v]) => `${k}: ${v}`);
-                if (hdrParts.length) extDesc += '\n' + hdrParts.join('\n');
+                if (hdrParts.length) extDesc += '\\n' + hdrParts.join('\\n');
             }
             tagLine = `<div class="orch-node-tag" style="color:#2ecc71;white-space:pre-line;word-break:break-all;font-size:9px;">${escapeHtml(extDesc)}</div>`;
         } else {

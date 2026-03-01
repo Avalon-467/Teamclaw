@@ -204,9 +204,15 @@ def _node_yaml_name(node: dict, use_bot_session: bool = False) -> str:
         return f"{tag}#ext#{ext_id}"
 
     if node_type == "session_agent":
-        title = node.get("name", "Agent")
+        title = node.get("name", "Agent")[:7]
         sid = node.get("session_id", "")
         if sid:
+            # Oasis sessions already have the format "tag#oasis#id",
+            # so don't prepend title to avoid breaking tag resolution.
+            if "#oasis#" in sid:
+                if inst > 1:
+                    return f"{sid}#{inst}"
+                return sid
             if inst > 1:
                 return f"{title}#{sid}#{inst}"
             return f"{title}#{sid}"
