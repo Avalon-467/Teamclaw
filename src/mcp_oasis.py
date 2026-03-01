@@ -1017,21 +1017,6 @@ def _yaml_to_layout_data(yaml_str: str) -> dict:
     return layout
 
 
-def _save_layout(layout: dict, name: str, user: str) -> str:
-    """Save layout JSON to data/visual_layouts/{user}/{name}.json. Returns file path."""
-    layout_dir = os.path.join(
-        os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-        "data", "visual_layouts", user,
-    )
-    os.makedirs(layout_dir, exist_ok=True)
-    safe_name = "".join(c for c in name if c.isalnum() or c in "-_ ").strip() or "untitled"
-    filepath = os.path.join(layout_dir, f"{safe_name}.json")
-    layout["name"] = safe_name
-    with open(filepath, "w", encoding="utf-8") as f:
-        json.dump(layout, f, ensure_ascii=False, indent=2)
-    return filepath
-
-
 @mcp.tool()
 async def yaml_to_layout(
     username: str = "",
@@ -1039,22 +1024,22 @@ async def yaml_to_layout(
     layout_name: str = "",
 ) -> str:
     """
-    Convert an OASIS YAML schedule to a visual layout and save it.
+    Convert an OASIS YAML schedule to a visual layout (on-the-fly, no file saved).
 
-    The layout can be loaded in the visual orchestrator UI (编排器) for viewing/editing.
-    Accepts either a YAML filename (from saved workflows) or raw YAML content.
+    Layout is generated dynamically from YAML; no separate layout JSON is stored.
+    The visual orchestrator UI loads layouts by reading YAML and converting in real-time.
 
     Args:
         username: (auto-injected) current user identity; do NOT set manually
         yaml_source: Either a saved workflow filename (e.g. "review.yaml") or raw YAML content
-        layout_name: Layout save name. If empty, auto-derived from yaml_source.
+        layout_name: Layout display name. If empty, auto-derived from yaml_source.
 
     Returns:
-        Confirmation with saved layout path and node summary
+        Confirmation with generated layout summary
     """
     effective_user = username or _FALLBACK_USER
 
-    # Use OASIS HTTP API for layout generation so curl can call it too
+    # Use OASIS HTTP API for layout generation
     try:
         async with httpx.AsyncClient(timeout=60) as client:
             payload = {
@@ -1066,8 +1051,14 @@ async def yaml_to_layout(
             if resp.status_code != 200:
                 return f"❌ 转换失败: {resp.text}"
             data = resp.json()
+            layout = data.get("data", {})
+            node_count = len(layout.get("nodes", []))
+            edge_count = len(layout.get("edges", []))
+            group_count = len(layout.get("groups", []))
             return (
-                f"✅ Layout 已生成并保存\n  文件: {data.get('layout')}\n  路径: {data.get('path')}"
+                f"✅ Layout 已生成（实时转换，无需保存文件）\n"
+                f"  名称: {data.get('layout')}\n"
+                f"  节点: {node_count} | 连线: {edge_count} | 分组: {group_count}"
             )
     except httpx.ConnectError:
         return _CONN_ERR

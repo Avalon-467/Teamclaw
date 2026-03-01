@@ -6665,6 +6665,12 @@ except Exception:
     _vis_extract_yaml = None
     _vis_validate_yaml = None
 
+# Import YAML→Layout converter (used for on-the-fly layout generation from saved YAML)
+try:
+    from mcp_oasis import _yaml_to_layout_data as _vis_yaml_to_layout
+except Exception:
+    _vis_yaml_to_layout = None
+
 
 @app.route("/proxy_visual/experts", methods=["GET"])
 def proxy_visual_experts():
@@ -6821,57 +6827,80 @@ def proxy_visual_agent_generate_yaml():
 
 @app.route("/proxy_visual/save-layout", methods=["POST"])
 def proxy_visual_save_layout():
-    """Save canvas layout JSON for the current user."""
+    """Save canvas layout as YAML (no separate layout JSON stored)."""
     user_id = session.get("user_id")
     if not user_id:
         return jsonify({"error": "Not logged in"}), 401
     data = request.get_json()
     if not data:
         return jsonify({"error": "No data"}), 400
-    save_dir = os.path.join(root_dir, "data", "visual_layouts", user_id)
-    os.makedirs(save_dir, exist_ok=True)
+    if not _vis_layout_to_yaml:
+        return jsonify({"error": "Layout-to-YAML converter unavailable"}), 500
     name = data.get("name", "untitled")
     safe = "".join(c for c in name if c.isalnum() or c in "-_ ").strip() or "untitled"
-    import json as _json
-    with open(os.path.join(save_dir, f"{safe}.json"), "w", encoding="utf-8") as f:
-        _json.dump(data, f, ensure_ascii=False, indent=2)
+    try:
+        yaml_out = _vis_layout_to_yaml(data)
+    except Exception as e:
+        return jsonify({"error": f"YAML conversion failed: {e}"}), 500
+    yaml_dir = os.path.join(root_dir, "data", "user_files", user_id, "oasis", "yaml")
+    os.makedirs(yaml_dir, exist_ok=True)
+    fpath = os.path.join(yaml_dir, f"{safe}.yaml")
+    with open(fpath, "w", encoding="utf-8") as f:
+        f.write(f"# Saved from visual orchestrator\n{yaml_out}")
     return jsonify({"saved": True})
 
 
 @app.route("/proxy_visual/load-layouts", methods=["GET"])
 def proxy_visual_load_layouts():
+    """List saved YAML workflows as available layouts."""
     user_id = session.get("user_id")
     if not user_id:
         return jsonify([])
-    save_dir = os.path.join(root_dir, "data", "visual_layouts", user_id)
-    if not os.path.isdir(save_dir):
+    yaml_dir = os.path.join(root_dir, "data", "user_files", user_id, "oasis", "yaml")
+    if not os.path.isdir(yaml_dir):
         return jsonify([])
-    return jsonify([f[:-5] for f in os.listdir(save_dir) if f.endswith(".json")])
+    return jsonify([f.replace('.yaml', '').replace('.yml', '') for f in sorted(os.listdir(yaml_dir)) if f.endswith((".yaml", ".yml"))])
 
 
 @app.route("/proxy_visual/load-layout/<name>", methods=["GET"])
 def proxy_visual_load_layout(name):
+    """Load a layout by reading the YAML file and converting to layout on-the-fly."""
     user_id = session.get("user_id")
     if not user_id:
         return jsonify({"error": "Not logged in"}), 401
+    if not _vis_yaml_to_layout:
+        return jsonify({"error": "YAML-to-layout converter unavailable"}), 500
     safe = "".join(c for c in name if c.isalnum() or c in "-_ ").strip()
-    path = os.path.join(root_dir, "data", "visual_layouts", user_id, f"{safe}.json")
-    if not os.path.isfile(path):
+    yaml_dir = os.path.join(root_dir, "data", "user_files", user_id, "oasis", "yaml")
+    # Try .yaml then .yml
+    fpath = os.path.join(yaml_dir, f"{safe}.yaml")
+    if not os.path.isfile(fpath):
+        fpath = os.path.join(yaml_dir, f"{safe}.yml")
+    if not os.path.isfile(fpath):
         return jsonify({"error": "Not found"}), 404
-    import json as _json
-    with open(path, "r", encoding="utf-8") as f:
-        return jsonify(_json.load(f))
+    with open(fpath, "r", encoding="utf-8") as f:
+        yaml_content = f.read()
+    try:
+        layout = _vis_yaml_to_layout(yaml_content)
+        layout["name"] = safe
+        return jsonify(layout)
+    except Exception as e:
+        return jsonify({"error": f"YAML-to-layout conversion failed: {e}"}), 500
 
 
 @app.route("/proxy_visual/delete-layout/<name>", methods=["DELETE"])
 def proxy_visual_delete_layout(name):
+    """Delete a saved YAML workflow."""
     user_id = session.get("user_id")
     if not user_id:
         return jsonify({"error": "Not logged in"}), 401
     safe = "".join(c for c in name if c.isalnum() or c in "-_ ").strip()
-    path = os.path.join(root_dir, "data", "visual_layouts", user_id, f"{safe}.json")
-    if os.path.isfile(path):
-        os.remove(path)
+    yaml_dir = os.path.join(root_dir, "data", "user_files", user_id, "oasis", "yaml")
+    fpath = os.path.join(yaml_dir, f"{safe}.yaml")
+    if not os.path.isfile(fpath):
+        fpath = os.path.join(yaml_dir, f"{safe}.yml")
+    if os.path.isfile(fpath):
+        os.remove(fpath)
         return jsonify({"deleted": True})
     return jsonify({"error": "Not found"}), 404
 

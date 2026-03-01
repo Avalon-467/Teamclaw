@@ -941,8 +941,7 @@ curl 'http://127.0.0.1:51202/topics/{topic_id}/stream?user_id=xinyuan'
 ```
 
 **保存位置：**
-- Workflows: `data/user_files/{user}/oasis/yaml/{file}.yaml`
-- Layouts: `data/visual_layouts/{user}/{name}.json`
+- Workflows (YAML): `data/user_files/{user}/oasis/yaml/{file}.yaml`（画布布局从 YAML 实时转换，不再单独存储 layout JSON）
 - 用户自定义专家: `data/oasis_user_experts/{user}.json`
 - 讨论记录: `data/oasis_topics/{user}/{topic_id}.json`
 

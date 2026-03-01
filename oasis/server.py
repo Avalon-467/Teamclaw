@@ -53,11 +53,9 @@ _src_path = os.path.join(_project_root, "src")
 if _src_path not in sys.path:
     sys.path.insert(0, _src_path)
 try:
-    from mcp_oasis import _yaml_to_layout_data, _save_layout
+    from mcp_oasis import _yaml_to_layout_data
 except Exception:
-    # Fallback: define minimal wrappers if import fails
     _yaml_to_layout_data = None
-    _save_layout = None
 
 
 # --- In-memory storage ---
@@ -518,12 +516,12 @@ class WorkflowSaveRequest(BaseModel):
     name: str
     schedule_yaml: str
     description: str = ""
-    save_layout: bool = True
+    save_layout: bool = False  # deprecated, layout is now generated on-the-fly from YAML
 
 
 @app.post("/workflows")
 async def save_workflow(req: WorkflowSaveRequest):
-    """Save a YAML workflow under data/user_files/{user}/oasis/yaml/ and optionally generate layout."""
+    """Save a YAML workflow under data/user_files/{user}/oasis/yaml/."""
     user = req.user_id
     name = req.name
     if not name.endswith((".yaml", ".yml")):
@@ -547,20 +545,7 @@ async def save_workflow(req: WorkflowSaveRequest):
     except Exception as e:
         raise HTTPException(500, f"保存失败: {e}")
 
-    result = {"status": "ok", "file": name, "path": filepath}
-
-    if req.save_layout:
-        if _yaml_to_layout_data is None or _save_layout is None:
-            result["layout_warning"] = "layout 功能暂不可用"
-        else:
-            try:
-                layout = _yaml_to_layout_data(req.schedule_yaml)
-                layout_path = _save_layout(layout, name.replace('.yaml',''), user)
-                result["layout"] = os.path.basename(layout_path)
-            except Exception as e:
-                result["layout_warning"] = f"layout 生成失败: {e}"
-
-    return result
+    return {"status": "ok", "file": name, "path": filepath}
 
 
 @app.get("/workflows")
@@ -592,7 +577,7 @@ class LayoutFromYamlRequest(BaseModel):
 
 @app.post("/layouts/from-yaml")
 async def layouts_from_yaml(req: LayoutFromYamlRequest):
-    """Generate a layout from YAML (either saved filename or raw YAML) and save layout JSON."""
+    """Generate a layout from YAML on-the-fly (no file saved; layout is ephemeral)."""
     user = req.user_id
     yaml_src = req.yaml_source
     yaml_content = ""
@@ -609,7 +594,7 @@ async def layouts_from_yaml(req: LayoutFromYamlRequest):
         yaml_content = yaml_src
         source_name = "converted"
 
-    if _yaml_to_layout_data is None or _save_layout is None:
+    if _yaml_to_layout_data is None:
         raise HTTPException(500, "layout 功能不可用（缺少实现）")
 
     try:
@@ -617,13 +602,9 @@ async def layouts_from_yaml(req: LayoutFromYamlRequest):
     except Exception as e:
         raise HTTPException(400, f"YAML 转换失败: {e}")
 
-    save_name = req.layout_name or source_name
-    try:
-        path = _save_layout(layout, save_name, user)
-    except Exception as e:
-        raise HTTPException(500, f"Layout 保存失败: {e}")
-
-    return {"status": "ok", "layout": os.path.basename(path), "path": path}
+    layout_name = req.layout_name or source_name
+    layout["name"] = layout_name
+    return {"status": "ok", "layout": layout_name, "data": layout}
 
 
 class UserExpertRequest(BaseModel):

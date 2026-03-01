@@ -760,50 +760,64 @@ def validate_yaml():
 
 @app.route("/api/save-layout", methods=["POST"])
 def save_layout():
-    """Save the current canvas layout to a JSON file."""
+    """Save the current canvas layout as YAML (no separate layout JSON stored)."""
     data = request.get_json()
     if not data:
         return jsonify({"error": "No data provided"}), 400
 
-    save_dir = os.path.join(_PROJECT_ROOT, "data", "visual_layouts")
-    os.makedirs(save_dir, exist_ok=True)
-
     name = data.get("name", "untitled")
     safe_name = "".join(c for c in name if c.isalnum() or c in "-_ ").strip() or "untitled"
-    path = os.path.join(save_dir, f"{safe_name}.json")
 
-    with open(path, "w", encoding="utf-8") as f:
-        json.dump(data, f, ensure_ascii=False, indent=2)
+    try:
+        yaml_output = layout_to_yaml(data)
+    except Exception as e:
+        return jsonify({"error": f"YAML conversion failed: {e}"}), 500
 
-    return jsonify({"saved": True, "path": path})
+    yaml_dir = os.path.join(_PROJECT_ROOT, "data", "user_files", "default", "oasis", "yaml")
+    os.makedirs(yaml_dir, exist_ok=True)
+    fpath = os.path.join(yaml_dir, f"{safe_name}.yaml")
+    with open(fpath, "w", encoding="utf-8") as f:
+        f.write(f"# Saved from visual orchestrator\n{yaml_output}")
+
+    return jsonify({"saved": True, "path": fpath})
 
 
 @app.route("/api/load-layouts", methods=["GET"])
 def load_layouts():
-    """List all saved layouts."""
-    save_dir = os.path.join(_PROJECT_ROOT, "data", "visual_layouts")
-    if not os.path.isdir(save_dir):
+    """List all saved YAML workflows as available layouts."""
+    yaml_dir = os.path.join(_PROJECT_ROOT, "data", "user_files", "default", "oasis", "yaml")
+    if not os.path.isdir(yaml_dir):
         return jsonify([])
 
     layouts = []
-    for fname in os.listdir(save_dir):
-        if fname.endswith(".json"):
-            layouts.append(fname[:-5])
+    for fname in sorted(os.listdir(yaml_dir)):
+        if fname.endswith((".yaml", ".yml")):
+            layouts.append(fname.replace('.yaml', '').replace('.yml', ''))
     return jsonify(layouts)
 
 
 @app.route("/api/load-layout/<name>", methods=["GET"])
 def load_layout(name: str):
-    """Load a specific saved layout."""
-    safe_name = "".join(c for c in name if c.isalnum() or c in "-_ ").strip()
-    path = os.path.join(_PROJECT_ROOT, "data", "visual_layouts", f"{safe_name}.json")
+    """Load a layout by reading the YAML file and converting to layout on-the-fly."""
+    from mcp_oasis import _yaml_to_layout_data
 
-    if not os.path.isfile(path):
+    safe_name = "".join(c for c in name if c.isalnum() or c in "-_ ").strip()
+    yaml_dir = os.path.join(_PROJECT_ROOT, "data", "user_files", "default", "oasis", "yaml")
+    fpath = os.path.join(yaml_dir, f"{safe_name}.yaml")
+    if not os.path.isfile(fpath):
+        fpath = os.path.join(yaml_dir, f"{safe_name}.yml")
+    if not os.path.isfile(fpath):
         return jsonify({"error": "Layout not found"}), 404
 
-    with open(path, "r", encoding="utf-8") as f:
-        data = json.load(f)
-    return jsonify(data)
+    with open(fpath, "r", encoding="utf-8") as f:
+        yaml_content = f.read()
+
+    try:
+        layout = _yaml_to_layout_data(yaml_content)
+        layout["name"] = safe_name
+        return jsonify(layout)
+    except Exception as e:
+        return jsonify({"error": f"YAML-to-layout conversion failed: {e}"}), 500
 
 
 if __name__ == "__main__":
