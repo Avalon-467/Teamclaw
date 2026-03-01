@@ -46,6 +46,8 @@ body {
 .top-bar button.primary:hover { background: #5a6fd6; }
 .top-bar button.danger { border-color: #e74c3c; color: #e74c3c; }
 .top-bar button.danger:hover { background: #e74c3c22; }
+#btn-lang { background: #2a1a4a; border-color: #764ba2; color: #d0b0ff; font-weight: 600; min-width: 72px; }
+#btn-lang:hover { background: #3a2a5a; border-color: #9060d0; }
 
 /* ── Main Layout ── */
 .main-container {

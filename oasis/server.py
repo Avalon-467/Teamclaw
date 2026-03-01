@@ -664,6 +664,62 @@ async def delete_user_expert_route(tag: str, user_id: str = Query(...)):
         raise HTTPException(status_code=400, detail=str(e))
 
 
+# ------------------------------------------------------------------
+# OpenClaw session discovery
+# ------------------------------------------------------------------
+
+_OPENCLAW_SESSIONS_FILE = os.getenv(
+    "OPENCLAW_SESSIONS_FILE",
+    "/projects/.moltbot/agents/main/sessions/sessions.json",
+)
+
+
+@app.get("/sessions/openclaw")
+async def list_openclaw_sessions(filter: str = Query("")):
+    """List OpenClaw sessions from sessions.json file."""
+    if not os.path.exists(_OPENCLAW_SESSIONS_FILE):
+        return {"sessions": [], "available": False, "message": "OpenClaw sessions file not found"}
+
+    try:
+        with open(_OPENCLAW_SESSIONS_FILE, "r", encoding="utf-8") as f:
+            data = json.load(f)
+    except Exception as e:
+        raise HTTPException(500, f"Failed to read OpenClaw sessions: {e}")
+
+    # Support both dict (key->session) and list formats
+    sessions = []
+    if isinstance(data, dict):
+        for k, v in data.items():
+            if isinstance(v, dict):
+                v.setdefault("key", k)
+                sessions.append(v)
+    elif isinstance(data, list):
+        sessions = data
+
+    # Keyword filter
+    if filter:
+        sessions = [s for s in sessions if filter.lower() in s.get("key", "").lower()]
+
+    # Sort by updatedAt descending
+    sessions.sort(key=lambda s: s.get("updatedAt", 0), reverse=True)
+
+    result = [
+        {
+            "key": s.get("key"),
+            "sessionId": s.get("sessionId"),
+            "kind": s.get("kind"),
+            "channel": s.get("channel"),
+            "model": s.get("model"),
+            "updatedAt": s.get("updatedAt"),
+            "contextTokens": s.get("contextTokens", 0),
+            "totalTokens": s.get("totalTokens", 0),
+        }
+        for s in sessions
+    ]
+
+    return {"sessions": result, "available": True}
+
+
 # --- Entrypoint ---
 if __name__ == "__main__":
     port = int(os.getenv("PORT_OASIS", "51202"))

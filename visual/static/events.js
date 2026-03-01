@@ -213,7 +213,7 @@ function setupCanvasEvents() {
 // ── Top Bar Events ──
 function setupTopBarEvents() {
     document.getElementById('btn-clear').addEventListener('click', () => {
-        if (confirm('Clear all nodes, edges, and groups?')) {
+        if (confirm(i18n('confirm_clear'))) {
             clearCanvas();
         }
     });
@@ -222,7 +222,7 @@ function setupTopBarEvents() {
         const yamlText = document.getElementById('yaml-content').textContent;
         try {
             await navigator.clipboard.writeText(yamlText);
-            showToast('YAML copied to clipboard! ✅');
+            showToast(i18n('toast_yaml_copied'));
         } catch {
             // Fallback
             const ta = document.createElement('textarea');
@@ -231,12 +231,12 @@ function setupTopBarEvents() {
             ta.select();
             document.execCommand('copy');
             document.body.removeChild(ta);
-            showToast('YAML copied! ✅');
+            showToast(i18n('toast_yaml_copied'));
         }
     });
 
     document.getElementById('btn-save').addEventListener('click', async () => {
-        const name = prompt('Layout name:', 'my-layout');
+        const name = prompt(i18n('prompt_layout_name'), 'my-layout');
         if (!name) return;
 
         const payload = getLayoutData();
@@ -249,10 +249,10 @@ function setupTopBarEvents() {
                 body: JSON.stringify(payload),
             });
             const result = await resp.json();
-            if (result.saved) showToast('Layout saved! 💾');
-            else showToast('Save failed: ' + result.error);
+            if (result.saved) showToast(i18n('toast_layout_saved'));
+            else showToast(i18n('toast_save_failed') + result.error);
         } catch (e) {
-            showToast('Save failed: ' + e.message);
+            showToast(i18n('toast_save_failed') + e.message);
         }
     });
 
@@ -261,22 +261,22 @@ function setupTopBarEvents() {
             const resp = await fetch('/api/load-layouts');
             const layouts = await resp.json();
             if (layouts.length === 0) {
-                showToast('No saved layouts found');
+                showToast(i18n('toast_no_layouts'));
                 return;
             }
-            const name = prompt('Load layout:\n\nAvailable: ' + layouts.join(', '));
+            const name = prompt(i18n('prompt_load_layout') + layouts.join(', '));
             if (!name) return;
 
             const resp2 = await fetch('/api/load-layout/' + encodeURIComponent(name));
             if (!resp2.ok) {
-                showToast('Layout not found');
+                showToast(i18n('toast_no_layouts'));
                 return;
             }
             const data = await resp2.json();
             loadLayoutData(data);
-            showToast('Layout loaded! 📂');
+            showToast(i18n('toast_layout_loaded'));
         } catch (e) {
-            showToast('Load failed: ' + e.message);
+            showToast(i18n('toast_load_failed') + e.message);
         }
     });
 
@@ -325,23 +325,23 @@ function showContextMenu(x, y) {
     const items = [];
 
     if (hasSelection && state.selectedNodes.size >= 2) {
-        items.push({ icon: '🔀', label: 'Group as Parallel', action: () => groupSelectedNodes('parallel') });
-        items.push({ icon: '👥', label: 'Group as All Experts', action: () => groupSelectedNodes('all') });
-        items.push({ icon: '🔗', label: 'Chain Selected (Workflow)', action: () => chainSelectedNodes() });
+        items.push({ icon: '🔀', label: i18n('ctx_group_parallel'), action: () => groupSelectedNodes('parallel') });
+        items.push({ icon: '👥', label: i18n('ctx_group_all'), action: () => groupSelectedNodes('all') });
+        items.push({ icon: '🔗', label: i18n('ctx_chain'), action: () => chainSelectedNodes() });
         items.push({ divider: true });
     }
 
     if (hasSelection) {
-        items.push({ icon: '🗑️', label: 'Delete Selected', action: () => {
+        items.push({ icon: '🗑️', label: i18n('ctx_delete'), action: () => {
             [...state.selectedNodes].forEach(nid => removeNode(nid));
         }});
         items.push({ divider: true });
     }
 
-    items.push({ icon: '📝', label: 'Add Manual Injection', action: () => {
+    items.push({ icon: '📝', label: i18n('ctx_add_manual'), action: () => {
         addNodeToCenter({
             type: 'manual',
-            name: 'Manual Injection',
+            name: i18n('manual_injection'),
             tag: 'manual',
             emoji: '📝',
             author: '主持人',
@@ -349,12 +349,12 @@ function showContextMenu(x, y) {
         });
     }});
 
-    items.push({ icon: '⭐', label: 'Add Custom Expert', action: () => {
+    items.push({ icon: '⭐', label: i18n('ctx_add_custom'), action: () => {
         showCustomExpertModal(x, y);
     }});
 
     items.push({ divider: true });
-    items.push({ icon: '🧹', label: 'Clear All', action: clearCanvas });
+    items.push({ icon: '🧹', label: i18n('ctx_clear_all'), action: clearCanvas });
 
     items.forEach(item => {
         if (item.divider) {
@@ -392,7 +392,7 @@ function hideContextMenu() {
 // ── Group Selected Nodes ──
 function groupSelectedNodes(type) {
     if (state.selectedNodes.size < 2) {
-        showToast('Select at least 2 nodes to group');
+        showToast(i18n('toast_select_2'));
         return;
     }
 
@@ -419,7 +419,7 @@ function groupSelectedNodes(type) {
 // ── Chain Selected Nodes (create sequential edges) ──
 function chainSelectedNodes() {
     if (state.selectedNodes.size < 2) {
-        showToast('Select at least 2 nodes to chain');
+        showToast(i18n('toast_select_2_chain'));
         return;
     }
 
@@ -434,7 +434,7 @@ function chainSelectedNodes() {
         addEdge(sorted[i].id, sorted[i + 1].id);
     }
     clearSelection();
-    showToast('Nodes chained as workflow! 🔗');
+    showToast(i18n('toast_chained'));
 }
 
 // ── Auto-Arrange Nodes ──
@@ -465,7 +465,7 @@ function autoArrangeNodes() {
     state.groups.forEach(g => updateGroupBounds(g));
     renderAllEdges();
     updateYamlOutput();
-    showToast('Nodes arranged in circle! 🔄');
+    showToast(i18n('toast_arranged'));
 }
 
 // ── YAML Output ──
@@ -492,7 +492,7 @@ async function updateYamlOutput() {
 async function generateLLMPrompt() {
     const data = getLayoutData();
     if (state.nodes.length === 0) {
-        showToast('Add some nodes first! 🎯');
+        showToast(i18n('toast_no_nodes'));
         return;
     }
 
@@ -502,9 +502,9 @@ async function generateLLMPrompt() {
     const authStatusEl = document.getElementById('auth-status');
 
     if (!username || !password) {
-        showToast('Please enter username and password first! 🔑');
+        showToast(i18n('toast_enter_creds'));
         if (authStatusEl) {
-            authStatusEl.textContent = '❌ Missing credentials — please fill in username and password';
+            authStatusEl.textContent = i18n('auth_missing');
             authStatusEl.style.color = '#e06060';
         }
         return;
@@ -517,12 +517,12 @@ async function generateLLMPrompt() {
     const yamlEl = document.getElementById('agent-yaml-content');
     const statusEl = document.getElementById('agent-status');
 
-    promptEl.textContent = '⏳ Building prompt and sending to Main Agent...';
-    if (yamlEl) yamlEl.textContent = '⏳ Waiting for agent response...';
-    if (statusEl) statusEl.textContent = '🔄 Authenticating as ' + username + ' and communicating with Main Agent...';
+    promptEl.textContent = i18n('status_building');
+    if (yamlEl) yamlEl.textContent = i18n('status_waiting');
+    if (statusEl) statusEl.textContent = i18n('status_loading', {user: username});
     if (statusEl) statusEl.className = 'agent-status loading';
     if (authStatusEl) {
-        authStatusEl.textContent = '🔄 Authenticating...';
+        authStatusEl.textContent = i18n('auth_authenticating');
         authStatusEl.style.color = '#60a0e0';
     }
 
@@ -545,23 +545,23 @@ async function generateLLMPrompt() {
             const isAuthError = result.error.includes('401') || result.error.includes('认证') || result.error.includes('auth');
             if (statusEl) {
                 statusEl.textContent = isAuthError
-                    ? '🔒 Authentication failed — check username/password'
-                    : '⚠️ Agent unavailable — prompt generated for manual use';
+                    ? i18n('status_auth_fail')
+                    : i18n('status_agent_unavail');
                 statusEl.className = 'agent-status error';
             }
             if (authStatusEl) {
                 authStatusEl.textContent = isAuthError
-                    ? '❌ Authentication failed — wrong username or password'
-                    : '⚠️ Agent connection issue';
+                    ? i18n('auth_failed')
+                    : i18n('auth_conn_issue');
                 authStatusEl.style.color = '#e06060';
             }
-            showToast(isAuthError ? 'Auth failed — check credentials 🔒' : 'Agent not available — prompt ready for manual use 📋');
+            showToast(isAuthError ? i18n('toast_auth_failed') : i18n('toast_agent_unavail'));
             return;
         }
 
         // Auth succeeded
         if (authStatusEl) {
-            authStatusEl.textContent = '✅ Authenticated as ' + username;
+            authStatusEl.textContent = i18n('auth_success') + ' ' + username;
             authStatusEl.style.color = '#60e080';
         }
 
@@ -574,22 +574,22 @@ async function generateLLMPrompt() {
                 const v = result.validation;
                 if (v.valid) {
                     if (statusEl) {
-                        statusEl.textContent = `✅ Valid YAML — ${v.steps} steps [${v.step_types.join(', ')}] | repeat: ${v.repeat}`;
+                        statusEl.textContent = i18n('status_valid_yaml', {steps: v.steps, types: v.step_types.join(', '), repeat: v.repeat});
                         statusEl.className = 'agent-status success';
                     }
-                    showToast('Agent generated valid YAML! 🤖✅');
+                    showToast(i18n('toast_agent_valid'));
                 } else {
                     if (statusEl) {
-                        statusEl.textContent = `⚠️ YAML validation issue: ${v.error}`;
+                        statusEl.textContent = i18n('status_yaml_warn', {error: v.error});
                         statusEl.className = 'agent-status warning';
                     }
-                    showToast('Agent generated YAML (with warnings) 🤖⚠️');
+                    showToast(i18n('toast_agent_warn'));
                 }
             }
         } else {
             if (yamlEl) yamlEl.textContent = '# Agent returned no YAML';
             if (statusEl) {
-                statusEl.textContent = '❌ No YAML in agent response';
+                statusEl.textContent = i18n('status_no_yaml');
                 statusEl.className = 'agent-status error';
             }
         }
@@ -597,7 +597,7 @@ async function generateLLMPrompt() {
         promptEl.textContent = '# Failed to communicate with backend: ' + e.message;
         if (yamlEl) yamlEl.textContent = '# Error';
         if (statusEl) {
-            statusEl.textContent = '❌ Connection error';
+            statusEl.textContent = i18n('status_conn_error');
             statusEl.className = 'agent-status error';
         }
     }
@@ -607,12 +607,12 @@ async function generateLLMPrompt() {
 async function copyAgentYaml() {
     const yamlText = document.getElementById('agent-yaml-content')?.textContent || '';
     if (!yamlText || yamlText.startsWith('⏳') || yamlText.startsWith('#')) {
-        showToast('Generate YAML from Agent first! 🤖');
+        showToast(i18n('toast_gen_first'));
         return;
     }
     try {
         await navigator.clipboard.writeText(yamlText);
-        showToast('Agent YAML copied! 🤖✅');
+        showToast(i18n('toast_agent_yaml_copied'));
     } catch {
         const ta = document.createElement('textarea');
         ta.value = yamlText;
@@ -620,7 +620,7 @@ async function copyAgentYaml() {
         ta.select();
         document.execCommand('copy');
         document.body.removeChild(ta);
-        showToast('Agent YAML copied! 🤖✅');
+        showToast(i18n('toast_agent_yaml_copied'));
     }
 }
 
@@ -628,12 +628,12 @@ async function copyAgentYaml() {
 async function copyLLMPrompt() {
     const promptText = document.getElementById('llm-prompt-content').textContent;
     if (!promptText || promptText.startsWith('⏳') || promptText.startsWith('#')) {
-        showToast('Generate a prompt first! 🤖');
+        showToast(i18n('toast_prompt_first'));
         return;
     }
     try {
         await navigator.clipboard.writeText(promptText);
-        showToast('LLM Prompt copied! 🤖✅');
+        showToast(i18n('toast_prompt_copied'));
     } catch {
         const ta = document.createElement('textarea');
         ta.value = promptText;
@@ -641,7 +641,7 @@ async function copyLLMPrompt() {
         ta.select();
         document.execCommand('copy');
         document.body.removeChild(ta);
-        showToast('LLM Prompt copied! 🤖✅');
+        showToast(i18n('toast_prompt_copied'));
     }
 }
 
@@ -720,7 +720,7 @@ function clearCanvas() {
 function updateStatusBar() {
     const bar = document.getElementById('status-bar');
     if (bar) {
-        bar.textContent = `Nodes: ${state.nodes.length} | Edges: ${state.edges.length} | Groups: ${state.groups.length} | Selected: ${state.selectedNodes.size}`;
+        bar.textContent = `${i18n('status_nodes')}: ${state.nodes.length} | ${i18n('status_edges')}: ${state.edges.length} | ${i18n('status_groups')}: ${state.groups.length} | ${i18n('status_selected')}: ${state.selectedNodes.size}`;
     }
 }
 
@@ -730,14 +730,14 @@ function showManualEditModal(node) {
     overlay.className = 'modal-overlay';
     overlay.innerHTML = `
         <div class="modal">
-            <h3>📝 Edit Manual Injection</h3>
-            <label style="font-size:13px;color:#aaa;margin-bottom:4px;display:block;">Author:</label>
+            <h3>${i18n('modal_edit_manual')}</h3>
+            <label style="font-size:13px;color:#aaa;margin-bottom:4px;display:block;">${i18n('modal_author')}</label>
             <input type="text" id="modal-author" value="${node.author || '主持人'}">
-            <label style="font-size:13px;color:#aaa;margin-bottom:4px;display:block;">Content:</label>
+            <label style="font-size:13px;color:#aaa;margin-bottom:4px;display:block;">${i18n('modal_content')}</label>
             <textarea id="modal-content">${node.content || ''}</textarea>
             <div class="modal-buttons">
-                <button id="modal-cancel">Cancel</button>
-                <button id="modal-save" class="primary">Save</button>
+                <button id="modal-cancel">${i18n('modal_cancel')}</button>
+                <button id="modal-save" class="primary">${i18n('modal_save')}</button>
             </div>
         </div>
     `;
@@ -747,7 +747,7 @@ function showManualEditModal(node) {
     overlay.querySelector('#modal-save').addEventListener('click', () => {
         node.author = document.getElementById('modal-author').value;
         node.content = document.getElementById('modal-content').value;
-        node.name = 'Manual: ' + node.author;
+        node.name = i18n('manual_injection') + ': ' + node.author;
         const el = document.getElementById('node-' + node.id);
         if (el) el.querySelector('.node-name').textContent = node.name;
         overlay.remove();
@@ -762,18 +762,18 @@ function showCustomExpertModal(x, y) {
     overlay.className = 'modal-overlay';
     overlay.innerHTML = `
         <div class="modal">
-            <h3>⭐ Add Custom Expert</h3>
-            <label style="font-size:13px;color:#aaa;margin-bottom:4px;display:block;">Name:</label>
-            <input type="text" id="modal-expert-name" placeholder="e.g. AI Researcher">
-            <label style="font-size:13px;color:#aaa;margin-bottom:4px;display:block;">Tag:</label>
-            <input type="text" id="modal-expert-tag" placeholder="e.g. ai_researcher">
-            <label style="font-size:13px;color:#aaa;margin-bottom:4px;display:block;">Persona:</label>
-            <textarea id="modal-expert-persona" placeholder="Describe this expert's role and expertise..."></textarea>
-            <label style="font-size:13px;color:#aaa;margin-bottom:4px;display:block;">Temperature (0.0 - 1.0):</label>
+            <h3>${i18n('modal_add_custom')}</h3>
+            <label style="font-size:13px;color:#aaa;margin-bottom:4px;display:block;">${i18n('modal_name')}</label>
+            <input type="text" id="modal-expert-name" placeholder="${i18n('modal_ph_name')}">
+            <label style="font-size:13px;color:#aaa;margin-bottom:4px;display:block;">${i18n('modal_tag')}</label>
+            <input type="text" id="modal-expert-tag" placeholder="${i18n('modal_ph_tag')}">
+            <label style="font-size:13px;color:#aaa;margin-bottom:4px;display:block;">${i18n('modal_persona')}</label>
+            <textarea id="modal-expert-persona" placeholder="${i18n('modal_ph_persona')}"></textarea>
+            <label style="font-size:13px;color:#aaa;margin-bottom:4px;display:block;">${i18n('modal_temperature')}</label>
             <input type="text" id="modal-expert-temp" value="0.7">
             <div class="modal-buttons">
-                <button id="modal-cancel">Cancel</button>
-                <button id="modal-save" class="primary">Add</button>
+                <button id="modal-cancel">${i18n('modal_cancel')}</button>
+                <button id="modal-save" class="primary">${i18n('modal_add')}</button>
             </div>
         </div>
     `;
@@ -786,7 +786,7 @@ function showCustomExpertModal(x, y) {
         const persona = document.getElementById('modal-expert-persona').value.trim();
         const temp = parseFloat(document.getElementById('modal-expert-temp').value) || 0.7;
 
-        if (!name) { showToast('Name is required'); return; }
+        if (!name) { showToast(i18n('toast_name_required')); return; }
 
         addNodeToCenter({
             type: 'expert',
