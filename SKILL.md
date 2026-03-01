@@ -6,6 +6,8 @@ description:
 
 # Teamclaw — Agent 子系统 Skill
 
+** 如果你是openclaw agent，请将自己作为Teamclaw的外部agent**
+
 ## 简介
 
 Teamclaw 是一个多功能 AI Agent 服务，提供：
@@ -87,6 +89,8 @@ bash selfskill/scripts/run.sh configure --batch TTS_MODEL=gemini-2.5-flash-previ
 | `PORT_BARK` | Bark 推送端口 | `58010` |
 | `TTS_MODEL` | TTS 模型（可选） | — |
 | `TTS_VOICE` | TTS 声音（可选） | — |
+| `OPENCLAW_API_URL` | OpenClaw 后端服务地址（OpenAI 兼容格式） | `http://127.0.0.1:23001/v1/chat/completions` |
+| `OPENCLAW_API_KEY` | OpenClaw 后端服务的 API Key（可选） | — |
 | `INTERNAL_TOKEN` | 内部通信密钥（自动生成） | 自动 |
 
 ## 端口与服务
@@ -153,7 +157,7 @@ OASIS 支持 **四种类型的智能体**，通过 `schedule_yaml` 中专家的 
 | 1 | **Direct LLM** | `tag#temp#N` | `ExpertAgent` | 无状态单次 LLM 调用。每轮读取所有帖子 → 一次 LLM 调用 → 发布 + 投票。无跨轮记忆。`tag` 映射到预设专家名/人设，`N` 是实例编号（同一专家可多副本）。 |
 | 2 | **Oasis Session** | `tag#oasis#id` | `SessionExpert` (oasis) | OASIS 管理的有状态 bot session。`tag` 映射到预设专家，首轮注入人设为 system prompt。Bot 跨轮保留对话记忆（增量上下文）。`id` 可为任意字符串，新 ID 首次使用时自动创建 session。 |
 | 3 | **Regular Agent** | `Title#session_id` | `SessionExpert` (regular) | 连接到已有的 agent session（如 `助手#default`、`Coder#my-project`）。不注入身份——session 自身的 system prompt 定义 agent。适合将个人 bot session 带入讨论。 |
-| 4 | **External API** | `tag#ext#id` | `ExternalExpert` | 直接调用任意 OpenAI 兼容外部 API（DeepSeek、GPT-4、Ollama、另一个 mini_timebot 实例等）。不经过本地 agent。外部服务假定有状态。支持通过 YAML `headers` 字段自定义请求头。 |
+| 4 | **External API** | `tag#ext#id` | `ExternalExpert` | 直接调用任意 OpenAI 兼容外部 API（DeepSeek、GPT-4、Ollama、另一个 mini_timebot 实例等）。不经过本地 agent。外部服务假定有状态。支持通过 YAML `headers` 字段自定义请求头。 | 经典用途：和openclaw agent连接
 
 ### Session ID 格式
 
@@ -161,7 +165,7 @@ OASIS 支持 **四种类型的智能体**，通过 `schedule_yaml` 中专家的 
 tag#temp#N           → ExpertAgent   (无状态, 直连LLM)
 tag#oasis#<id>       → SessionExpert (oasis管理, 有状态bot)
 Title#session_id     → SessionExpert (普通agent session)
-tag#ext#<id>         → ExternalExpert (外部API)
+tag#ext#<id>         → ExternalExpert (外部API，如openclaw agent)
 ```
 
 **特殊后缀：**
@@ -195,6 +199,11 @@ plan:
   # Type 4: External API（DeepSeek, GPT-4等）
   - expert: "deepseek#ext#ds1"
 
+  # Type 4: OpenClaw External API（本地 Agent 服务）
+  - expert: "coder#ext#oc1"
+    api_url: "http://127.0.0.1:23001/v1/chat/completions"
+    model: "agent:main:test1"    # agent:<agent_name>:<session>，session 不存在时自动新建
+
   # 并行执行
   - parallel:
       - expert: "creative#temp#1"
@@ -221,7 +230,6 @@ plan:
     api_key: "sk-xxx"                             # 可选：API key → Authorization: Bearer <key>
     model: "deepseek-chat"                        # 可选：模型名，默认 gpt-3.5-turbo
     headers:                                      # 可选：自定义 HTTP 请求头（key-value 字典）
-      x-openclaw-session-key: "my-session-id"
       X-Custom-Header: "value"
 ```
 
@@ -234,8 +242,30 @@ plan:
 | `model` | ❌ | 默认 `gpt-3.5-turbo` |
 | `headers` | ❌ | 任意 key-value 字典，合并到 HTTP 请求头 |
 
-**`x-openclaw-session-key` 的用途：**
-当外部服务是 OpenClaw 时，该 header 告诉服务端使用哪个 session，从而实现**跨轮对话记忆**。前端编排面板拖拽 OpenClaw session 时会自动设置此 header。
+**OpenClaw 专属配置：**
+
+OpenClaw 是一个本地运行的 OpenAI 兼容 Agent 服务。在 `.env` 中设置好 OpenClaw 专属 endpoint 后，前端编排面板中拖入 OpenClaw 专家时会**自动填入** `api_url` 和 `api_key`，无需手动输入：
+
+```bash
+# 配置 OpenClaw endpoint（默认地址如下）
+bash selfskill/scripts/run.sh configure --batch \
+  OPENCLAW_API_URL=http://127.0.0.1:23001/v1/chat/completions \
+  OPENCLAW_API_KEY=your-openclaw-key-if-needed
+```
+
+**OpenClaw 的 `model` 字段格式：**
+
+```
+agent:<agent_name>:<session_name>
+```
+
+- `agent_name`：OpenClaw 中的 agent 名称，通常为 `main`
+- `session_name`：会话名称，如 `test1`、`default` 等。**可以填入不存在的 session 名来自动新建**
+
+示例：
+- `agent:main:default` — 使用 main agent 的 default session
+- `agent:main:test1` — 使用 main agent 的 test1 session（不存在则新建）
+- `agent:main:code-review` — 使用 main agent 的 code-review session
 
 **请求头组装逻辑：**
 最终发出的请求头 = `Content-Type: application/json` + `Authorization: Bearer <api_key>`（如有） + YAML `headers` 中自定义的所有键值对。
@@ -391,6 +421,7 @@ bash selfskill/scripts/run.sh configure --batch \
   PORT_OASIS=51202 \
   PORT_FRONTEND=51209 \
   PORT_BARK=58010 \
+  OPENCLAW_API_URL=http://127.0.0.1:23001/v1/chat/completions \
   OPENAI_STANDARD_MODE=false
 bash selfskill/scripts/run.sh add-user system <your-password>
 ```
