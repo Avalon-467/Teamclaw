@@ -698,7 +698,8 @@ async def list_openclaw_sessions(filter: str = Query("")):
         for s in sessions
     ]
 
-    # Strip /v1/chat/completions suffix — canvas only needs the base URL
+    # Strip /v1/chat/completions suffix — .env stores the full URL,
+    # but canvas / YAML only needs the base URL (engine auto-appends the path)
     raw_url = os.getenv("OPENCLAW_API_URL", "")
     base_url = raw_url.replace("/v1/chat/completions", "").rstrip("/")
 

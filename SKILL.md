@@ -89,9 +89,9 @@ bash selfskill/scripts/run.sh configure --batch TTS_MODEL=gemini-2.5-flash-previ
 | `PORT_BARK` | Bark 推送端口 | `58010` |
 | `TTS_MODEL` | TTS 模型（可选） | — |
 | `TTS_VOICE` | TTS 声音（可选） | — |
-| `OPENCLAW_API_URL` | OpenClaw 后端服务地址（OpenAI 兼容格式） | `http://127.0.0.1:23001/v1/chat/completions` |
+| `OPENCLAW_API_URL` | OpenClaw 后端服务地址（完整路径，含 `/v1/chat/completions`） | `http://127.0.0.1:18789/v1/chat/completions` |
 | `OPENCLAW_API_KEY` | OpenClaw 后端服务的 API Key（可选） | — |
-| `OPENCLAW_SESSIONS_FILE` | OpenClaw sessions.json 文件路径（可选，不设置时跳过） | — |
+| `OPENCLAW_SESSIONS_FILE` | OpenClaw sessions.json 文件的绝对路径（**使用 OpenClaw 时必须配置**） | `/projects/.moltbot/agents/main/sessions/sessions.json` |
 | `INTERNAL_TOKEN` | 内部通信密钥（自动生成） | 自动 |
 
 ## 端口与服务
@@ -248,12 +248,17 @@ plan:
 OpenClaw 是一个本地运行的 OpenAI 兼容 Agent 服务。在 `.env` 中设置好 OpenClaw 专属 endpoint 后，前端编排面板中拖入 OpenClaw 专家时会**自动填入** `api_url` 和 `api_key`，无需手动输入：
 
 ```bash
-# 配置 OpenClaw endpoint（默认地址如下）
+# 配置 OpenClaw endpoint 和 sessions 文件路径
 bash selfskill/scripts/run.sh configure --batch \
+  OPENCLAW_SESSIONS_FILE=/projects/.moltbot/agents/main/sessions/sessions.json \
   OPENCLAW_API_URL=http://127.0.0.1:18789/v1/chat/completions \
   OPENCLAW_API_KEY=your-openclaw-key-if-needed
 ```
-注意在yaml文件的url只需要http://127.0.0.1:18789
+
+> **⚠️ 注意：**
+> - `OPENCLAW_SESSIONS_FILE` 是使用 OpenClaw 功能的**前提条件**，必须指向 OpenClaw 的 `sessions.json` 文件绝对路径。未配置时前端编排面板不会加载 OpenClaw sessions。
+> - `OPENCLAW_API_URL` 应填写**完整路径**（含 `/v1/chat/completions`），系统会自动剥离后缀生成 base URL 填入 YAML。YAML 中的 `api_url` 字段只需要 base URL（如 `http://127.0.0.1:18789`），引擎会自动补全路径。
+> - 如果你的 OpenClaw 服务运行在非默认端口，请务必修改这些配置。
 
 **OpenClaw 的 `model` 字段格式：**
 
@@ -424,7 +429,7 @@ bash selfskill/scripts/run.sh configure --batch \
   PORT_OASIS=51202 \
   PORT_FRONTEND=51209 \
   PORT_BARK=58010 \
-  OPENCLAW_API_URL=http://127.0.0.1:23001/v1/chat/completions \
+  OPENCLAW_API_URL=http://127.0.0.1:18789/v1/chat/completions \
   OPENAI_STANDARD_MODE=false
 bash selfskill/scripts/run.sh add-user system <your-password>
 ```
