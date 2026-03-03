@@ -65,6 +65,8 @@ selfskill/scripts/
 
 All commands are executed in the project root directory.
 
+**Three-step launch flow: `setup` → `configure` → `start`**
+
 ### 1. First Deployment
 
 ```bash
@@ -609,6 +611,8 @@ selfskill/scripts/
 ## 
 
 
+
+****`setup`  `configure`  `start`
 
 ### 1. 
 
