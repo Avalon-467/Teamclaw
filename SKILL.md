@@ -1120,3 +1120,109 @@ bash selfskill/scripts/run.sh stop
 
 - 
 - openclaw session fileskillopenclaw agentopenclaw
+
+---
+
+## ⚠️ Before First Launch — Required Configuration
+
+Before starting TeamClaw for the first time, the following environment variables **must** be configured. Without them the service will not function correctly.
+
+### 1. LLM Configuration (Required)
+
+| Variable | Description | Example |
+|----------|-------------|---------|
+| `LLM_API_KEY` | Your LLM provider's API key. **This is mandatory.** | `sk-xxxxxxxxxxxxxxxx` |
+| `LLM_BASE_URL` | Base URL of your LLM provider's API endpoint. | `https://api.deepseek.com` |
+| `LLM_MODEL` | The model name to use for conversations. | `deepseek-chat` / `gpt-4o` / `gemini-2.5-flash` |
+
+```bash
+bash selfskill/scripts/run.sh configure --batch \
+  LLM_API_KEY=sk-your-key \
+  LLM_BASE_URL=https://api.deepseek.com \
+  LLM_MODEL=deepseek-chat
+```
+
+### 2. OpenClaw Integration (Required for visual workflow orchestration)
+
+These variables are **required** if you intend to use the OASIS visual Canvas to orchestrate OpenClaw agents:
+
+| Variable | Description | Example |
+|----------|-------------|---------|
+| `OPENCLAW_SESSIONS_FILE` | Absolute path to the OpenClaw `sessions.json` file. Used to discover existing OpenClaw agent sessions and make them available for drag-and-drop orchestration on the visual Canvas. **The frontend orchestration panel will NOT load OpenClaw sessions if this is not set.** | `/projects/.moltbot/agents/main/sessions/sessions.json` |
+| `OPENCLAW_API_URL` | The OpenClaw backend API endpoint. This changes with the gateway port. **You MUST first enable OpenClaw's OpenAI-compatible API interface** before configuring this. Include the full path with `/v1/chat/completions`. | `http://127.0.0.1:18789/v1/chat/completions` |
+| `OPENCLAW_API_KEY` | The API key for accessing OpenClaw via its OpenAI-compatible endpoint. Required if your OpenClaw instance has authentication enabled. | `your-openclaw-key` |
+
+> **Important**: `OPENCLAW_API_URL` changes whenever the OpenClaw gateway port changes. Always verify the port is correct and that the OpenClaw OpenAI-compatible interface is enabled before starting TeamClaw.
+
+```bash
+bash selfskill/scripts/run.sh configure --batch \
+  OPENCLAW_SESSIONS_FILE=/projects/.moltbot/agents/main/sessions/sessions.json \
+  OPENCLAW_API_URL=http://127.0.0.1:18789/v1/chat/completions \
+  OPENCLAW_API_KEY=your-openclaw-key-if-needed
+```
+
+### 3. Cloudflare Tunnel (Optional — for remote access)
+
+To expose the Web UI to the public internet for remote visual workflow programming (e.g., from a mobile phone):
+
+- The `tunnel.py` script will automatically write `PUBLIC_DOMAIN` and `BARK_PUBLIC_URL` into `.env` when a Cloudflare Tunnel is established.
+- No manual configuration is needed — just run the tunnel script and the frontend becomes accessible via HTTPS on the public domain.
+- **Non-blocking start**: `tunnel.py` blocks the terminal by default (main thread joins tunnel threads). To start it without blocking the agent or terminal, run it in the background:
+
+```bash
+nohup python scripts/tunnel.py > logs/tunnel.log 2>&1 &
+sleep 30  # Wait for tunnels to be established and PUBLIC_DOMAIN written to .env
+```
+
+---
+
+## ⚠️ 首次启动前 — 必须配置项
+
+首次启动 TeamClaw 之前，以下环境变量**必须**配置完毕，否则服务无法正常运行。
+
+### 1. LLM 配置（必填）
+
+| 变量 | 说明 | 示例 |
+|------|------|------|
+| `LLM_API_KEY` | LLM 服务商的 API 密钥，**必填项**。 | `sk-xxxxxxxxxxxxxxxx` |
+| `LLM_BASE_URL` | LLM 服务商的 API 基础地址。 | `https://api.deepseek.com` |
+| `LLM_MODEL` | 使用的模型名称。 | `deepseek-chat` / `gpt-4o` / `gemini-2.5-flash` |
+
+```bash
+bash selfskill/scripts/run.sh configure --batch \
+  LLM_API_KEY=sk-your-key \
+  LLM_BASE_URL=https://api.deepseek.com \
+  LLM_MODEL=deepseek-chat
+```
+
+### 2. OpenClaw 集成配置（使用可视化编排时必填）
+
+如果你需要使用 OASIS 可视化画布来编排 OpenClaw Agent，以下变量**必须配置**：
+
+| 变量 | 说明 | 示例 |
+|------|------|------|
+| `OPENCLAW_SESSIONS_FILE` | OpenClaw `sessions.json` 文件的绝对路径。用于获取已有的 OpenClaw Agent session 号，使其可以在可视化画布中被拖拽使用。**未配置此项时前端编排面板将无法加载 OpenClaw sessions。** | `/projects/.moltbot/agents/main/sessions/sessions.json` |
+| `OPENCLAW_API_URL` | OpenClaw 后端 API 地址。该地址随 gateway 端口变化而变化。**必须先开启 OpenClaw 的 OpenAI 兼容接口**，填写包含 `/v1/chat/completions` 的完整路径。 | `http://127.0.0.1:18789/v1/chat/completions` |
+| `OPENCLAW_API_KEY` | 通过 OpenAI 兼容接口访问 OpenClaw 时使用的 API Key。如果你的 OpenClaw 实例启用了鉴权，则此项必填。 | `your-openclaw-key` |
+
+> **重要提醒**：`OPENCLAW_API_URL` 会随着 OpenClaw gateway 端口的改变而改变，启动前请务必确认端口正确，且 OpenClaw 的 OpenAI 兼容接口已开启。
+
+```bash
+bash selfskill/scripts/run.sh configure --batch \
+  OPENCLAW_SESSIONS_FILE=/projects/.moltbot/agents/main/sessions/sessions.json \
+  OPENCLAW_API_URL=http://127.0.0.1:18789/v1/chat/completions \
+  OPENCLAW_API_KEY=your-openclaw-key-if-needed
+```
+
+### 3. Cloudflare Tunnel（可选 — 用于远程访问）
+
+如需将前端 Web UI 通过公网 HTTPS 安全暴露，以便在手机或其他远程设备上进行可视化多 Agent 工作流编排：
+
+- 运行 `tunnel.py` 脚本后，Cloudflare Tunnel 会自动建立，并将 `PUBLIC_DOMAIN` 和 `BARK_PUBLIC_URL` 写入 `.env`。
+- 无需手动配置，启动隧道后即可通过 HTTPS 公网域名访问前端。
+- **非阻塞启动**：`tunnel.py` 默认会阻塞终端（主线程 join 等待隧道线程）。如需避免阻塞 Agent 或终端，请后台启动：
+
+```bash
+nohup python scripts/tunnel.py > logs/tunnel.log 2>&1 &
+sleep 30  # 等待隧道建立完成，PUBLIC_DOMAIN 写入 .env
+```
