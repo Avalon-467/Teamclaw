@@ -36,6 +36,14 @@ Schedule YAML format:
         X-Custom-Auth: "token123"
       instruction: "从数据角度分析"           # 可选
 
+    # OpenClaw agent（通过 x-openclaw-session-key 指定确定 session）
+    - expert: "coder#ext#oc1"
+      api_url: "http://127.0.0.1:18789"
+      api_key: "your-key"
+      model: "agent:main:test1"
+      headers:
+        x-openclaw-session-key: "agent:main:test1"  # 构建确定 session 号的关键 header
+
     # 多个专家同时并行发言
     - parallel:
         - expert: "创意专家"

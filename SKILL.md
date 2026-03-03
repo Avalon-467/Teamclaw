@@ -384,6 +384,25 @@ Examples:
 **Request Header Assembly Logic:**
 Final request headers = `Content-Type: application/json` + `Authorization: Bearer <api_key>` (if present) + all key-value pairs from YAML `headers`.
 
+**`x-openclaw-session-key` — Deterministic OpenClaw Session Routing:**
+
+When calling an OpenClaw agent via External API (Type 4), the `x-openclaw-session-key` HTTP header is the **key mechanism** for routing requests to a specific, deterministic OpenClaw session. Without this header, OpenClaw may not correctly associate the request with the intended session.
+
+- The frontend orchestration panel **automatically** sets this header when you drag an OpenClaw session onto the canvas.
+- When writing YAML manually or calling the API programmatically, you **must** include this header in the `headers` field to ensure session determinism.
+
+```yaml
+# Example: Connecting to a specific OpenClaw session
+- expert: "coder#ext#oc1"
+  api_url: "http://127.0.0.1:18789"
+  api_key: "your-openclaw-key"
+  model: "agent:main:my-session"
+  headers:
+    x-openclaw-session-key: "agent:main:my-session"   # ← This header determines the exact OpenClaw session
+```
+
+> The value of `x-openclaw-session-key` should match the `model` field's session identifier (format: `agent:<agent_name>:<session_name>`). This ensures the external request is routed to the correct OpenClaw agent session, maintaining conversation continuity and state.
+
 ---
 
 ## Using OASIS Server Independently
@@ -930,6 +949,25 @@ agent:<agent_name>:<session_name>
 
 ****
  = `Content-Type: application/json` + `Authorization: Bearer <api_key>` + YAML `headers` 
+
+**`x-openclaw-session-key` —— OpenClaw 确定性 Session 路由：**
+
+通过 External API（Type 4）调用 OpenClaw agent 时，`x-openclaw-session-key` HTTP header 是**将请求路由到指定 OpenClaw session 的关键机制**。缺少此 header，OpenClaw 可能无法正确关联到目标 session。
+
+- 前端编排面板在拖拽 OpenClaw session 到画布时会**自动设置**此 header。
+- 手动编写 YAML 或通过 API 调用时，**必须**在 `headers` 字段中包含此 header 以确保 session 的确定性。
+
+```yaml
+# 示例：连接到指定的 OpenClaw session
+- expert: "coder#ext#oc1"
+  api_url: "http://127.0.0.1:18789"
+  api_key: "your-openclaw-key"
+  model: "agent:main:my-session"
+  headers:
+    x-openclaw-session-key: "agent:main:my-session"   # ← 此 header 决定了目标 OpenClaw session
+```
+
+> `x-openclaw-session-key` 的值应与 `model` 字段的 session 标识符一致（格式：`agent:<agent_name>:<session_name>`）。这确保外部请求被路由到正确的 OpenClaw agent session，保持对话连续性和状态。
 
 ---
 
