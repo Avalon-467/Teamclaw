@@ -11,7 +11,7 @@ compatibility:
   - "ollama"
 
 
-argument-hint: "[REQUIRED] LLM_API_KEY. [NETWORK] Requires outbound access for LLM/TTS APIs. Uses ports 51200-51209 and 58010 (Bark). [SESSIONS] Accesses OPENCLAW_SESSIONS_FILE to orchestrate multi-agent workflows on a visual Canvas. [BOTS] Optional integrations: TELEGRAM_BOT_TOKEN, QQ_APP_ID, QQ_BOT_SECRET. [TUNNEL] Set PUBLIC_DOMAIN to enable secure Cloudflare Tunneling."
+argument-hint: "[BEFORE FIRST LAUNCH - MUST CONFIGURE] (1) LLM_API_KEY: your LLM provider API key (required). (2) LLM_BASE_URL: the base URL of your LLM provider (e.g. https://api.deepseek.com). (3) LLM_MODEL: the model name to use (e.g. deepseek-chat, gpt-4o, gemini-2.5-flash). (4) OPENCLAW_SESSIONS_FILE: absolute path to OpenClaw sessions.json, used to discover existing OpenClaw agent sessions for workflow orchestration on the visual Canvas. (5) OPENCLAW_API_URL: OpenClaw backend API endpoint (changes with gateway port; you MUST first enable OpenClaw's OpenAI-compatible API interface, e.g. http://127.0.0.1:18789/v1/chat/completions). (6) OPENCLAW_API_KEY: the API key for accessing OpenClaw via its OpenAI-compatible endpoint. [NETWORK] Requires outbound access for LLM/TTS APIs. Uses ports 51200-51209 and 58010 (Bark). [BOTS] Optional integrations: TELEGRAM_BOT_TOKEN, QQ_APP_ID, QQ_BOT_SECRET. [TUNNEL] Set PUBLIC_DOMAIN to enable secure Cloudflare Tunneling."
 
 metadata:
   version: "1.0.1"
