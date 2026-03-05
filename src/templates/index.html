@@ -271,8 +271,9 @@
             <div class="orch-layout">
                 <!-- Left: Expert Pool -->
                 <div class="orch-sidebar" style="overflow-y:auto;">
-                    <div class="orch-sidebar-header" style="display:flex;align-items:center;justify-content:space-between;">
-                        <span class="text-sm font-bold text-gray-700" data-i18n="orch_expert_pool">🧑‍💼 专家池</span>
+                    <div class="orch-sidebar-header" style="display:flex;align-items:center;justify-content:space-between;cursor:pointer;user-select:none;" onclick="toggleOrchExpertList()">
+                        <span class="text-sm font-bold text-gray-700">🧑‍💼 <span data-i18n="orch_expert_pool_text">专家池</span></span>
+                        <span id="orch-expert-toggle-icon" style="font-size:12px;transition:transform 0.2s;margin-right:4px;">▼</span>
                         <!-- Manual injection -->
                         <div class="orch-manual-card" draggable="true" id="orch-manual-card" style="margin:0;padding:4px 8px;font-size:11px;">
                             <span style="font-size:14px;">📝</span>
@@ -485,6 +486,23 @@
     </div>
 
 
+    <script>
+    // Toggle orchestration expert list expand/collapse
+    function toggleOrchExpertList() {
+        const grid = document.querySelector('.orch-sidebar-grid');
+        const shortcuts = grid ? grid.nextElementSibling : null;
+        const icon = document.getElementById('orch-expert-toggle-icon');
+        if (grid.style.display === 'none') {
+            grid.style.display = '';
+            if (shortcuts) shortcuts.style.display = '';
+            icon.style.transform = 'rotate(0deg)';
+        } else {
+            grid.style.display = 'none';
+            if (shortcuts) shortcuts.style.display = 'none';
+            icon.style.transform = 'rotate(-90deg)';
+        }
+    }
+    </script>
     <script src="/static/js/main.js"></script>
     <script src="/static/js/app.js"></script>
     <!-- ===== Orchestration Page JavaScript ===== -->

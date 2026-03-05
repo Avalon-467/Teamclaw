@@ -159,6 +159,7 @@ const i18n = {
 
         // 编排面板
         orch_expert_pool: '🧑‍💼 专家池',
+        orch_expert_pool_text: '专家池',
         orch_preset_experts: '📚 预设专家',
         orch_custom_experts: '🛠️ 自定义专家',
         orch_session_agents: '💬 Session Agent',
@@ -470,6 +471,7 @@ orch_openclaw_sessions: '🦞 OpenClaw',
 
         // Orchestration panel
         orch_expert_pool: '🧑‍💼 Expert Pool',
+        orch_expert_pool_text: 'Expert Pool',
         orch_preset_experts: '📚 Preset Experts',
         orch_custom_experts: '🛠️ Custom Experts',
         orch_session_agents: '💬 Session Agents',
