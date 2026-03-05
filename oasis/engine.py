@@ -175,7 +175,7 @@ class DiscussionEngine:
                     name=expert_name,
                     ext_id=ext_id,
                     api_url=cfg["api_url"],
-                    api_key=cfg.get("api_key", ""),
+                    api_key=cfg.get("api_key", "") or os.getenv("OPENCLAW_API_KEY", ""),
                     model=cfg.get("model", "gpt-3.5-turbo"),
                     persona=persona,
                     timeout=bot_timeout,

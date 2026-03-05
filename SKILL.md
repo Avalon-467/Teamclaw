@@ -305,11 +305,14 @@ plan:
   - expert: "Coder#my-project"
 
   # Type 4: External API (DeepSeek, GPT-4, etc.)
+  # Note: api_key is auto-read from OPENCLAW_API_KEY env var; use "****" mask in YAML (never write plaintext keys)
   - expert: "deepseek#ext#ds1"
 
   # Type 4: OpenClaw External API (local Agent service)
+  # api_key auto-resolved from OPENCLAW_API_KEY env var when set to "****"
   - expert: "coder#ext#oc1"
     api_url: "http://127.0.0.1:23001/v1/chat/completions"
+    api_key: "****"              # Masked — real key read from OPENCLAW_API_KEY env var at runtime
     model: "agent:main:test1"    # agent:<agent_name>:<session>, session auto-created if not exists
 
   # Parallel execution
@@ -333,20 +336,21 @@ Type 4 external agents support additional configuration fields in YAML steps:
 ```yaml
 version: 1
 plan:
-  - expert: "Analyst#ext#analyst"
+  - expert: "#ext#analyst"
     api_url: "https://api.deepseek.com"          # Required: External API base URL (auto-completes to /v1/chat/completions)
-    api_key: "sk-xxx"                             # Required: API key  Authorization: Bearer <key>
+    api_key: "****"                               # Masked — real key auto-read from OPENCLAW_API_KEY env var at runtime
     model: "deepseek-chat"                        # Optional: Model name, default gpt-3.5-turbo
     headers:                                      # Optional: Custom HTTP headers (key-value dict)
       X-Custom-Header: "value"
 ```
 
+> 🔒 **API Key Security**: You no longer need to write plaintext API keys in YAML. Set `api_key: "****"` (or omit it entirely) and the system will automatically read the real key from the `OPENCLAW_API_KEY` environment variable at runtime. The frontend canvas also displays `****` instead of the real key. If you do write a plaintext key, it will still work (backward compatible).
 **Configuration Field Description:**
 
 | Field | Required | Description |
 |-------|----------|-------------|
 | `api_url` |  | External API address, auto-completes path to `/v1/chat/completions` |
-| `api_key` |  | Placed in `Authorization: Bearer <key>` header |
+| `api_key` |  | Use `****` mask — auto-read from `OPENCLAW_API_KEY` env var. Plaintext keys also supported (backward compatible) |
 | `model` |  | Default `gpt-3.5-turbo` |
 | `headers` |  | Any key-value dict, merged into HTTP request headers |
 
@@ -397,7 +401,7 @@ When calling an OpenClaw agent via External API (Type 4), the `x-openclaw-sessio
 # Example: Connecting to a specific OpenClaw session
 - expert: "coder#ext#oc1"
   api_url: "http://127.0.0.1:18789"
-  api_key: "your-openclaw-key"
+  api_key: "****"                                      # ← Masked; real key from OPENCLAW_API_KEY env var
   model: "agent:main:my-session"
   headers:
     x-openclaw-session-key: "agent:main:my-session"   # ← This header determines the exact OpenClaw session
@@ -872,11 +876,14 @@ plan:
   - expert: "Coder#my-project"
 
   # Type 4: External APIDeepSeek, GPT-4
+  # 注意：api_key 自动从 OPENCLAW_API_KEY 环境变量读取；YAML 中使用 "****" 掩码（切勿写入明文密钥）
   - expert: "deepseek#ext#ds1"
 
   # Type 4: OpenClaw External API Agent 
+  # api_key 从 OPENCLAW_API_KEY 环境变量自动读取，YAML 中使用 "****" 掩码
   - expert: "coder#ext#oc1"
     api_url: "http://127.0.0.1:23001/v1/chat/completions"
+    api_key: "****"              # 掩码 — 运行时自动从 OPENCLAW_API_KEY 环境变量读取真实密钥
     model: "agent:main:test1"    # agent:<agent_name>:<session>session 
 
   # 
@@ -902,18 +909,20 @@ version: 1
 plan:
   - expert: "#ext#analyst"
     api_url: "https://api.deepseek.com"          #  API  base URL /v1/chat/completions
-    api_key: "sk-xxx"                             # API key  Authorization: Bearer <key>
+    api_key: "****"                               # 掩码 — 运行时自动从 OPENCLAW_API_KEY 环境变量读取真实密钥
     model: "deepseek-chat"                        #  gpt-3.5-turbo
     headers:                                      #  HTTP key-value 
       X-Custom-Header: "value"
 ```
+
+> 🔒 **API Key 安全机制**：YAML 中无需再写入明文 API Key。设置 `api_key: "****"`（或完全省略）即可，系统运行时会自动从 `OPENCLAW_API_KEY` 环境变量读取真实密钥。前端画布也仅显示 `****` 而非真实密钥。如果你仍然写入明文密钥，也能正常工作（向后兼容）。
 
 ****
 
 |  |  |  |
 |------|------|------|
 | `api_url` |  |  API  `/v1/chat/completions` |
-| `api_key` |  |  `Authorization: Bearer <key>` header  |
+| `api_key` |  | 使用 `****` 掩码 — 自动从 `OPENCLAW_API_KEY` 环境变量读取。也支持直接写入明文密钥（向后兼容） |
 | `model` |  |  `gpt-3.5-turbo` |
 | `headers` |  |  key-value  HTTP  |
 
@@ -964,7 +973,7 @@ agent:<agent_name>:<session_name>
 # 示例：连接到指定的 OpenClaw session
 - expert: "coder#ext#oc1"
   api_url: "http://127.0.0.1:18789"
-  api_key: "your-openclaw-key"
+  api_key: "****"                                      # ← 掩码；真实密钥从 OPENCLAW_API_KEY 环境变量读取
   model: "agent:main:my-session"
   headers:
     x-openclaw-session-key: "agent:main:my-session"   # ← 此 header 决定了目标 OpenClaw session

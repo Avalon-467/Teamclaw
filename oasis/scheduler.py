@@ -30,7 +30,7 @@ Schedule YAML format:
     # 外部 agent（直连 OpenAI 兼容 API，不经过本地 agent）
     - expert: "分析师#ext#analyst"
       api_url: "https://api.deepseek.com"    # 必填：外部服务 base URL
-      api_key: "sk-xxx"                      # 必填：外部服务 API key
+      api_key: "****"                      # 掩码 — 运行时从 OPENCLAW_API_KEY 环境变量自动读取
       model: "deepseek-chat"                 # 可选：模型名，默认 gpt-3.5-turbo
       headers:                               # 可选：额外 HTTP headers
         X-Custom-Auth: "token123"
@@ -39,7 +39,7 @@ Schedule YAML format:
     # OpenClaw agent（通过 x-openclaw-session-key 指定确定 session）
     - expert: "coder#ext#oc1"
       api_url: "http://127.0.0.1:18789"
-      api_key: "your-key"
+      api_key: "****"
       model: "agent:main:test1"
       headers:
         x-openclaw-session-key: "agent:main:test1"  # 构建确定 session 号的关键 header
@@ -52,7 +52,7 @@ Schedule YAML format:
         # 外部 agent 也可以在 parallel 中使用
         - expert: "GPT4专家#ext#gpt4"
           api_url: "https://api.openai.com"
-          api_key: "sk-xxx"
+          api_key: "****"
           model: "gpt-4"
 
     # 手动注入一条帖子（不经过 LLM）
@@ -77,7 +77,12 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Optional
 
+import os
+
 import yaml
+
+# Placeholder mask used in YAML to indicate "use key from environment"
+_API_KEY_MASK = "****"
 
 
 class StepType(str, Enum):
@@ -114,16 +119,24 @@ def _extract_external_config(item: dict) -> dict:
 
     Supports:
       api_url: "https://api.example.com"      # external API base URL
-      api_key: "sk-xxx"                        # API key
+      api_key: "sk-xxx" or "****"              # API key (masked = read from env)
       model: "gpt-4"                           # model name
       headers:                                 # extra HTTP headers (key: value)
         X-Custom-Header: "value"
+
+    If api_key is the mask placeholder "****", it will be resolved to
+    the OPENCLAW_API_KEY environment variable at parse time.
     """
     cfg: dict = {}
     if "api_url" in item:
         cfg["api_url"] = str(item["api_url"])
     if "api_key" in item:
-        cfg["api_key"] = str(item["api_key"])
+        raw_key = str(item["api_key"])
+        if raw_key == _API_KEY_MASK:
+            # Resolve masked key from environment variable
+            cfg["api_key"] = os.getenv("OPENCLAW_API_KEY", "")
+        else:
+            cfg["api_key"] = raw_key
     if "model" in item:
         cfg["model"] = str(item["model"])
     if "headers" in item and isinstance(item["headers"], dict):

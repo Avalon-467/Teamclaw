@@ -713,12 +713,17 @@ async def list_openclaw_sessions(filter: str = Query("")):
     raw_url = os.getenv("OPENCLAW_API_URL", "")
     base_url = raw_url.replace("/v1/chat/completions", "").rstrip("/")
 
+    # Mask the API key: if set in env, return "****" so the frontend
+    # knows a key exists but never sees the plaintext.
+    raw_key = os.getenv("OPENCLAW_API_KEY", "")
+    masked_key = "****" if raw_key else ""
+
     return {
         "sessions": result,
         "available": True,
         # Provide OpenClaw-specific endpoint config for auto-fill when dragging into canvas
         "openclaw_api_url": base_url,
-        "openclaw_api_key": os.getenv("OPENCLAW_API_KEY", ""),
+        "openclaw_api_key": masked_key,
     }
 
 

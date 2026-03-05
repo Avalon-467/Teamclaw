@@ -392,6 +392,7 @@ Auto-downloads `cloudflared`, starts tunnels for Web UI + Bark push, captures pu
 - **Request Verification**: Every `/ask` re-verifies password
 - **Internal Auth**: Inter-service communication via `INTERNAL_TOKEN` (auto-generated 64-char hex)
 - **User Isolation**: Conversation memory, file storage, custom experts all isolated by `user_id`
+- **OASIS API Key Masking**: External API keys (e.g. `OPENCLAW_API_KEY`) are never exposed in YAML or the frontend canvas. Set `api_key: "****"` in YAML and the system auto-reads the real key from environment variables at runtime.
 
 ---
 
@@ -860,9 +861,9 @@ python scripts/tunnel.py
 - **请求验证**：每次 `/ask` 都重新验证密码
 - **内部鉴权**：服务间通信通过 `INTERNAL_TOKEN`（自动生成 64 字符 hex）
 - **用户隔离**：对话记忆、文件存储、自定义专家均按 `user_id` 隔离
+- **OASIS API Key 掩码机制**：外部 API 密钥（如 `OPENCLAW_API_KEY`）不会在 YAML 或前端画布中暴露明文。YAML 中设置 `api_key: "****"` 即可，系统运行时自动从环境变量读取真实密钥。
 
-### 外部 curl 参与 OASIS 服务器（完整方法）
-
+### 外部 curl 参与 OASIS 服务器
 OASIS 服务器（端口 51202）除了供 MCP 工具调用外，也支持直接 curl 操作，便于外部脚本或调试。所有接口均使用 `user_id` 参数进行用户隔离。
 
 #### 1. 专家管理

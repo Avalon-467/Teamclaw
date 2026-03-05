@@ -47,12 +47,14 @@ Directly calls any OpenAI-compatible API. External service assumed stateful. Sen
 ```yaml
 - expert: "analyst#ext#ds1"
   api_url: "https://api.deepseek.com"
-  api_key: "sk-xxx"
+  api_key: "****"                    # Masked — real key auto-read from OPENCLAW_API_KEY env var
   model: "deepseek-chat"
   headers:
     X-Custom-Header: "value"
   instruction: "Analyze from data perspective"
 ```
+
+> 🔒 **API Key Security**: Set `api_key: "****"` (or omit it) and the system auto-reads the real key from the `OPENCLAW_API_KEY` environment variable at runtime. Plaintext keys still work (backward compatible).
 
 ### Special Suffix: `#new`
 
@@ -84,7 +86,7 @@ plan: [...]              # Required: list of steps
 - expert: "critical#temp#1"
   instruction: "Focus on risks"
   api_url: "https://..."          # only for #ext#
-  api_key: "sk-xxx"               # only for #ext#
+  api_key: "****"               # only for #ext#, masked — auto-read from env
   model: "deepseek-chat"          # only for #ext#
   headers:                        # only for #ext#
     x-openclaw-session-key: "agent:main:test1"
@@ -132,7 +134,7 @@ plan:
 | `expert` | Yes | Name (format determines type) |
 | `instruction` | No | Per-step instruction |
 | `api_url` | Yes (ext) | Base URL (auto-completes to `/v1/chat/completions`) |
-| `api_key` | No | API key |
+| `api_key` | No | Use `****` mask — auto-read from `OPENCLAW_API_KEY` env var. Plaintext also supported. |
 | `model` | No | Default `gpt-3.5-turbo` |
 | `headers` | No | Extra HTTP headers (dict) |
 
@@ -179,7 +181,7 @@ Non-existent sessions are auto-created.
 ```yaml
 - expert: "coder#ext#oc1"
   api_url: "http://127.0.0.1:18789"
-  api_key: "your-key"
+  api_key: "****"                                  # Masked — real key from OPENCLAW_API_KEY env var
   model: "agent:main:my-session"
   headers:
     x-openclaw-session-key: "agent:main:my-session"
@@ -190,7 +192,7 @@ Non-existent sessions are auto-created.
 
 ```
 Content-Type: application/json
-Authorization: Bearer <api_key>
+Authorization: Bearer <resolved_api_key>   # The actual key resolved from env var (never visible in YAML)
 x-openclaw-session-key: agent:main:my-session
 ```
 
@@ -203,7 +205,7 @@ discussion: false
 plan:
   - expert: "architect#ext#oc_arch"
     api_url: "http://127.0.0.1:18789"
-    api_key: "key"
+    api_key: "****"                              # Masked — auto-read from env
     model: "agent:main:architect"
     headers:
       x-openclaw-session-key: "agent:main:architect"
@@ -212,14 +214,14 @@ plan:
   - parallel:
     - expert: "backend#ext#oc_be"
       api_url: "http://127.0.0.1:18789"
-      api_key: "key"
+      api_key: "****"
       model: "agent:main:backend"
       headers:
         x-openclaw-session-key: "agent:main:backend"
       instruction: "Implement backend API"
     - expert: "frontend#ext#oc_fe"
       api_url: "http://127.0.0.1:18789"
-      api_key: "key"
+      api_key: "****"
       model: "agent:main:frontend"
       headers:
         x-openclaw-session-key: "agent:main:frontend"
@@ -227,7 +229,7 @@ plan:
 
   - expert: "reviewer#ext#oc_rev"
     api_url: "http://127.0.0.1:18789"
-    api_key: "key"
+    api_key: "****"
     model: "agent:main:reviewer"
     headers:
       x-openclaw-session-key: "agent:main:reviewer"
@@ -373,13 +375,13 @@ plan:
     - expert: "critical#temp#2"
   - expert: "coder#ext#oc1"
     api_url: "http://127.0.0.1:18789"
-    api_key: "key"
+    api_key: "****"                                # Masked — from env
     model: "agent:main:research"
     headers:
       x-openclaw-session-key: "agent:main:research"
   - expert: "analyst#ext#ds1"
     api_url: "https://api.deepseek.com"
-    api_key: "sk-xxx"
+    api_key: "****"                                # Masked — from env
     model: "deepseek-chat"
 ```
 
