@@ -3582,10 +3582,9 @@ orch_openclaw_sessions: '🦞 OpenClaw',
 
             renderPosts(detail.posts || [], detail.timeline || [], detail.discussion !== false);
 
-            // Show/hide conclusion (执行模式下不显示 conclusion)
+            // Show/hide conclusion
             const conclusionArea = document.getElementById('oasis-conclusion-area');
-            const isDiscussion = detail.discussion !== false;
-            if (isDiscussion && detail.conclusion && detail.status === 'concluded') {
+            if (detail.conclusion && detail.status === 'concluded') {
                 document.getElementById('oasis-conclusion-text').textContent = detail.conclusion;
                 conclusionArea.style.display = 'block';
             } else {
@@ -3613,40 +3612,7 @@ orch_openclaw_sessions: '🦞 OpenClaw',
                 return;
             }
 
-            if (!isDiscussion) {
-                // ── 执行模式：只展示 timeline 事件通知 ──
-                if (!timeline || timeline.length === 0) {
-                    box.innerHTML = `
-                        <div class="text-center text-gray-400 text-sm py-8">
-                            <div class="text-2xl mb-2">⏳</div>
-                            <p>等待执行...</p>
-                        </div>`;
-                    return;
-                }
-
-                box.innerHTML = timeline.map(ev => {
-                    const evIcons = {start:'🚀', round:'📢', agent_call:'⏳', agent_done:'✅', conclude:'🏁', manual_post:'📝'};
-                    const icon = evIcons[ev.event] || '⏱';
-                    let label = '';
-                    if (ev.event === 'agent_call') {
-                        label = ev.agent + ' 开始执行...';
-                    } else if (ev.event === 'agent_done') {
-                        label = ev.agent + ' 执行完成';
-                    } else {
-                        label = ev.agent ? ev.agent + (ev.detail ? ' · ' + ev.detail : '') : (ev.detail || ev.event);
-                    }
-                    return `
-                        <div class="flex items-center space-x-2 py-1 px-2">
-                            <span class="text-[10px] font-mono text-blue-500 whitespace-nowrap">${fmtElapsed(ev.elapsed)}</span>
-                            <span class="text-xs text-gray-400">${icon} ${escapeHtml(label)}</span>
-                        </div>`;
-                }).join('');
-
-                box.scrollTop = box.scrollHeight;
-                return;
-            }
-
-            // ── 讨论模式：timeline 事件（绿色卡片）+ 帖子混排 ──
+            // ── timeline 事件（绿色卡片）+ 帖子混排 ──
             const items = [];
             if (timeline) {
                 for (const ev of timeline) {
