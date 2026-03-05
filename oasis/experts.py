@@ -471,7 +471,7 @@ class SessionExpert:
                 body["enabled_tools"] = self.enabled_tools
 
             try:
-                async with httpx.AsyncClient(timeout=httpx.Timeout(timeout=self.timeout)) as client:
+                async with httpx.AsyncClient(timeout=httpx.Timeout(timeout=None)) as client:
                     resp = await client.post(
                         self._bot_url, json=body, headers=self._auth_header(),
                     )
@@ -667,14 +667,20 @@ class ExternalExpert:
         h.update(self._extra_headers)
         return h
 
-    async def _call_api(self, messages: list[dict]) -> str:
-        """Send messages to external API and return the assistant response text."""
+    async def _call_api(self, messages: list[dict], timeout_override: float | None = ...) -> str:
+        """Send messages to external API and return the assistant response text.
+
+        Args:
+            timeout_override: Explicit timeout value. None = no timeout;
+                              ... (default sentinel) = use self.timeout.
+        """
+        effective_timeout = self.timeout if timeout_override is ... else timeout_override
         body = {
             "model": self.model,
             "messages": messages,
             "stream": False,
         }
-        async with httpx.AsyncClient(timeout=httpx.Timeout(timeout=self.timeout)) as client:
+        async with httpx.AsyncClient(timeout=httpx.Timeout(timeout=effective_timeout)) as client:
             resp = await client.post(self._api_url, json=body, headers=self._headers())
         if resp.status_code != 200:
             raise RuntimeError(f"External API error {resp.status_code}: {resp.text[:300]}")
@@ -711,7 +717,7 @@ class ExternalExpert:
                 messages.append({"role": "user", "content": "\n".join(ctx_parts)})
 
             try:
-                reply = await self._call_api(messages)
+                reply = await self._call_api(messages, timeout_override=None)
                 await forum.publish(author=self.name, content=reply.strip()[:2000])
                 print(f"  [OASIS] ✅ {self.name} (external) 执行完成")
             except Exception as e:

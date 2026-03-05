@@ -467,6 +467,16 @@ async def post_to_oasis(
 
             if result.status_code == 200:
                 data = result.json()
+                # Execution mode: server returns status="running" when still in progress
+                if data.get("status") == "running":
+                    return (
+                        f"🏛️ OASIS 执行任务仍在后台运行中\n"
+                        f"主题: {data['question']}\n"
+                        f"当前轮次: {data.get('current_round', '?')}\n"
+                        f"已产出帖子: {data.get('total_posts', 0)}\n"
+                        f"Topic ID: {topic_id}\n\n"
+                        f"💡 使用 check_oasis_discussion(topic_id=\"{topic_id}\") 查看进展和结果。"
+                    )
                 return (
                     f"🏛️ OASIS 论坛讨论完成\n"
                     f"主题: {data['question']}\n"

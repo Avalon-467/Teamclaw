@@ -413,6 +413,16 @@ async def get_conclusion(topic_id: str, user_id: str = Query(...), timeout: int 
     if forum.status == "error":
         raise HTTPException(500, f"Discussion failed: {forum.conclusion}")
     if forum.status != "concluded":
+        # Execution mode: return 202 (still running) instead of 504 error
+        if not forum.discussion:
+            return {
+                "topic_id": topic_id,
+                "question": forum.question,
+                "status": "running",
+                "current_round": forum.current_round,
+                "total_posts": len(forum.posts),
+                "message": "执行仍在后台运行中，可稍后通过 check_oasis_discussion 查看结果",
+            }
         raise HTTPException(504, "Discussion timed out")
 
     return {

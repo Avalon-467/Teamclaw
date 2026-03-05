@@ -581,6 +581,9 @@ Based on the above canvas arrangement, generate an OASIS YAML schedule that:
 4. Uses `repeat: {str(settings.get('repeat', True)).lower()}`
 5. Optimizes the collaboration pattern for the given experts
 
+After generating the YAML, you MUST also save it as a workflow using the `set_oasis_workflow` tool with a descriptive name,
+so that the workflow is immediately ready to use from the OASIS panel. Both generating and saving are required.
+
 Output ONLY the YAML schedule, no explanations."""
 
     return prompt
@@ -630,9 +633,13 @@ def agent_generate_yaml():
                     "role": "system",
                     "content": (
                         "You are a YAML schedule generator for the OASIS expert orchestration engine. "
-                        "Output ONLY valid YAML, no markdown fences, no explanations, no commentary. "
-                        "The YAML must start with 'version: 1' and contain a 'plan:' section."
-                        "you should use mcp tool to set new yaml as workflow and save it layout"
+                        "Your task has TWO parts: (1) Generate valid OASIS YAML, and (2) Save it as a workflow so it's ready to use.\n\n"
+                        "STEP 1 — Generate YAML: Output valid YAML starting with 'version: 1' and containing a 'plan:' section. "
+                        "No markdown fences, no explanations, no commentary — just the raw YAML.\n\n"
+                        "STEP 2 — Save Workflow: After generating the YAML, you MUST call the `set_oasis_workflow` MCP tool to save it as a named workflow. "
+                        "Use a descriptive workflow name based on the task/experts involved (e.g. 'code_review_pipeline', 'brainstorm_trio'). "
+                        "This ensures the workflow is immediately available for use on the OASIS canvas without manual saving.\n\n"
+                        "Both steps are mandatory. Do NOT skip the save step."
                     ),
                 },
                 {
