@@ -436,6 +436,40 @@ def proxy_logout():
     return jsonify({"status": "success"})
 
 
+LOCAL_SETTINGS_URL = f"http://127.0.0.1:{PORT_AGENT}/settings"
+
+
+@app.route("/proxy_settings", methods=["GET"])
+def proxy_get_settings():
+    """代理获取系统配置"""
+    user_id = session.get("user_id")
+    password = session.get("password")
+    if not user_id or not password:
+        return jsonify({"error": "未登录"}), 401
+    try:
+        r = requests.get(LOCAL_SETTINGS_URL, params={"user_id": user_id, "password": password}, timeout=10)
+        return jsonify(r.json()), r.status_code
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/proxy_settings", methods=["POST"])
+def proxy_update_settings():
+    """代理更新系统配置"""
+    user_id = session.get("user_id")
+    password = session.get("password")
+    if not user_id or not password:
+        return jsonify({"error": "未登录"}), 401
+    try:
+        data = request.get_json(force=True)
+        data["user_id"] = user_id
+        data["password"] = password
+        r = requests.post(LOCAL_SETTINGS_URL, json=data, timeout=10)
+        return jsonify(r.json()), r.status_code
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
 @app.route("/proxy_sessions")
 def proxy_sessions():
     """代理获取用户会话列表"""

@@ -728,8 +728,12 @@ class MiniTimeAgent:
                 task.cancel()
                 try:
                     await asyncio.wait_for(asyncio.shield(task), timeout=5.0)
-                except (asyncio.CancelledError, asyncio.TimeoutError, Exception):
+                except asyncio.TimeoutError:
+                    # 超时说明 task 还活着，保留引用以便再次 cancel
+                    return
+                except (asyncio.CancelledError, Exception):
                     pass
+            # 只有 task 已结束或成功取消才移除
             self._active_tasks.pop(user_id, None)
 
     def register_task(self, user_id: str, task: asyncio.Task):

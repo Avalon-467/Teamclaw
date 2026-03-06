@@ -817,6 +817,118 @@ async def session_status(req: SessionStatusRequest):
     }
 
 
+# --- Settings API (读写 .env 系统配置) ---
+
+# 允许前端读写的配置项白名单（敏感项如 INTERNAL_TOKEN 不暴露）
+_SETTINGS_WHITELIST = [
+    "LLM_API_KEY", "LLM_BASE_URL", "LLM_MODEL", "LLM_PROVIDER", "LLM_VISION_SUPPORT",
+    "TTS_MODEL", "TTS_VOICE",
+    "OPENCLAW_API_URL", "OPENCLAW_API_KEY", "OPENCLAW_SESSIONS_FILE",
+    "PORT_AGENT", "PORT_SCHEDULER", "PORT_OASIS", "PORT_FRONTEND", "PORT_BARK",
+    "TELEGRAM_BOT_TOKEN", "TELEGRAM_ALLOWED_USERS",
+    "QQ_APP_ID", "QQ_BOT_SECRET", "QQ_BOT_USERNAME",
+    "PUBLIC_DOMAIN",
+    "OPENAI_STANDARD_MODE",
+    "ALLOWED_COMMANDS", "EXEC_TIMEOUT", "MAX_OUTPUT_LENGTH",
+]
+
+# 需要掩码显示的敏感字段
+_MASK_FIELDS = {"LLM_API_KEY", "OPENCLAW_API_KEY", "TELEGRAM_BOT_TOKEN", "QQ_BOT_SECRET"}
+
+
+def _read_env_settings() -> dict:
+    """从 .env 文件解析出白名单内的键值对。"""
+    settings = {}
+    try:
+        with open(env_path, "r", encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if not line or line.startswith("#"):
+                    continue
+                if "=" not in line:
+                    continue
+                key, _, val = line.partition("=")
+                key = key.strip()
+                if key in _SETTINGS_WHITELIST:
+                    settings[key] = val.strip()
+    except FileNotFoundError:
+        pass
+    return settings
+
+
+def _mask_value(key: str, val: str) -> str:
+    """对敏感字段做掩码。"""
+    if key in _MASK_FIELDS and val and len(val) > 8:
+        return val[:4] + "****" + val[-4:]
+    return val
+
+
+def _write_env_settings(updates: dict):
+    """将 updates 合并写入 .env（更新已有行或追加新行）。"""
+    try:
+        with open(env_path, "r", encoding="utf-8") as f:
+            lines = f.readlines()
+    except FileNotFoundError:
+        lines = []
+
+    updated_keys = set()
+    new_lines = []
+    for line in lines:
+        stripped = line.strip()
+        if stripped and not stripped.startswith("#") and "=" in stripped:
+            key = stripped.partition("=")[0].strip()
+            if key in updates:
+                new_lines.append(f"{key}={updates[key]}\n")
+                updated_keys.add(key)
+                continue
+        new_lines.append(line)
+
+    # 追加新增的键
+    for key, val in updates.items():
+        if key not in updated_keys:
+            new_lines.append(f"{key}={val}\n")
+
+    with open(env_path, "w", encoding="utf-8") as f:
+        f.writelines(new_lines)
+
+
+class SettingsUpdateRequest(BaseModel):
+    user_id: str
+    password: str
+    settings: dict
+
+
+@app.get("/settings")
+async def get_settings(user_id: str, password: str):
+    """获取系统配置（敏感值掩码）。"""
+    if not verify_password(user_id, password):
+        raise HTTPException(status_code=401, detail="用户名或密码错误")
+    raw = _read_env_settings()
+    masked = {k: _mask_value(k, v) for k, v in raw.items()}
+    return {"status": "success", "settings": masked}
+
+
+@app.post("/settings")
+async def update_settings(req: SettingsUpdateRequest):
+    """更新系统配置。"""
+    if not verify_password(req.user_id, req.password):
+        raise HTTPException(status_code=401, detail="用户名或密码错误")
+
+    # 只允许白名单内的 key
+    filtered = {}
+    for k, v in req.settings.items():
+        if k in _SETTINGS_WHITELIST:
+            # 如果值是掩码（含 ****），跳过不更新
+            if "****" in str(v):
+                continue
+            filtered[k] = str(v)
+
+    if filtered:
+        _write_env_settings(filtered)
+
+    return {"status": "success", "updated": list(filtered.keys())}
+
+
 @app.post("/system_trigger")
 async def system_trigger(req: SystemTriggerRequest, x_internal_token: str | None = Header(None)):
     verify_internal_token(x_internal_token)

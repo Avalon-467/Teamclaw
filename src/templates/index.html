@@ -116,6 +116,7 @@
                         <span class="hidden sm:inline" data-i18n="new_chat">+新</span>
                     </button>
                     <button onclick="toggleLanguage()" id="lang-toggle-btn" class="text-[10px] sm:text-xs bg-purple-50 text-purple-600 hover:bg-purple-100 px-2 py-1 rounded border border-purple-200 transition-colors" title="Switch Language">EN</button>
+                    <button onclick="openSettings()" class="desktop-only-btn text-[10px] sm:text-xs bg-gray-50 text-gray-600 hover:bg-gray-100 px-2 py-1 rounded border border-gray-200 transition-colors" data-i18n="settings" data-i18n-title="settings_title" title="系统设置">⚙️</button>
                     <button onclick="handleLogout()" class="desktop-only-btn text-[10px] sm:text-xs text-gray-400 hover:text-red-500 px-1.5 sm:px-2 py-1 rounded transition-colors" data-i18n="logout" data-i18n-title="logout" title="切换用户">退出</button>
                     <!-- Mobile: hamburger menu -->
                     <div class="mobile-menu-wrapper" style="position:relative;">
@@ -124,6 +125,7 @@
                             <button onclick="toggleSessionSidebar(); closeMobileMenu();" class="mobile-menu-item" data-i18n="menu_history">🤖 Agents</button>
                             <button onclick="handleNewSession(); closeMobileMenu();" class="mobile-menu-item" data-i18n="menu_new">➕ 新对话</button>
                             <button onclick="toggleOasisMobile(); closeMobileMenu();" class="mobile-menu-item" data-i18n="menu_oasis">🏛️ TeamsWork</button>
+                            <button onclick="openSettings(); closeMobileMenu();" class="mobile-menu-item" data-i18n="menu_settings">⚙️ 设置</button>
                             <button onclick="handleLogout(); closeMobileMenu();" class="mobile-menu-item text-red-500" data-i18n="menu_logout">🚪 退出</button>
                         </div>
                     </div>
@@ -521,6 +523,24 @@
         btn.classList.toggle('focus-active', isFocused);
     }
     </script>
+
+    <!-- Settings Modal -->
+    <div id="settings-modal" class="settings-modal-overlay" style="display:none;" onclick="if(event.target===this)closeSettings()">
+        <div class="settings-modal">
+            <div class="settings-header">
+                <h2 data-i18n="settings_title">⚙️ 系统设置</h2>
+                <button onclick="closeSettings()" class="settings-close-btn">&times;</button>
+            </div>
+            <div class="settings-body" id="settings-body">
+                <div class="settings-loading" data-i18n="loading">加载中...</div>
+            </div>
+            <div class="settings-footer">
+                <button onclick="closeSettings()" class="settings-btn settings-btn-cancel" data-i18n="cancel">取消</button>
+                <button onclick="saveSettings()" class="settings-btn settings-btn-save" data-i18n="settings_save">保存</button>
+            </div>
+        </div>
+    </div>
+
     <script src="/static/js/main.js"></script>
     <script src="/static/js/app.js"></script>
     <!-- ===== Orchestration Page JavaScript ===== -->

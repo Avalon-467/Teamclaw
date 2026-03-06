@@ -310,6 +310,22 @@ orch_openclaw_sessions: '🦞 OpenClaw',
         secure_footer: 'Secured by Nginx Reverse Proxy & SSH Tunnel',
         refresh: '刷新',
         collapse: '收起',
+
+        // 设置
+        settings: '⚙️',
+        settings_title: '⚙️ 系统设置',
+        settings_save: '保存',
+        settings_saved: '✅ 设置已保存',
+        settings_save_fail: '❌ 保存失败',
+        settings_load_fail: '❌ 加载设置失败',
+        settings_restart_hint: '部分配置需要重启服务后生效',
+        menu_settings: '⚙️ 设置',
+        settings_group_llm: 'LLM 模型配置',
+        settings_group_tts: 'TTS 语音配置',
+        settings_group_openclaw: 'OpenClaw 集成',
+        settings_group_ports: '端口配置',
+        settings_group_bots: '机器人集成',
+        settings_group_other: '其他',
     },
     'en': {
         // General
@@ -634,6 +650,22 @@ orch_openclaw_sessions: '🦞 OpenClaw',
         secure_footer: 'Secured by Nginx Reverse Proxy & SSH Tunnel',
         refresh: 'Refresh',
         collapse: 'Collapse',
+
+        // Settings
+        settings: '⚙️',
+        settings_title: '⚙️ System Settings',
+        settings_save: 'Save',
+        settings_saved: '✅ Settings saved',
+        settings_save_fail: '❌ Save failed',
+        settings_load_fail: '❌ Failed to load settings',
+        settings_restart_hint: 'Some settings require a service restart to take effect',
+        menu_settings: '⚙️ Settings',
+        settings_group_llm: 'LLM Model',
+        settings_group_tts: 'TTS Voice',
+        settings_group_openclaw: 'OpenClaw Integration',
+        settings_group_ports: 'Ports',
+        settings_group_bots: 'Bot Integration',
+        settings_group_other: 'Other',
     }
 };
 
@@ -1537,6 +1569,98 @@ async function handleLogin() {
     } finally {
         loginBtn.disabled = false;
         loginBtn.textContent = t('login_btn');
+    }
+}
+
+// ===================== Settings Modal =====================
+const SETTINGS_GROUPS = {
+    llm: { label: 'settings_group_llm', keys: ['LLM_API_KEY', 'LLM_BASE_URL', 'LLM_MODEL', 'LLM_PROVIDER', 'LLM_VISION_SUPPORT'] },
+    tts: { label: 'settings_group_tts', keys: ['TTS_MODEL', 'TTS_VOICE'] },
+    openclaw: { label: 'settings_group_openclaw', keys: ['OPENCLAW_API_URL', 'OPENCLAW_API_KEY', 'OPENCLAW_SESSIONS_FILE'] },
+    ports: { label: 'settings_group_ports', keys: ['PORT_AGENT', 'PORT_SCHEDULER', 'PORT_OASIS', 'PORT_FRONTEND', 'PORT_BARK'] },
+    bots: { label: 'settings_group_bots', keys: ['TELEGRAM_BOT_TOKEN', 'TELEGRAM_ALLOWED_USERS', 'QQ_APP_ID', 'QQ_BOT_SECRET', 'QQ_BOT_USERNAME'] },
+    other: { label: 'settings_group_other', keys: ['PUBLIC_DOMAIN', 'OPENAI_STANDARD_MODE', 'ALLOWED_COMMANDS', 'EXEC_TIMEOUT', 'MAX_OUTPUT_LENGTH'] },
+};
+
+let _settingsCache = {};
+
+async function openSettings() {
+    const modal = document.getElementById('settings-modal');
+    const body = document.getElementById('settings-body');
+    modal.style.display = 'flex';
+    body.innerHTML = `<div class="settings-loading">${t('loading')}</div>`;
+    try {
+        const r = await fetch('/proxy_settings');
+        const data = await r.json();
+        if (data.error || !data.settings) throw new Error(data.error || 'unknown');
+        _settingsCache = data.settings;
+        renderSettings(data.settings);
+    } catch (e) {
+        body.innerHTML = `<div class="settings-error">${t('settings_load_fail')}: ${e.message}</div>`;
+    }
+}
+
+function renderSettings(settings) {
+    const body = document.getElementById('settings-body');
+    let html = `<div class="settings-hint">${t('settings_restart_hint')}</div>`;
+    for (const [gid, group] of Object.entries(SETTINGS_GROUPS)) {
+        const hasValues = group.keys.some(k => settings[k] !== undefined && settings[k] !== '');
+        html += `<div class="settings-group">`;
+        html += `<div class="settings-group-title" onclick="this.parentElement.classList.toggle('collapsed')">${t(group.label)} <span class="settings-chevron">▼</span></div>`;
+        html += `<div class="settings-group-body">`;
+        for (const key of group.keys) {
+            const val = settings[key] || '';
+            const isPassword = key.includes('KEY') || key.includes('TOKEN') || key.includes('SECRET');
+            html += `<div class="settings-field">`;
+            html += `<label class="settings-label" title="${key}">${key}</label>`;
+            html += `<input class="settings-input" data-key="${key}" type="${isPassword ? 'password' : 'text'}" value="${escapeHtml(val)}" placeholder="${key}" autocomplete="off" />`;
+            html += `</div>`;
+        }
+        html += `</div></div>`;
+    }
+    body.innerHTML = html;
+}
+
+function escapeHtml(str) {
+    const div = document.createElement('div');
+    div.textContent = str;
+    return div.innerHTML.replace(/"/g, '&quot;');
+}
+
+function closeSettings() {
+    document.getElementById('settings-modal').style.display = 'none';
+}
+
+async function saveSettings() {
+    const inputs = document.querySelectorAll('#settings-body .settings-input');
+    const updates = {};
+    inputs.forEach(inp => {
+        const key = inp.dataset.key;
+        const val = inp.value.trim();
+        const orig = _settingsCache[key] || '';
+        if (val !== orig) {
+            updates[key] = val;
+        }
+    });
+    if (Object.keys(updates).length === 0) {
+        closeSettings();
+        return;
+    }
+    try {
+        const r = await fetch('/proxy_settings', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ settings: updates }),
+        });
+        const data = await r.json();
+        if (data.status === 'success') {
+            appendMessage(t('settings_saved') + (data.updated?.length ? ': ' + data.updated.join(', ') : ''), false);
+            closeSettings();
+        } else {
+            alert(t('settings_save_fail'));
+        }
+    } catch (e) {
+        alert(t('settings_save_fail') + ': ' + e.message);
     }
 }
 
