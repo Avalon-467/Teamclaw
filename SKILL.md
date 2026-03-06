@@ -329,6 +329,36 @@ plan:
       content: "Please focus on feasibility"
 ```
 
+### DAG Mode — Dependency-Driven Parallel Execution
+
+When the workflow has **fan-in** (a node has multiple predecessors) or **fan-out** (a node has multiple successors), use DAG mode with `id` and `depends_on` fields. The engine maximizes parallelism — each node starts as soon as all its dependencies are satisfied.
+
+**DAG YAML Example:**
+
+```yaml
+version: 1
+repeat: false
+plan:
+  - id: research
+    expert: "creative#temp#1"                # Root — starts immediately
+  - id: analysis
+    expert: "critical#temp#1"                # Root — runs in PARALLEL with research
+  - id: synthesis
+    expert: "synthesis#temp#1"
+    depends_on: [research, analysis]         # Fan-in: waits for BOTH to complete
+  - id: review
+    expert: "data#temp#1"
+    depends_on: [synthesis]                  # Runs after synthesis
+```
+
+**DAG Rules:**
+- Every step **must** have a unique `id` field.
+- `depends_on` is a list of step ids that must complete before this step starts. Omit for root nodes.
+- The graph **must** be acyclic (no circular dependencies).
+- Steps with no dependency relationship run in parallel automatically.
+- The visual Canvas auto-detects fan-in/fan-out and generates DAG format.
+- `manual` steps can also have `id`/`depends_on`.
+
 ### External API (Type 4) Detailed Configuration
 
 Type 4 external agents support additional configuration fields in YAML steps:
@@ -899,6 +929,36 @@ plan:
       author: ""
       content: ""
 ```
+
+### DAG 模式 — 依赖驱动的并行执行
+
+当工作流存在 **fan-in**（一个节点有多个前驱）或 **fan-out**（一个节点有多个后继）时，使用带 `id` 和 `depends_on` 字段的 DAG 模式。引擎会最大化并行——每个节点在所有依赖完成后立即启动，无需等待无关节点。
+
+**DAG YAML 示例：**
+
+```yaml
+version: 1
+repeat: false
+plan:
+  - id: research
+    expert: "creative#temp#1"                # 根节点 — 立即启动
+  - id: analysis
+    expert: "critical#temp#1"                # 根节点 — 与 research 并行运行
+  - id: synthesis
+    expert: "synthesis#temp#1"
+    depends_on: [research, analysis]         # Fan-in：等待两者都完成
+  - id: review
+    expert: "data#temp#1"
+    depends_on: [synthesis]                  # synthesis 完成后执行
+```
+
+**DAG 规则：**
+- 每个步骤**必须**有唯一的 `id` 字段。
+- `depends_on` 是该步骤启动前必须完成的步骤 id 列表。根节点不需要此字段。
+- 图**必须**无环（禁止循环依赖）。
+- 没有依赖关系的步骤自动并行执行。
+- 可视化画布自动检测 fan-in/fan-out 并生成 DAG 格式。
+- `manual` 步骤同样支持 `id`/`depends_on`。
 
 ### External API (Type 4) 
 

@@ -224,9 +224,32 @@ def _node_yaml_name(node: dict, use_bot_session: bool = False) -> str:
     return f"{tag}#temp#{inst}"
 
 
+def _has_fan_in(edges: list[dict]) -> bool:
+    """Check if any node has multiple incoming edges (fan-in), requiring DAG mode."""
+    in_count: dict[str, int] = {}
+    for e in edges:
+        tgt = e.get("target", "")
+        in_count[tgt] = in_count.get(tgt, 0) + 1
+    return any(c > 1 for c in in_count.values())
+
+
+def _has_fan_out(edges: list[dict]) -> bool:
+    """Check if any node has multiple outgoing edges (fan-out), requiring DAG mode."""
+    out_count: dict[str, int] = {}
+    for e in edges:
+        src = e.get("source", "")
+        out_count[src] = out_count.get(src, 0) + 1
+    return any(c > 1 for c in out_count.values())
+
+
 def layout_to_yaml(data: dict) -> str:
     """
     Convert the canvas layout data to OASIS-compatible YAML schedule.
+
+    When edges form a DAG with fan-in or fan-out (a node has multiple
+    predecessors or successors), outputs DAG format with id/depends_on
+    so the engine can maximize parallelism. Otherwise falls back to the
+    simpler linear step list.
 
     Input data format:
     {
@@ -300,7 +323,7 @@ def layout_to_yaml(data: dict) -> str:
             author = group.get("author", "主持人")
             plan.append({"manual": {"author": author, "content": content}})
 
-    # Step 2: Process edges → sequential steps (workflow)
+    # Step 2: Process edges → workflow steps
     # Filter edges that connect ungrouped nodes
     workflow_edges = [
         e for e in edges
@@ -311,22 +334,61 @@ def layout_to_yaml(data: dict) -> str:
     edge_consumed_ids: set = set()
 
     if workflow_edges:
-        ordered_ids = _topological_sort_edges(workflow_edges, node_map)
-        for nid in ordered_ids:
-            node = node_map.get(nid)
-            if not node:
-                continue
-            edge_consumed_ids.add(nid)
-            if node.get("type") == "manual":
-                # Manual node in workflow → emit as manual step (not expert)
-                plan.append({
-                    "manual": {
-                        "author": node.get("author", "主持人"),
-                        "content": node.get("content", ""),
+        # Decide: DAG mode (id + depends_on) vs linear mode
+        use_dag = _has_fan_in(workflow_edges) or _has_fan_out(workflow_edges)
+
+        if use_dag:
+            # ── DAG mode: emit steps with id and depends_on ──
+            # Build predecessors map: node_id → [predecessor node_ids]
+            preds: dict[str, list[str]] = {}
+            all_edge_nodes = set()
+            for e in workflow_edges:
+                src, tgt = e["source"], e["target"]
+                preds.setdefault(tgt, []).append(src)
+                all_edge_nodes.add(src)
+                all_edge_nodes.add(tgt)
+
+            # Assign stable step IDs based on node id
+            for nid in _topological_sort_edges(workflow_edges, node_map):
+                node = node_map.get(nid)
+                if not node:
+                    continue
+                edge_consumed_ids.add(nid)
+
+                if node.get("type") == "manual":
+                    step = {
+                        "id": nid,
+                        "manual": {
+                            "author": node.get("author", "主持人"),
+                            "content": node.get("content", ""),
+                        },
                     }
-                })
-            else:
-                plan.append(_make_expert_step(node))
+                else:
+                    step = _make_expert_step(node)
+                    step["id"] = nid
+
+                deps = preds.get(nid, [])
+                if deps:
+                    step["depends_on"] = deps
+
+                plan.append(step)
+        else:
+            # ── Linear mode (simple chain): topological sort → sequential ──
+            ordered_ids = _topological_sort_edges(workflow_edges, node_map)
+            for nid in ordered_ids:
+                node = node_map.get(nid)
+                if not node:
+                    continue
+                edge_consumed_ids.add(nid)
+                if node.get("type") == "manual":
+                    plan.append({
+                        "manual": {
+                            "author": node.get("author", "主持人"),
+                            "content": node.get("content", ""),
+                        }
+                    })
+                else:
+                    plan.append(_make_expert_step(node))
     else:
         # Step 3: Process remaining ungrouped, unconnected nodes
         # Auto-detect spatial patterns
@@ -450,14 +512,28 @@ def _build_llm_prompt(data: dict) -> str:
     # ── Describe relationships ──
     relationships = []
 
-    # Edges → sequential workflow
+    # Edges → workflow connections
     if edges:
+        # Filter to ungrouped edges for DAG detection
+        _grouped_ids = set()
+        for g in groups:
+            _grouped_ids.update(g.get("nodeIds", []))
+        _wf_edges = [e for e in edges if e["source"] not in _grouped_ids and e["target"] not in _grouped_ids]
+        _is_dag = _has_fan_in(_wf_edges) or _has_fan_out(_wf_edges) if _wf_edges else False
+
         chains = []
         for e in edges:
             src = node_map.get(e["source"], {})
             tgt = node_map.get(e["target"], {})
-            chains.append(f"    {src.get('name', '?')} → {tgt.get('name', '?')}")
-        relationships.append("Sequential workflow connections (these experts should speak in order):\n" + "\n".join(chains))
+            chains.append(f"    {src.get('name', '?')} ({e['source']}) → {tgt.get('name', '?')} ({e['target']})")
+        if _is_dag:
+            relationships.append(
+                "DAG workflow connections (has fan-in or fan-out — use id/depends_on DAG format):\n"
+                + "\n".join(chains)
+                + "\n    ⚠ Nodes with all predecessors complete should start immediately (maximize parallelism)."
+            )
+        else:
+            relationships.append("Sequential workflow connections (simple chain — use linear format):\n" + "\n".join(chains))
 
     # Groups
     for g in groups:
@@ -516,7 +592,9 @@ def _build_llm_prompt(data: dict) -> str:
 
 ## OASIS YAML Format Rules
 
-The YAML must follow this structure:
+The YAML supports two modes: **Linear** (simple chain) and **DAG** (directed acyclic graph with parallelism).
+
+### Linear Mode (simple sequential pipeline):
 ```yaml
 version: 1
 repeat: true/false
@@ -534,6 +612,44 @@ plan:
       content: "Please summarize..."
 ```
 
+### DAG Mode (when nodes have fan-in or fan-out — i.e. a node has multiple predecessors or successors):
+When the workflow is NOT a simple chain, use `id` and `depends_on` fields to express the dependency graph.
+The engine will run nodes in parallel whenever their dependencies are satisfied — no unnecessary waiting.
+
+```yaml
+version: 1
+repeat: false
+plan:
+  - id: n1                        # Unique step identifier (use the canvas node id)
+    expert: "creative#temp#1"     # Root node — no depends_on, starts immediately
+  - id: n2
+    expert: "critical#temp#1"     # Another root — runs in PARALLEL with n1
+  - id: n3
+    expert: "writer#temp#1"
+    depends_on: [n1, n2]          # Fan-in: waits for BOTH n1 and n2 to finish
+  - id: n4
+    expert: "reviewer#temp#1"
+    depends_on: [n3]              # Runs after n3 completes
+```
+
+**DAG rules:**
+- Every step MUST have a unique `id` field.
+- `depends_on` is a list of step ids that must complete before this step starts. Omit it for root nodes (no predecessors).
+- The graph MUST be acyclic (no circular dependencies).
+- Steps with no dependency relationship run in parallel automatically.
+- `manual` steps can also have `id`/`depends_on`:
+  ```yaml
+  - id: m1
+    manual:
+      author: "主持人"
+      content: "Summarize the above"
+    depends_on: [n3, n4]
+  ```
+
+**When to use which mode:**
+- Use **Linear** when the workflow is a simple A→B→C chain (every node has at most one predecessor and one successor).
+- Use **DAG** when any node has multiple incoming edges (fan-in) or any node has multiple outgoing edges (fan-out).
+
 ## Expert Name Formats
 1. `tag#temp#N` — Preset expert instance N (stateless), e.g. "creative#temp#1", "creative#temp#2" (same expert used twice)
 2. `tag#oasis#new` — Preset expert (stateful session, auto-creates new session), use when bot_session mode is ON
@@ -542,9 +658,10 @@ plan:
 
 ## Available Step Types
 1. `expert: "Name"` — Single expert speaks in order
-2. `parallel: ["A", "B"]` — Multiple experts speak simultaneously
-3. `all_experts: true` — Everyone speaks at once
+2. `parallel: ["A", "B"]` — Multiple experts speak simultaneously (linear mode only)
+3. `all_experts: true` — Everyone speaks at once (linear mode only)
 4. `manual: {{author, content}}` — Inject fixed text (no LLM)
+5. `id` + `depends_on` — DAG dependency declaration (DAG mode, can combine with expert or manual)
 
 ## Current Canvas State
 
@@ -563,10 +680,12 @@ plan:
 ## Current Rule YAML (Auto-generated Reference)
 
 **IMPORTANT**: The following YAML was auto-generated from the canvas layout using a rule-based algorithm.
-It contains the complete configuration for each agent (including api_url, headers, model, etc.),
-but the **agent ordering may NOT be correct** — the algorithm uses simple spatial heuristics (left-to-right, top-to-bottom)
-which may not reflect the user's intended execution order. Please use this as a REFERENCE for agent configurations
-and adjust the ordering based on the canvas relationships and spatial layout analysis above.
+It contains the complete configuration for each agent (including api_url, headers, model, etc.).
+If the reference YAML contains `id` and `depends_on` fields, it means the workflow is a DAG —
+you MUST preserve DAG format in your output. The auto-generated dependency graph is accurate;
+focus on verifying the expert configurations and adjusting if needed.
+For simple linear workflows (no `id`/`depends_on`), the ordering may need adjustment based on
+the canvas relationships and spatial layout analysis above.
 
 ```yaml
 {current_rule_yaml if current_rule_yaml else "# (no rule YAML could be generated)"}
@@ -575,11 +694,12 @@ and adjust the ordering based on the canvas relationships and spatial layout ana
 ## Your Task
 
 Based on the above canvas arrangement, generate an OASIS YAML schedule that:
-1. Respects the explicit connections (edges = sequential order)
-2. Respects the explicit groups (parallel groups = simultaneous speaking)
-3. Interprets the spatial arrangement when no explicit connections exist
-4. Uses `repeat: {str(settings.get('repeat', True)).lower()}`
-5. Optimizes the collaboration pattern for the given experts
+1. Respects the explicit connections (edges define dependency order)
+2. Uses **DAG format** (id + depends_on) when the workflow has fan-in or fan-out; uses **linear format** for simple chains
+3. Respects the explicit groups (parallel groups = simultaneous speaking)
+4. Interprets the spatial arrangement when no explicit connections exist
+5. Uses `repeat: {str(settings.get('repeat', True)).lower()}`
+6. Maximizes parallelism — nodes with no dependency relationship should be able to run concurrently
 
 You MUST also call the `set_oasis_workflow` tool to save the generated YAML as a named workflow,
 so that the workflow is immediately ready to use from the OASIS panel.
@@ -634,7 +754,9 @@ def agent_generate_yaml():
                     "content": (
                         "You are a YAML schedule generator for the OASIS expert orchestration engine. "
                         "You have TWO tasks to complete:\n\n"
-                        "1. Generate a valid OASIS YAML schedule (starting with 'version: 1' and containing a 'plan:' section).\n"
+                        "1. Generate a valid OASIS YAML schedule (starting with 'version: 1' and containing a 'plan:' section). "
+                        "The schedule supports two modes: LINEAR (simple sequential steps) and DAG (steps with `id` and `depends_on` "
+                        "fields for parallel execution with dependency tracking). Use DAG mode when the workflow has fan-in or fan-out.\n"
                         "2. Call the `set_oasis_workflow` MCP tool to save it as a named workflow so it is immediately ready to use.\n\n"
                         "You may output the YAML in your response AND call the tool — both are required. "
                         "Use a descriptive workflow name based on the task/experts involved (e.g. 'code_review_pipeline', 'brainstorm_trio'). "

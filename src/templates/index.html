@@ -320,6 +320,7 @@
 
                 <!-- Center: Canvas -->
                 <div class="orch-canvas-wrapper">
+                    <button class="orch-sidebar-toggle" id="orch-sidebar-toggle" onclick="toggleOrchSidebar()" title="Toggle Expert Pool">◀</button>
                     <!-- Toolbar -->
                     <div class="orch-toolbar">
                         <button onclick="orchAutoArrange()" class="orch-btn" data-i18n-title="orch_tip_arrange" title="自动排列"><span data-i18n="orch_btn_arrange">🔄 排列</span></button>
@@ -332,6 +333,7 @@
                         <input type="file" id="orch-yaml-upload-input" accept=".yaml,.yml" style="display:none;" onchange="orchHandleYamlUpload(event)">
                         <button onclick="orchRefreshSessions()" class="orch-btn" data-i18n-title="orch_tip_status" title="刷新 session 状态"><span data-i18n="orch_btn_status">🔄 状态</span></button>
                         <button onclick="orchClearCanvas()" class="orch-btn orch-btn-danger" data-i18n-title="orch_tip_clear" title="清空画布"><span data-i18n="orch_btn_clear">🗑️ 清空</span></button>
+                        <button onclick="toggleOrchFocusMode()" id="orch-focus-btn" class="orch-btn" title="专注模式：隐藏两侧面板"><span data-i18n="orch_btn_focus">🎯 专注</span></button>
                     </div>
                     <div class="orch-canvas" id="orch-canvas-area">
                         <div class="orch-canvas-inner" id="orch-canvas-inner">
@@ -473,14 +475,17 @@
                         <!-- Posts will be injected here -->
                     </div>
 
-                    <!-- Conclusion area -->
+                    <!-- Conclusion area (collapsible) -->
                     <div id="oasis-conclusion-area" class="p-3 border-t flex-shrink-0" style="display:none;">
                         <div class="oasis-conclusion-box">
-                            <div class="flex items-center space-x-1 mb-2">
-                                <span class="text-sm">🏆</span>
-                                <span class="text-xs font-bold text-green-800" data-i18n="oasis_conclusion">讨论结论</span>
+                            <div class="flex items-center justify-between cursor-pointer" onclick="toggleConclusionCollapse()">
+                                <div class="flex items-center space-x-1">
+                                    <span class="text-sm">🏆</span>
+                                    <span class="text-xs font-bold text-green-800" data-i18n="oasis_conclusion">讨论结论</span>
+                                </div>
+                                <span id="oasis-conclusion-toggle" class="text-xs text-gray-400 transition-transform" style="display:inline-block;">▼</span>
                             </div>
-                            <p id="oasis-conclusion-text" class="text-xs text-gray-700 leading-relaxed"></p>
+                            <p id="oasis-conclusion-text" class="text-xs text-gray-700 leading-relaxed mt-2"></p>
                         </div>
                     </div>
                 </div>
@@ -504,6 +509,16 @@
             if (shortcuts) shortcuts.style.display = 'none';
             icon.style.transform = 'rotate(-90deg)';
         }
+    }
+
+    // Toggle orchestration focus mode (collapse both sidebar and right panel)
+    function toggleOrchFocusMode() {
+        const sidebar = document.querySelector('.orch-sidebar');
+        const rightPanel = document.querySelector('.orch-right-panel');
+        const btn = document.getElementById('orch-focus-btn');
+        const isFocused = sidebar.classList.toggle('focus-hidden');
+        rightPanel.classList.toggle('focus-hidden', isFocused);
+        btn.classList.toggle('focus-active', isFocused);
     }
     </script>
     <script src="/static/js/main.js"></script>

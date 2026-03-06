@@ -2419,9 +2419,23 @@ function renderTopicDetail(detail) {
     if (detail.conclusion && detail.status === 'concluded') {
         document.getElementById('oasis-conclusion-text').textContent = detail.conclusion;
         conclusionArea.style.display = 'block';
+        // Reset to expanded state
+        const textEl = document.getElementById('oasis-conclusion-text');
+        const toggleEl = document.getElementById('oasis-conclusion-toggle');
+        textEl.style.display = '';
+        if (toggleEl) toggleEl.textContent = '▼';
     } else {
         conclusionArea.style.display = 'none';
     }
+}
+
+function toggleConclusionCollapse() {
+    const textEl = document.getElementById('oasis-conclusion-text');
+    const toggleEl = document.getElementById('oasis-conclusion-toggle');
+    if (!textEl) return;
+    const collapsed = textEl.style.display === 'none';
+    textEl.style.display = collapsed ? '' : 'none';
+    if (toggleEl) toggleEl.textContent = collapsed ? '▼' : '▶';
 }
 
 function fmtElapsed(sec) {

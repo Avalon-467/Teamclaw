@@ -64,6 +64,28 @@ Schedule YAML format:
     # 所有专家并行（等同于不用 schedule 的默认行为）
     - all_experts: true
 
+  # ── DAG 模式（单向无环图调度）──
+  # 当 plan 中的步骤包含 id 和 depends_on 字段时，自动进入 DAG 模式。
+  # 每个步骤的所有前驱步骤完成后，该步骤立即开始执行（最大化并行）。
+  #
+  # 示例:
+  #   version: 1
+  #   repeat: false
+  #   plan:
+  #     - id: step_a
+  #       expert: "creative#temp#1"
+  #     - id: step_b
+  #       expert: "critical#temp#1"
+  #     - id: step_c
+  #       expert: "writer#temp#1"
+  #       depends_on: [step_a, step_b]     # step_c 等待 step_a 和 step_b 都完成
+  #     - id: step_d
+  #       expert: "reviewer#temp#1"
+  #       depends_on: [step_c]
+  #
+  # depends_on 为空列表或省略 → 该步骤没有前驱，立即执行。
+  # DAG 必须是无环的，否则会抛出 ValueError。
+
 Execution modes:
   repeat: true  -> plan 在每轮重复执行，max_rounds 控制总轮数
   repeat: false -> plan 中的步骤顺序执行一次即结束（忽略 max_rounds）
@@ -104,6 +126,9 @@ class ScheduleStep:
     manual_reply_to: Optional[int] = None                    # for MANUAL
     # External agent config: expert_name → {api_url, api_key, model}
     external_configs: dict[str, dict] = field(default_factory=dict)
+    # DAG fields
+    step_id: str = ""                                        # unique id for DAG dependency
+    depends_on: list[str] = field(default_factory=list)      # list of step_ids this step waits for
 
 
 @dataclass
@@ -112,6 +137,7 @@ class Schedule:
     steps: list[ScheduleStep]
     repeat: bool = False  # True = repeat plan each round; False = run once
     discussion: bool = False  # True = forum discussion mode (JSON reply/vote); False = execute mode (agents just run tasks)
+    is_dag: bool = False  # True when steps have id/depends_on fields (DAG execution mode)
 
 
 def _extract_external_config(item: dict) -> dict:
@@ -162,9 +188,23 @@ def parse_schedule(yaml_content: str) -> Schedule:
     discussion = bool(data.get("discussion", False))
 
     steps: list[ScheduleStep] = []
+    has_ids = False  # track whether any step has an 'id' field → DAG mode
+
     for i, item in enumerate(plan):
         if not isinstance(item, dict):
             raise ValueError(f"Step {i}: must be a dict, got {type(item).__name__}")
+
+        # Extract DAG fields (common to all step types)
+        step_id = str(item.get("id", ""))
+        depends_on_raw = item.get("depends_on", [])
+        if isinstance(depends_on_raw, str):
+            depends_on = [depends_on_raw]
+        elif isinstance(depends_on_raw, list):
+            depends_on = [str(d) for d in depends_on_raw]
+        else:
+            depends_on = []
+        if step_id:
+            has_ids = True
 
         if "expert" in item:
             expert_name = str(item["expert"])
@@ -179,6 +219,8 @@ def parse_schedule(yaml_content: str) -> Schedule:
                 expert_names=[expert_name],
                 instructions=instr_map,
                 external_configs=ext_configs,
+                step_id=step_id,
+                depends_on=depends_on,
             ))
 
         elif "parallel" in item:
@@ -204,10 +246,16 @@ def parse_schedule(yaml_content: str) -> Schedule:
                 expert_names=names,
                 instructions=instr_map,
                 external_configs=ext_configs,
+                step_id=step_id,
+                depends_on=depends_on,
             ))
 
         elif "all_experts" in item:
-            steps.append(ScheduleStep(step_type=StepType.ALL))
+            steps.append(ScheduleStep(
+                step_type=StepType.ALL,
+                step_id=step_id,
+                depends_on=depends_on,
+            ))
 
         elif "manual" in item:
             m = item["manual"]
@@ -218,12 +266,55 @@ def parse_schedule(yaml_content: str) -> Schedule:
                 manual_author=str(m.get("author", "主持人")),
                 manual_content=str(m["content"]),
                 manual_reply_to=m.get("reply_to"),
+                step_id=step_id,
+                depends_on=depends_on,
             ))
 
         else:
             raise ValueError(f"Step {i}: unknown step type, keys={list(item.keys())}")
 
-    return Schedule(steps=steps, repeat=repeat, discussion=discussion)
+    # Detect DAG mode: if any step has an 'id', it's a DAG schedule
+    is_dag = has_ids
+
+    # Validate DAG: check for cycles and invalid references
+    if is_dag:
+        _validate_dag(steps)
+
+    return Schedule(steps=steps, repeat=repeat, discussion=discussion, is_dag=is_dag)
+
+
+def _validate_dag(steps: list[ScheduleStep]) -> None:
+    """Validate DAG: check that all depends_on references exist and there are no cycles."""
+    id_set = {s.step_id for s in steps if s.step_id}
+
+    # Check all depends_on references are valid
+    for s in steps:
+        for dep in s.depends_on:
+            if dep not in id_set:
+                raise ValueError(f"Step '{s.step_id}': depends_on references unknown step '{dep}'")
+
+    # Check for cycles using Kahn's algorithm
+    in_deg: dict[str, int] = {s.step_id: 0 for s in steps if s.step_id}
+    adj: dict[str, list[str]] = {s.step_id: [] for s in steps if s.step_id}
+    for s in steps:
+        if not s.step_id:
+            continue
+        for dep in s.depends_on:
+            adj[dep].append(s.step_id)
+            in_deg[s.step_id] += 1
+
+    queue = [sid for sid, deg in in_deg.items() if deg == 0]
+    visited = 0
+    while queue:
+        node = queue.pop(0)
+        visited += 1
+        for neighbor in adj.get(node, []):
+            in_deg[neighbor] -= 1
+            if in_deg[neighbor] == 0:
+                queue.append(neighbor)
+
+    if visited < len(id_set):
+        raise ValueError("DAG schedule contains a cycle — workflow must be acyclic")
 
 
 def load_schedule_file(path: str) -> Schedule:
