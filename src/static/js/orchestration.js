@@ -1066,7 +1066,7 @@ async function orchDoLoadLayout(name) {
 
         // Restore settings
         if (data.settings) {
-            document.getElementById('orch-repeat').checked = data.settings.repeat !== false;
+            document.getElementById('orch-repeat').checked = data.settings.repeat === true;
             document.getElementById('orch-rounds').value = data.settings.max_rounds || 5;
             document.getElementById('orch-bot-session').checked = data.settings.use_bot_session || false;
             if (data.settings.cluster_threshold) {
@@ -1171,7 +1171,7 @@ async function orchImportYamlFile(file) {
             const data = res.layout;
             // Restore settings
             if (data.settings) {
-                document.getElementById('orch-repeat').checked = data.settings.repeat !== false;
+                document.getElementById('orch-repeat').checked = data.settings.repeat === true;
                 document.getElementById('orch-rounds').value = data.settings.max_rounds || 5;
                 document.getElementById('orch-bot-session').checked = data.settings.use_bot_session || false;
                 if (data.settings.cluster_threshold) {

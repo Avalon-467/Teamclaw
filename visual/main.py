@@ -268,7 +268,7 @@ def layout_to_yaml(data: dict) -> str:
             ...
         ],
         "settings": {
-            "repeat": true,
+            "repeat": false,
             "max_rounds": 5,
             "use_bot_session": false,
             "cluster_threshold": 150
@@ -280,7 +280,7 @@ def layout_to_yaml(data: dict) -> str:
     groups = data.get("groups", [])
     settings = data.get("settings", {})
 
-    repeat = settings.get("repeat", True)
+    repeat = settings.get("repeat", False)
     use_bot_session = settings.get("use_bot_session", False)
     node_map = {n["id"]: n for n in nodes}
 
@@ -578,7 +578,7 @@ def _build_llm_prompt(data: dict) -> str:
         spatial_desc = "No expert nodes on canvas."
 
     # ── Settings description ──
-    repeat_str = "true (repeat plan every round — good for debates/discussions)" if settings.get("repeat", True) else "false (execute plan once — good for task pipelines)"
+    repeat_str = "true (repeat plan every round — good for debates/discussions)" if settings.get("repeat", False) else "false (execute plan once — good for task pipelines)"
     bot_session_str = "Stateful bot mode (experts have memory + tools, suitable for complex task execution)" if settings.get("use_bot_session", False) else "Stateless discussion mode (lightweight, no memory, suitable for debates/brainstorming)"
 
     # ── Generate current rule YAML as reference ──
@@ -698,7 +698,7 @@ Based on the above canvas arrangement, generate an OASIS YAML schedule that:
 2. Uses **DAG format** (id + depends_on) when the workflow has fan-in or fan-out; uses **linear format** for simple chains
 3. Respects the explicit groups (parallel groups = simultaneous speaking)
 4. Interprets the spatial arrangement when no explicit connections exist
-5. Uses `repeat: {str(settings.get('repeat', True)).lower()}`
+5. Uses `repeat: {str(settings.get('repeat', False)).lower()}`
 6. Maximizes parallelism — nodes with no dependency relationship should be able to run concurrently
 
 You MUST follow this exact order:
@@ -877,7 +877,7 @@ def _validate_generated_yaml(yaml_str: str) -> dict:
         return {
             "valid": True,
             "version": parsed.get("version"),
-            "repeat": parsed.get("repeat", True),
+            "repeat": parsed.get("repeat", False),
             "steps": plan_steps,
             "step_types": step_types,
         }

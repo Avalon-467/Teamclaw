@@ -950,7 +950,12 @@ async def system_trigger(req: SystemTriggerRequest, x_internal_token: str | None
             agent.set_thread_busy_source(thread_id, "system")
             print(f"[SystemTrigger] 🔒 Acquired lock on {thread_id}, invoking graph ...")
             try:
-                await agent.agent_app.ainvoke(system_input, config)
+                # 用 astream_events 替代 ainvoke，这样每个 event 都是一个
+                # await 点，task.cancel() 可以在任意 event 间隙注入
+                async for event in agent.agent_app.astream_events(
+                    system_input, config, version="v2"
+                ):
+                    pass  # 不需要处理事件，只是消费完整个流
                 agent.add_pending_system_message(thread_id)
                 print(f"[SystemTrigger] ✅ Done for {thread_id}")
             except asyncio.CancelledError:

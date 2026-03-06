@@ -323,7 +323,7 @@ const state = {
     nextEdgeId: 1,
     nextGroupId: 1,
     settings: {
-        repeat: true,
+        repeat: false,
         max_rounds: 5,
         use_bot_session: false,
         cluster_threshold: 150,
