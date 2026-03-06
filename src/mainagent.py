@@ -397,122 +397,19 @@ async def login(req: LoginRequest):
     raise HTTPException(status_code=401, detail="用户名或密码错误")
 
 
-@app.post("/ask", deprecated=True)
-async def ask_agent(req: UserRequest):
-    """[已弃用] 请使用 POST /v1/chat/completions (非流式, stream=false)"""
-    if not verify_password(req.user_id, req.password):
-        raise HTTPException(status_code=401, detail="用户名或密码错误")
-
-    # Compose thread_id: user_id#session_id for conversation isolation
-    thread_id = f"{req.user_id}#{req.session_id}"
-    config = {"configurable": {"thread_id": thread_id}}
-    user_input = {
-        "messages": [_build_human_message(req.text, req.images, req.files, req.audios)],
-        "trigger_source": "user",
-        "enabled_tools": req.enabled_tools,
-        "user_id": req.user_id,
-        "session_id": req.session_id,
-    }
-
-    result = await agent.agent_app.ainvoke(user_input, config)
-    return {"status": "success", "response": _extract_text(result["messages"][-1].content)}
-
-
-@app.post("/ask_stream", deprecated=True)
-async def ask_agent_stream(req: UserRequest):
-    """[已弃用] 请使用 POST /v1/chat/completions (流式, stream=true)"""
-    if not verify_password(req.user_id, req.password):
-        raise HTTPException(status_code=401, detail="用户名或密码错误")
-
-    # Cancel previous active task for this user+session
-    task_key = f"{req.user_id}#{req.session_id}"
-    await agent.cancel_task(task_key)
-
-    # Compose thread_id: user_id#session_id for conversation isolation
-    thread_id = f"{req.user_id}#{req.session_id}"
-    config = {"configurable": {"thread_id": thread_id}}
-    user_input = {
-        "messages": [_build_human_message(req.text, req.images, req.files, req.audios)],
-        "trigger_source": "user",
-        "enabled_tools": req.enabled_tools,
-        "user_id": req.user_id,
-        "session_id": req.session_id,
-    }
-
-    queue: asyncio.Queue[str | None] = asyncio.Queue()
-
-    async def _stream_worker(task_key=task_key):
-        """在独立 Task 中运行 astream_events，产出数据写入 queue"""
-        collected_tokens = []
-        try:
-            async for event in agent.agent_app.astream_events(user_input, config, version="v2"):
-                kind = event.get("event", "")
-                if kind == "on_chat_model_stream":
-                    chunk = event.get("data", {}).get("chunk")
-                    if chunk and hasattr(chunk, "content") and chunk.content:
-                        text = _extract_text(chunk.content)
-                        if text:
-                            collected_tokens.append(text)
-                            text = text.replace("\\", "\\\\").replace("\n", "\\n")
-                            await queue.put(f"data: {text}\n\n")
-                elif kind == "on_tool_start":
-                    tool_name = event.get("name", "")
-                    await queue.put(f"data: \\n🔧 调用工具: {tool_name}...\\n\n\n")
-                elif kind == "on_tool_end":
-                    await queue.put(f"data: \\n✅ 工具执行完成\\n\n\n")
-            await queue.put("data: [DONE]\n\n")
-        except asyncio.CancelledError:
-            # 终止时，修复 checkpoint 中可能不完整的消息序列
-            try:
-                snapshot = await agent.agent_app.aget_state(config)
-                last_msgs = snapshot.values.get("messages", [])
-                if last_msgs:
-                    last_msg = last_msgs[-1]
-                    if hasattr(last_msg, "tool_calls") and last_msg.tool_calls:
-                        tool_messages = [
-                            ToolMessage(
-                                content="⚠️ 工具调用被用户终止",
-                                tool_call_id=tc["id"],
-                            )
-                            for tc in last_msg.tool_calls
-                        ]
-                        await agent.agent_app.aupdate_state(config, {"messages": tool_messages})
-            except Exception:
-                pass
-
-            partial_text = "".join(collected_tokens)
-            if partial_text:
-                partial_text += "\n\n⚠️ （回复被用户终止）"
-                partial_msg = AIMessage(content=partial_text)
-                await agent.agent_app.aupdate_state(config, {"messages": [partial_msg]})
-            await queue.put(f"data: \\n\\n⚠️ 已终止思考\n\n")
-            await queue.put("data: [DONE]\n\n")
-        except Exception as e:
-            await queue.put(f"data: \\n❌ 流式响应异常: {str(e)}\n\n")
-            await queue.put("data: [DONE]\n\n")
-        finally:
-            await queue.put(None)
-            agent.unregister_task(task_key)
-
-    task = asyncio.create_task(_stream_worker())
-    agent.register_task(task_key, task)
-
-    async def event_generator():
-        while True:
-            item = await queue.get()
-            if item is None:
-                break
-            yield item
-
-    return StreamingResponse(
-        event_generator(),
-        media_type="text/event-stream",
-        headers={
-            "Cache-Control": "no-cache",
-            "Connection": "keep-alive",
-            "X-Accel-Buffering": "no",
-        },
-    )
+# ──────────────────────────────────────────────────────────────
+# [已弃用] /ask 和 /ask_stream — 已被 /v1/chat/completions 替代
+# 前端和内部调用均已迁移，以下端点注释保留备查。
+# ──────────────────────────────────────────────────────────────
+# @app.post("/ask", deprecated=True)
+# async def ask_agent(req: UserRequest):
+#     """[已弃用] 请使用 POST /v1/chat/completions (非流式, stream=false)"""
+#     ...
+#
+# @app.post("/ask_stream", deprecated=True)
+# async def ask_agent_stream(req: UserRequest):
+#     """[已弃用] 请使用 POST /v1/chat/completions (流式, stream=true)"""
+#     ...
 
 
 @app.post("/cancel")
@@ -1306,12 +1203,43 @@ async def openai_chat_completions(
 
     # --- 非流式 ---
     if not req.stream:
-        async with thread_lock:
-            agent.set_thread_busy_source(thread_id, "user")
+        task_key = f"{user_id}#{session_id}"
+        await agent.cancel_task(task_key)
+
+        async def _non_stream_worker():
+            async with thread_lock:
+                agent.set_thread_busy_source(thread_id, "user")
+                try:
+                    return await agent.agent_app.ainvoke(user_input, config)
+                finally:
+                    agent.clear_thread_busy_source(thread_id)
+
+        task = asyncio.create_task(_non_stream_worker())
+        agent.register_task(task_key, task)
+        try:
+            result = await task
+        except asyncio.CancelledError:
+            # 被 cancel_task 终止：修复 checkpoint 中可能不完整的 tool_calls
             try:
-                result = await agent.agent_app.ainvoke(user_input, config)
-            finally:
-                agent.clear_thread_busy_source(thread_id)
+                snapshot = await agent.agent_app.aget_state(config)
+                last_msgs = snapshot.values.get("messages", [])
+                if last_msgs:
+                    last_msg_item = last_msgs[-1]
+                    if hasattr(last_msg_item, "tool_calls") and last_msg_item.tool_calls:
+                        tool_messages = [
+                            ToolMessage(
+                                content="⚠️ 工具调用被用户终止",
+                                tool_call_id=tc["id"],
+                            )
+                            for tc in last_msg_item.tool_calls
+                        ]
+                        await agent.agent_app.aupdate_state(config, {"messages": tool_messages})
+            except Exception:
+                pass
+            return _make_openai_response("⚠️ 已终止", model=model_name)
+        finally:
+            agent.unregister_task(task_key)
+
         last_msg = result["messages"][-1]
 
         # 检测是否有外部工具调用需要返回

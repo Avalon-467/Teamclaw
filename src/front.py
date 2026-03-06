@@ -16,8 +16,9 @@ app.config['MAX_CONTENT_LENGTH'] = 50 * 1024 * 1024  # 50MB for image uploads
 
 # --- 配置区 ---
 PORT_AGENT = int(os.getenv("PORT_AGENT", "51200"))
-LOCAL_AGENT_URL = f"http://127.0.0.1:{PORT_AGENT}/ask"
-LOCAL_AGENT_STREAM_URL = f"http://127.0.0.1:{PORT_AGENT}/ask_stream"
+# [已弃用] 旧端点 URL，已被 /v1/chat/completions 替代
+# LOCAL_AGENT_URL = f"http://127.0.0.1:{PORT_AGENT}/ask"
+# LOCAL_AGENT_STREAM_URL = f"http://127.0.0.1:{PORT_AGENT}/ask_stream"
 LOCAL_AGENT_CANCEL_URL = f"http://127.0.0.1:{PORT_AGENT}/cancel"
 LOCAL_LOGIN_URL = f"http://127.0.0.1:{PORT_AGENT}/login"
 LOCAL_TOOLS_URL = f"http://127.0.0.1:{PORT_AGENT}/tools"
@@ -205,178 +206,17 @@ def proxy_login():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
-@app.route("/proxy_ask", methods=["POST"])
-def proxy_ask():
-    """[已弃用] 非流式代理，请改用 /v1/chat/completions (stream=false)"""
-    user_id = session.get("user_id")
-    password = session.get("password")
-    if not user_id or not password:
-        return jsonify({"error": "未登录"}), 401
-
-    user_content = request.json.get("content")
-    images = request.json.get("images")
-
-    # 构造 content parts
-    content_parts = []
-    if user_content:
-        content_parts.append({"type": "text", "text": user_content})
-    if images:
-        for img_data in images:
-            content_parts.append({"type": "image_url", "image_url": {"url": img_data}})
-
-    if len(content_parts) == 1 and content_parts[0]["type"] == "text":
-        msg_content = content_parts[0]["text"]
-    elif content_parts:
-        msg_content = content_parts
-    else:
-        msg_content = "(空消息)"
-
-    openai_payload = {
-        "model": "mini-timebot",
-        "messages": [{"role": "user", "content": msg_content}],
-        "stream": False,
-        "user": user_id,
-        "password": password,
-    }
-
-    try:
-        r = requests.post(
-            LOCAL_OPENAI_COMPLETIONS_URL,
-            json=openai_payload,
-            headers={"Authorization": f"Bearer {user_id}:{password}"},
-            timeout=120,
-        )
-        if r.status_code == 401:
-            session.clear()
-            return jsonify(r.json()), 401
-        resp = r.json()
-        # 从 OpenAI 格式提取 content 转为原格式
-        content = resp.get("choices", [{}])[0].get("message", {}).get("content", "")
-        return jsonify({"status": "success", "response": content})
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
-
-@app.route("/proxy_ask_stream", methods=["POST"])
-def proxy_ask_stream():
-    """[已弃用] 流式代理，请改用 /v1/chat/completions (stream=true)"""
-    user_id = session.get("user_id")
-    password = session.get("password")
-    if not user_id or not password:
-        return jsonify({"error": "未登录"}), 401
-
-    data = request.get_json(silent=True)
-    if data is None:
-        content_len = request.content_length or 0
-        print(f"[proxy_ask_stream] ⚠️ JSON 解析失败, content_length={content_len}, content_type={request.content_type}")
-        return jsonify({"error": f"请求体解析失败 (大小: {content_len/1024/1024:.1f}MB)"}), 400
-
-    user_content = data.get("content")
-    enabled_tools = data.get("enabled_tools")  # None or list
-    session_id = data.get("session_id", "default")
-    images = data.get("images")  # None or list of base64 strings
-    files = data.get("files")    # None or list of {name, content}
-    audios = data.get("audios")  # None or list of {base64, name, format}
-    print(f"[proxy_ask_stream] 收到请求: text={bool(user_content)}, images={len(images) if images else 0}, files={len(files) if files else 0}, audios={len(audios) if audios else 0}")
-
-    # 构造 OpenAI 格式的 messages content parts
-    content_parts = []
-    if user_content:
-        content_parts.append({"type": "text", "text": user_content})
-
-    # 图片 → image_url parts
-    if images:
-        for img_data in images:
-            content_parts.append({"type": "image_url", "image_url": {"url": img_data}})
-
-    # 音频 → input_audio parts
-    if audios:
-        for audio in audios:
-            content_parts.append({
-                "type": "input_audio",
-                "input_audio": {
-                    "data": audio.get("base64", ""),
-                    "format": audio.get("format", "webm"),
-                },
-            })
-
-    # 文件 → file parts
-    if files:
-        for f in files:
-            fname = f.get("name", "file")
-            fcontent = f.get("content", "")
-            ftype = f.get("type", "text")
-            file_data_uri = fcontent if fcontent.startswith("data:") else f"data:application/octet-stream;base64,{fcontent}"
-            content_parts.append({
-                "type": "file",
-                "file": {"filename": fname, "file_data": file_data_uri},
-            })
-
-    # 如果只有纯文本，content 直接用字符串
-    if len(content_parts) == 1 and content_parts[0]["type"] == "text":
-        msg_content = content_parts[0]["text"]
-    elif content_parts:
-        msg_content = content_parts
-    else:
-        msg_content = "(空消息)"
-
-    # 构造 OpenAI 格式请求
-    openai_payload = {
-        "model": "mini-timebot",
-        "messages": [{"role": "user", "content": msg_content}],
-        "stream": True,
-        "user": user_id,
-        "password": password,
-        "session_id": session_id,
-        "enabled_tools": enabled_tools,
-    }
-
-    try:
-        r = requests.post(
-            LOCAL_OPENAI_COMPLETIONS_URL,
-            json=openai_payload,
-            headers={"Authorization": f"Bearer {user_id}:{password}"},
-            stream=True,
-            timeout=120,
-        )
-        if r.status_code == 401:
-            session.clear()
-            return jsonify({"error": "认证失败"}), 401
-        if r.status_code != 200:
-            return jsonify({"error": f"Agent 返回 {r.status_code}"}), r.status_code
-
-        def generate():
-            """将 OpenAI SSE 格式转为前端期望的简单 SSE 格式"""
-            import json as _json
-            for line in r.iter_lines(decode_unicode=True):
-                if not line:
-                    continue
-                if line.startswith("data: [DONE]"):
-                    yield "data: [DONE]\n\n"
-                    continue
-                if line.startswith("data: "):
-                    try:
-                        chunk = _json.loads(line[6:])
-                        delta = chunk.get("choices", [{}])[0].get("delta", {})
-                        content = delta.get("content", "")
-                        if content:
-                            # 转换为前端期望的简单 SSE 格式
-                            text = content.replace("\\", "\\\\").replace("\n", "\\n")
-                            yield f"data: {text}\n\n"
-                    except _json.JSONDecodeError:
-                        # 透传无法解析的行
-                        yield line + "\n\n"
-
-        return Response(
-            generate(),
-            mimetype="text/event-stream",
-            headers={
-                "Cache-Control": "no-cache",
-                "Connection": "keep-alive",
-                "X-Accel-Buffering": "no",
-            },
-        )
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
+# ──────────────────────────────────────────────────────────────
+# [已弃用] proxy_ask 和 proxy_ask_stream — 已被前端直接调用
+# /v1/chat/completions 替代，以下端点注释保留备查。
+# ──────────────────────────────────────────────────────────────
+# @app.route("/proxy_ask", methods=["POST"])
+# def proxy_ask():
+#     ...
+#
+# @app.route("/proxy_ask_stream", methods=["POST"])
+# def proxy_ask_stream():
+#     ...
 
 @app.route("/proxy_cancel", methods=["POST"])
 def proxy_cancel():
