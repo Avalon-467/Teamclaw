@@ -174,6 +174,7 @@ async function orchLoadOpenClawSessions() {
                 type: 'external', name: agentName, tag: 'openclaw', emoji: '🦞', temperature: 0.7,
                 api_url: openclawUrl, api_key: '****',
                 model: modelStr,
+                ext_id: agentName,  // use agent name as ext_id to distinguish different agents
             };
             card.addEventListener('dragstart', e => {
                 e.dataTransfer.setData('application/json', JSON.stringify(nodeData));
