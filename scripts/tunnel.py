@@ -4,8 +4,8 @@
 Cloudflare Tunnel 公网部署脚本
 - 自动检测平台（Linux/macOS + amd64/arm64）
 - 提示用户手动安装 cloudflared
-- 启动两条隧道：前端 Web UI + Bark 推送服务
-- 打印各自的公网地址
+- 启动隧道：前端 Web UI
+- 打印公网地址
 """
 
 import os
@@ -31,14 +31,13 @@ ENV_PATH = os.path.join(PROJECT_ROOT, "config", ".env")
 # ── 加载配置 ──────────────────────────────────────────────
 load_dotenv(dotenv_path=os.path.join(PROJECT_ROOT, "config", ".env"))
 PORT_FRONTEND = os.getenv("PORT_FRONTEND", "51209")
-PORT_BARK = os.getenv("PORT_BARK", "58010")
 
 # ── 全局进程引用 ──────────────────────────────────────────
 tunnel_procs = []
-tunnel_urls = {}  # {"frontend": "https://...", "bark": "https://..."}
+tunnel_urls = {}  # {"frontend": "https://..."}
 urls_lock = threading.Lock()
 all_tunnels_ready = threading.Event()
-expected_tunnels = 2
+expected_tunnels = 1
 
 
 def detect_platform():
@@ -183,8 +182,6 @@ def write_domains_to_env():
     with urls_lock:
         if "frontend" in tunnel_urls:
             write_env_key("PUBLIC_DOMAIN", tunnel_urls["frontend"])
-        if "bark" in tunnel_urls:
-            write_env_key("BARK_PUBLIC_URL", tunnel_urls["bark"])
     print(f"📝 已将公网域名写入 {ENV_PATH}")
 
 
@@ -240,7 +237,6 @@ def start_tunnels():
     # Define tunnels: (name, local_port, env_key)
     tunnel_configs = [
         ("frontend", PORT_FRONTEND, "PUBLIC_DOMAIN"),
-        ("bark", PORT_BARK, "BARK_PUBLIC_URL"),
     ]
 
     # Start each tunnel in a background thread
@@ -264,9 +260,6 @@ def start_tunnels():
         with urls_lock:
             if "frontend" in tunnel_urls:
                 print(f"  🌍 前端地址: {tunnel_urls['frontend']}")
-            if "bark" in tunnel_urls:
-                print(f"  📱 Bark 推送地址: {tunnel_urls['bark']}")
-                print(f"     (请在 Bark App 中设置此地址作为 Server URL)")
         print("  按 Ctrl+C 关闭所有隧道")
         print("============================================")
         print()

@@ -26,9 +26,6 @@ USER_INJECTED_TOOLS = {
     "run_command", "run_python_code",
     # Alarm management tools
     "add_alarm", "list_alarms", "delete_alarm",
-    # Bark push notification tools
-    "set_push_key", "send_push_notification", "get_push_status",
-    "set_public_url", "get_public_url", "clear_public_url",
     # Telegram push notification tools
     "set_telegram_chat_id", "send_telegram_message", "get_telegram_status", "remove_telegram_config",
     # OASIS forum tools
@@ -304,11 +301,6 @@ class MiniTimeAgent:
             "oasis_service": {
                 "command": "python",
                 "args": [os.path.join(self._src_dir, "mcp_oasis.py")],
-                "transport": "stdio",
-            },
-            "bark_service": {
-                "command": "python",
-                "args": [os.path.join(self._src_dir, "mcp_bark.py")],
                 "transport": "stdio",
             },
             "session_service": {
