@@ -881,7 +881,7 @@ header {
 .settings-input::placeholder { color: #d1d5db; }
 
 .settings-footer {
-    display: flex; justify-content: flex-end; gap: 8px;
+    display: flex; align-items: center; gap: 8px;
     padding: 12px 20px; border-top: 1px solid #e5e7eb;
 }
 .settings-btn {
@@ -896,6 +896,12 @@ header {
     background: #2563eb; color: #fff;
 }
 .settings-btn-save:hover { background: #1d4ed8; }
+.settings-btn-restart {
+    background: linear-gradient(135deg, #f59e0b, #d97706); color: #fff;
+    border: 1.5px solid #b45309;
+}
+.settings-btn-restart:hover { background: linear-gradient(135deg, #d97706, #b45309); }
+.settings-btn-restart:disabled { opacity: 0.6; cursor: not-allowed; }
 
 @media (max-width: 768px) {
     .settings-modal { width: 100%; max-width: 100%; max-height: 100vh; border-radius: 0; }

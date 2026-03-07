@@ -220,9 +220,64 @@ def _open_browser():
 
 threading.Thread(target=_open_browser, daemon=True).start()
 
-# 等待任意子进程退出
+# 重启信号文件路径
+RESTART_FLAG = os.path.join(PROJECT_ROOT, ".restart_flag")
+# 启动时清理残留的重启信号
+if os.path.isfile(RESTART_FLAG):
+    os.remove(RESTART_FLAG)
+
+# 等待任意子进程退出 / 监测重启信号
 try:
     while True:
+        # 检测重启信号文件
+        if os.path.isfile(RESTART_FLAG):
+            print("\n🔄 检测到重启信号，正在重启所有服务...")
+            os.remove(RESTART_FLAG)
+            # 停止所有子进程
+            for p in procs:
+                if p.poll() is None:
+                    try:
+                        p.terminate()
+                    except Exception:
+                        pass
+            for _ in range(50):
+                if all(p.poll() is not None for p in procs):
+                    break
+                time.sleep(0.1)
+            for p in procs:
+                if p.poll() is None:
+                    try:
+                        p.kill()
+                    except Exception:
+                        pass
+            for p in procs:
+                try:
+                    p.wait(timeout=2)
+                except Exception:
+                    pass
+            # 等待端口释放（避免 Address already in use）
+            time.sleep(2)
+            # 重新加载 .env
+            load_dotenv(dotenv_path=ENV_PATH, override=True)
+            # 重新启动所有服务
+            procs.clear()
+            cleanup_done = False
+            print()
+            for msg, script, wait_time in services:
+                print(msg)
+                proc = subprocess.Popen(
+                    [venv_python, script],
+                    cwd=PROJECT_ROOT,
+                    stdout=None,
+                    stderr=None,
+                )
+                procs.append(proc)
+                time.sleep(wait_time)
+            print()
+            print("✅ 所有服务已重启！")
+            print()
+            continue
+
         for p in procs:
             if p.poll() is not None:
                 print(f"⚠️ 服务 (PID {p.pid}) 异常退出，正在关闭其余服务...")

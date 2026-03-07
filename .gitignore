@@ -63,3 +63,6 @@ logs/
 
 # PID 文件
 .mini_timebot.pid
+
+# 重启信号文件
+.restart_flag

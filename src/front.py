@@ -188,6 +188,15 @@ def proxy_openai_models():
         return jsonify({"error": str(e)}), 500
 
 
+@app.route("/proxy_check_session")
+def proxy_check_session():
+    """轻量 session 校验：前端页面加载时调用，确认后端 session 仍然有效"""
+    user_id = session.get("user_id")
+    if user_id:
+        return jsonify({"valid": True, "user_id": user_id})
+    return jsonify({"valid": False}), 401
+
+
 @app.route("/proxy_login", methods=["POST"])
 def proxy_login():
     """代理登录请求到后端 Agent"""
@@ -311,6 +320,7 @@ def proxy_update_settings():
 
 
 LOCAL_SETTINGS_FULL_URL = f"http://127.0.0.1:{PORT_AGENT}/settings/full"
+LOCAL_RESTART_URL = f"http://127.0.0.1:{PORT_AGENT}/restart"
 
 
 @app.route("/proxy_settings_full", methods=["GET"])
@@ -340,6 +350,22 @@ def proxy_update_settings_full():
         data["password"] = password
         r = requests.post(LOCAL_SETTINGS_FULL_URL, json=data, timeout=10)
         return jsonify(r.json()), r.status_code
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/proxy_restart", methods=["POST"])
+def proxy_restart_services():
+    """直接写重启信号文件，不经过 mainagent（避免响应返回前进程被杀）"""
+    user_id = session.get("user_id")
+    password = session.get("password")
+    if not user_id or not password:
+        return jsonify({"error": "未登录"}), 401
+    try:
+        restart_flag = os.path.join(root_dir, ".restart_flag")
+        with open(restart_flag, "w") as f:
+            f.write("restart")
+        return jsonify({"status": "success", "message": "重启信号已发送"})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 

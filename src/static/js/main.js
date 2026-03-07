@@ -319,9 +319,12 @@ orch_openclaw_sessions: '🦞 OpenClaw',
         settings_saved: '✅ 设置已保存',
         settings_save_fail: '❌ 保存失败',
         settings_load_fail: '❌ 加载设置失败',
-        settings_restart_hint: '🟢 LLM/TTS/OpenClaw 等配置保存后立即生效 | 🟡 端口/Bot 配置需重启服务',
-        settings_hot_applied: '🟢 已即时生效',
-        settings_restart_needed: '🟡 需重启服务才能生效',
+        settings_restart_hint: '修改配置后请先「保存」，再点击「重启服务」使配置生效',
+        settings_restart_btn: '🔄 重启服务',
+        settings_restarting: '⏳ 正在重启...',
+        settings_restart_ok: '✅ 重启信号已发送，页面将在 15 秒后自动刷新',
+        settings_restart_fail: '❌ 重启失败',
+        settings_restart_confirm: '确定要重启所有服务吗？未保存的配置修改将丢失。',
         menu_settings: '⚙️ 设置',
         settings_group_llm: 'LLM 模型配置',
         settings_group_tts: 'TTS 语音配置',
@@ -675,9 +678,12 @@ orch_openclaw_sessions: '🦞 OpenClaw',
         settings_saved: '✅ Settings saved',
         settings_save_fail: '❌ Save failed',
         settings_load_fail: '❌ Failed to load settings',
-        settings_restart_hint: '🟢 LLM/TTS/OpenClaw settings take effect immediately | 🟡 Port/Bot settings require restart',
-        settings_hot_applied: '🟢 Applied immediately',
-        settings_restart_needed: '🟡 Restart required to take effect',
+        settings_restart_hint: 'After editing, click "Save" first, then "Restart" to apply changes',
+        settings_restart_btn: '🔄 Restart',
+        settings_restarting: '⏳ Restarting...',
+        settings_restart_ok: '✅ Restart signal sent, page will auto-refresh in 15 seconds',
+        settings_restart_fail: '❌ Restart failed',
+        settings_restart_confirm: 'Restart all services? Unsaved changes will be lost.',
         menu_settings: '⚙️ Settings',
         settings_group_llm: 'LLM Model',
         settings_group_tts: 'TTS Voice',
@@ -1729,19 +1735,49 @@ async function saveSettings() {
         const data = await r.json();
         if (data.status === 'success') {
             let msg = t('settings_saved');
-            if (data.hot_applied?.length) {
-                msg += '\n' + t('settings_hot_applied') + ': ' + data.hot_applied.join(', ');
-            }
-            if (data.restart_required?.length) {
-                msg += '\n' + t('settings_restart_needed') + ': ' + data.restart_required.join(', ');
+            if (data.updated?.length) {
+                msg += '\n' + data.updated.join(', ');
             }
             appendMessage(msg, false);
-            closeSettings();
+            // 更新缓存
+            for (const k of (data.updated || [])) {
+                const inp = document.querySelector(`#settings-body .settings-input[data-key="${k}"]`);
+                if (inp) _settingsCache[k] = inp.value.trim();
+            }
         } else {
             alert(t('settings_save_fail'));
         }
     } catch (e) {
         alert(t('settings_save_fail') + ': ' + e.message);
+    }
+}
+
+async function restartServices() {
+    if (!confirm(t('settings_restart_confirm'))) return;
+    const btn = document.getElementById('restart-btn');
+    if (btn) {
+        btn.disabled = true;
+        btn.textContent = t('settings_restarting');
+    }
+    try {
+        const r = await fetch('/proxy_restart', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+        });
+        const data = await r.json();
+        if (data.status === 'success') {
+            appendMessage(t('settings_restart_ok'), false);
+            closeSettings();
+            setTimeout(() => location.reload(), 15000);
+        } else {
+            alert(t('settings_restart_fail') + ': ' + (data.detail || data.error || ''));
+            if (btn) { btn.disabled = false; btn.textContent = t('settings_restart_btn'); }
+        }
+    } catch (e) {
+        // 网络断开说明服务已在重启中，属于正常现象
+        appendMessage(t('settings_restart_ok'), false);
+        closeSettings();
+        setTimeout(() => location.reload(), 15000);
     }
 }
 
@@ -1922,21 +1958,37 @@ async function loadTools() {
 }
 
 // Session check
-(function checkSession() {
+(async function checkSession() {
     // 初始化语言
     document.documentElement.lang = currentLang;
     applyTranslations();
 
     const saved = sessionStorage.getItem('userId');
     if (saved) {
-        currentUserId = saved;
-        initSession();
-        document.getElementById('uid-display').textContent = 'UID: ' + saved;
-        document.getElementById('login-screen').style.display = 'none';
-        document.getElementById('chat-screen').style.display = 'flex';
-        loadTools();
-        refreshOasisTopics();
-        startHistoryPolling();
+        // 向后端验证 session 是否仍然有效
+        try {
+            const resp = await fetch('/proxy_check_session');
+            if (resp.ok) {
+                const data = await resp.json();
+                if (data.valid) {
+                    currentUserId = saved;
+                    initSession();
+                    document.getElementById('uid-display').textContent = 'UID: ' + saved;
+                    document.getElementById('login-screen').style.display = 'none';
+                    document.getElementById('chat-screen').style.display = 'flex';
+                    loadTools();
+                    refreshOasisTopics();
+                    startHistoryPolling();
+                    return;
+                }
+            }
+        } catch (e) {
+            // 网络错误（比如服务还在重启），回退到登录页
+        }
+        // 后端 session 无效，清除前端状态，回退到登录页
+        sessionStorage.removeItem('userId');
+        sessionStorage.removeItem('authToken');
+        sessionStorage.removeItem('sessionId');
     }
 })();
 
