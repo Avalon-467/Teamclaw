@@ -11,7 +11,7 @@ compatibility:
   - "ollama"
 
 
-argument-hint: "[BEFORE FIRST LAUNCH - MUST CONFIGURE] (1) LLM_API_KEY: your LLM provider API key (required). (2) LLM_BASE_URL: the base URL of your LLM provider (e.g. https://api.deepseek.com). (3) LLM_MODEL: the model name to use (e.g. deepseek-chat, gpt-4o, gemini-2.5-flash). [AUTO-DETECT] OPENCLAW_SESSIONS_FILE is auto-detected via `openclaw sessions` (Session store line); OPENCLAW_API_URL is auto-detected via `openclaw config get gateway.port`. Both can be manually overridden in .env if needed. (5) OPENCLAW_GATEWAY_TOKEN: the gateway token for accessing OpenClaw via its OpenAI-compatible endpoint (required when orchestrating agents from OpenClaw). [NETWORK] Requires outbound access for LLM/TTS APIs. Uses ports 51200-51209. [BOTS] Optional integrations: TELEGRAM_BOT_TOKEN, QQ_APP_ID, QQ_BOT_SECRET. [TUNNEL] Set PUBLIC_DOMAIN to enable secure Cloudflare Tunneling. Public deployment is entirely user-controlled (start-tunnel / stop-tunnel / frontend toggle). CRITICAL: Agent MUST NOT download cloudflared or start the tunnel unless the user EXPLICITLY requests it. Agent retrieves public URL via get_publicnet_info() tool (queries GET /publicnet/info), never reads .env directly."
+argument-hint: "[BEFORE FIRST LAUNCH - MUST CONFIGURE] (1) LLM_API_KEY: your LLM provider API key (required). (2) LLM_BASE_URL: the base URL of your LLM provider (e.g. https://api.deepseek.com). (3) LLM_MODEL: the model name to use (e.g. deepseek-chat, gpt-4o, gemini-2.5-flash). [NETWORK] Requires outbound access for LLM/TTS APIs. Uses ports 51200-51209. [BOTS] Optional integrations: TELEGRAM_BOT_TOKEN, QQ_APP_ID, QQ_BOT_SECRET. [TUNNEL] Set PUBLIC_DOMAIN to enable secure Cloudflare Tunneling. Public deployment is entirely user-controlled (start-tunnel / stop-tunnel / frontend toggle). CRITICAL: Agent MUST NOT download cloudflared or start the tunnel unless the user EXPLICITLY requests it. Agent retrieves public URL via get_publicnet_info() tool (queries GET /publicnet/info), never reads .env directly."
 
 metadata:
   version: "1.0.1"
@@ -141,9 +141,6 @@ bash selfskill/scripts/run.sh configure --batch TTS_MODEL=gemini-2.5-flash-previ
 | `PORT_FRONTEND` | Web UI port (optional, has default) | `51209` |
 | `TTS_MODEL` | TTS model (optional) |  |
 | `TTS_VOICE` | TTS voice (optional) |  |
-| `OPENCLAW_API_URL` | OpenClaw backend service URL (default: **auto-detected** via `openclaw config get gateway.port`; ChatCompletions endpoint is auto-enabled; can be manually overridden in `.env`) | Auto |
-| `OPENCLAW_GATEWAY_TOKEN` | OpenClaw gateway token (optional) |  |
-| `OPENCLAW_SESSIONS_FILE` | Absolute path to OpenClaw sessions.json file (default: **auto-detected** via `openclaw sessions`; can be manually overridden in `.env`) | Auto |
 | `INTERNAL_TOKEN` | Internal communication secret (**auto-generated on first startup, no manual config needed**) | Auto |
 
 ## Ports & Services
@@ -305,17 +302,15 @@ plan:
   - expert: "Coder#my-project"
 
   # Type 4: External API (DeepSeek, GPT-4, etc.)
-  # Note: api_key is auto-read from OPENCLAW_GATEWAY_TOKEN env var; use "****" mask in YAML (never write plaintext keys)
   - expert: "deepseek#ext#ds1"
 
   # Type 4: OpenClaw External API (local Agent service)
   # When model matches "agent:<name>:<session>", CLI is used first:
   #   openclaw agent --agent "main" --session-id "test1" --message "..."
   # Falls back to HTTP API if CLI unavailable
-  # api_key auto-resolved from OPENCLAW_GATEWAY_TOKEN env var when set to "****"
   - expert: "coder#ext#oc1"
     api_url: "http://127.0.0.1:23001/v1/chat/completions"
-    api_key: "****"              # Masked — real key read from OPENCLAW_GATEWAY_TOKEN env var at runtime
+    api_key: "****"
     model: "agent:main:test1"    # agent:<agent_name>:<session> → triggers CLI priority
 
   # Parallel execution
@@ -371,35 +366,27 @@ version: 1
 plan:
   - expert: "#ext#analyst"
     api_url: "https://api.deepseek.com"          # Required: External API base URL (auto-completes to /v1/chat/completions)
-    api_key: "****"                               # Masked — real key auto-read from OPENCLAW_GATEWAY_TOKEN env var at runtime
+    api_key: "****"                               # Optional: API key for the external service
     model: "deepseek-chat"                        # Optional: Model name, default gpt-3.5-turbo
     headers:                                      # Optional: Custom HTTP headers (key-value dict)
       X-Custom-Header: "value"
 ```
 
-> 🔒 **API Key Security**: You no longer need to write plaintext API keys in YAML. Set `api_key: "****"` (or omit it entirely) and the system will automatically read the real key from the `OPENCLAW_GATEWAY_TOKEN` environment variable at runtime. The frontend canvas also displays `****` instead of the real key. If you do write a plaintext key, it will still work (backward compatible).
+> 🔒 **API Key Security**: Set `api_key: "****"` (or omit it) to use a masked key. Plaintext keys also work (backward compatible).
 **Configuration Field Description:**
 
 | Field | Required | Description |
 |-------|----------|-------------|
 | `api_url` |  | External API address, auto-completes path to `/v1/chat/completions` |
-| `api_key` |  | Use `****` mask — auto-read from `OPENCLAW_GATEWAY_TOKEN` env var. Plaintext keys also supported (backward compatible) |
+| `api_key` |  | API key for the external service. Use `****` mask or plaintext. |
 | `model` |  | Default `gpt-3.5-turbo` |
 | `headers` |  | Any key-value dict, merged into HTTP request headers |
 
 **OpenClaw-specific Configuration:**
 
-OpenClaw is a locally running OpenAI-compatible Agent service. After setting up OpenClaw-specific endpoints in `.env`, the frontend orchestration panel will **auto-fill** `api_url` and `api_key` when dragging in an OpenClaw expert, no manual input needed:
-
-```bash
-# Configure OpenClaw (all auto-detected by default; only OPENCLAW_GATEWAY_TOKEN needs manual config if auth is enabled)
-bash selfskill/scripts/run.sh configure --batch \
-  OPENCLAW_GATEWAY_TOKEN=your-openclaw-token-if-needed
-```
+OpenClaw is a locally running OpenAI-compatible Agent service. The frontend orchestration panel will **auto-fill** `api_url` when dragging in an OpenClaw expert, no manual input needed.
 
 > ** Note:**
-> - **`OPENCLAW_API_URL` is auto-detected**: The system first enables the ChatCompletions endpoint (`openclaw config set gateway.http.endpoints.chatCompletions.enabled true`), then runs `openclaw config get gateway.port` to discover the gateway port and automatically sets `OPENCLAW_API_URL=http://127.0.0.1:<port>/v1/chat/completions`. If you need to override, manually set `OPENCLAW_API_URL` in `.env`.
-> - **`OPENCLAW_SESSIONS_FILE` is auto-detected**: The system runs `openclaw sessions` and parses the `Session store:` line to get the sessions.json path. If you need to override, manually set `OPENCLAW_SESSIONS_FILE` in `.env`.
 > - **Path Convention**: `./agents/main/sessions/sessions.json` is a common path structure for OpenClaw agent sessions.
 > - **Session Management**: Accessing session information is a necessary process for OpenClaw agent orchestration, enabling multi-agent workflow coordination and visual canvas operations.
 
@@ -439,7 +426,7 @@ When CLI is unavailable and falling back to HTTP API, the `x-openclaw-session-ke
 # Example: Connecting to a specific OpenClaw session
 - expert: "coder#ext#oc1"
   api_url: "http://127.0.0.1:18789"
-  api_key: "****"                                      # ← Masked; real key from OPENCLAW_GATEWAY_TOKEN env var
+  api_key: "****"
   model: "agent:main:my-session"
   headers:
     x-openclaw-session-key: "agent:main:my-session"   # ← This header determines the exact OpenClaw session
@@ -602,8 +589,6 @@ bash selfskill/scripts/run.sh configure --batch \
 bash selfskill/scripts/run.sh add-user system <your-password>
 ```
 
-> Note: `OPENCLAW_API_URL` is auto-detected (ChatCompletions endpoint auto-enabled + port discovery via `openclaw config get gateway.port`) during `configure --init`. Can be manually overridden in `.env`.
-
 Output after `configure --show`:
 
 ```
@@ -752,9 +737,6 @@ bash selfskill/scripts/run.sh configure --batch TTS_MODEL=gemini-2.5-flash-previ
 | `PORT_FRONTEND` | Web UI 端口（可选，有默认值） | `51209` |
 | `TTS_MODEL` | TTS 模型（可选） |  |
 | `TTS_VOICE` | TTS 声音（可选） |  |
-| `OPENCLAW_API_URL` | OpenClaw 后端服务地址（默认**自动探测**，通过 `openclaw config get gateway.port`；也可在 `.env` 中手动覆盖） | 自动 |
-| `OPENCLAW_GATEWAY_TOKEN` | OpenClaw Gateway Token（**当用户需要编排来自 OpenClaw 的 agent 时必填**） |  |
-| `OPENCLAW_SESSIONS_FILE` | OpenClaw sessions.json 绝对路径（默认**自动探测**，通过 `openclaw sessions`；也可在 `.env` 中手动覆盖） | 自动 |
 | `INTERNAL_TOKEN` | 内部通信密钥（**首次启动自动生成，无需手动配置**） | 自动 |
 
 ## 
@@ -915,17 +897,15 @@ plan:
   - expert: "Coder#my-project"
 
   # Type 4: External APIDeepSeek, GPT-4
-  # 注意：api_key 自动从 OPENCLAW_GATEWAY_TOKEN 环境变量读取；YAML 中使用 "****" 掩码（切勿写入明文密钥）
   - expert: "deepseek#ext#ds1"
 
   # Type 4: OpenClaw External API Agent 
   # model 匹配 "agent:<name>:<session>" 时优先使用 CLI 调用：
   #   openclaw agent --agent "main" --session-id "test1" --message "..."
   # CLI 不可用时自动回退到 HTTP API
-  # api_key 从 OPENCLAW_GATEWAY_TOKEN 环境变量自动读取，YAML 中使用 "****" 掩码
   - expert: "coder#ext#oc1"
     api_url: "http://127.0.0.1:23001/v1/chat/completions"
-    api_key: "****"              # 掩码 — 运行时自动从 OPENCLAW_GATEWAY_TOKEN 环境变量读取真实密钥
+    api_key: "****"
     model: "agent:main:test1"    # agent:<agent_name>:<session> → 触发 CLI 优先调用
 
   # 
@@ -981,36 +961,28 @@ version: 1
 plan:
   - expert: "#ext#analyst"
     api_url: "https://api.deepseek.com"          #  API  base URL /v1/chat/completions
-    api_key: "****"                               # 掩码 — 运行时自动从 OPENCLAW_GATEWAY_TOKEN 环境变量读取真实密钥
+    api_key: "****"                               # Optional: API key for the external service
     model: "deepseek-chat"                        #  gpt-3.5-turbo
     headers:                                      #  HTTP key-value 
       X-Custom-Header: "value"
 ```
 
-> 🔒 **API Key 安全机制**：YAML 中无需再写入明文 API Key。设置 `api_key: "****"`（或完全省略）即可，系统运行时会自动从 `OPENCLAW_GATEWAY_TOKEN` 环境变量读取真实密钥。前端画布也仅显示 `****` 而非真实密钥。如果你仍然写入明文密钥，也能正常工作（向后兼容）。
+> 🔒 **API Key 安全机制**：YAML 中设置 `api_key: "****"`（或完全省略）即可使用掩码。如果写入明文密钥，也能正常工作（向后兼容）。
 
 ****
 
 |  |  |  |
 |------|------|------|
 | `api_url` |  |  API  `/v1/chat/completions` |
-| `api_key` |  | 使用 `****` 掩码 — 自动从 `OPENCLAW_GATEWAY_TOKEN` 环境变量读取。也支持直接写入明文密钥（向后兼容） |
+| `api_key` |  | API key，支持 `****` 掩码或明文密钥 |
 | `model` |  |  `gpt-3.5-turbo` |
 | `headers` |  |  key-value  HTTP  |
 
 **OpenClaw **
 
-OpenClaw  OpenAI  Agent  `.env`  OpenClaw  endpoint  OpenClaw **** `api_url`  `api_key`
-
-```bash
-# 配置 OpenClaw（默认全部自动探测；仅 OPENCLAW_GATEWAY_TOKEN 需手动配置，且仅在 OpenClaw 开启鉴权时）
-bash selfskill/scripts/run.sh configure --batch \
-  OPENCLAW_GATEWAY_TOKEN=your-openclaw-token-if-needed
-```
+OpenClaw  OpenAI  Agent  OpenClaw **** `api_url`
 
 > ** 说明：**
-> - **`OPENCLAW_API_URL` 默认自动探测**：系统先开启 ChatCompletions 端点（`openclaw config set gateway.http.endpoints.chatCompletions.enabled true`），再通过 `openclaw config get gateway.port` 获取网关端口，自动设置 `OPENCLAW_API_URL=http://127.0.0.1:<端口>/v1/chat/completions`。如需手动指定，在 `.env` 中设置 `OPENCLAW_API_URL` 即可覆盖。
-> - **`OPENCLAW_SESSIONS_FILE` 默认自动探测**：系统运行 `openclaw sessions` 并解析 `Session store:` 行获取 sessions.json 路径。如需手动指定，在 `.env` 中设置 `OPENCLAW_SESSIONS_FILE` 即可覆盖。
 > - **Path Convention**: `./agents/main/sessions/sessions.json` 是 OpenClaw agent sessions 的常用路径结构。
 > - **Session Management**: 获取 session 信息是 OpenClaw agent 编排的必要过程，用于多 agent 工作流协调和可视化画布操作。
 
@@ -1050,7 +1022,7 @@ openclaw agent --agent "<agent_name>" --session-id "<session_id>" --message "<me
 # 示例：连接到指定的 OpenClaw session
 - expert: "coder#ext#oc1"
   api_url: "http://127.0.0.1:18789"
-  api_key: "****"                                      # ← 掩码；真实密钥从 OPENCLAW_GATEWAY_TOKEN 环境变量读取
+  api_key: "****"
   model: "agent:main:my-session"
   headers:
     x-openclaw-session-key: "agent:main:my-session"   # ← 此 header 决定了目标 OpenClaw session
@@ -1213,8 +1185,6 @@ bash selfskill/scripts/run.sh configure --batch \
 bash selfskill/scripts/run.sh add-user system <your-password>
 ```
 
-> 注：`OPENCLAW_API_URL` 和 `OPENCLAW_SESSIONS_FILE` 均在 `configure --init` 时自动探测，也可在 `.env` 中手动覆盖。
-
  `configure --show` 
 
 ```
@@ -1281,7 +1251,6 @@ Before starting TeamClaw for the first time, the following environment variables
 > ⚠️ **LLM API ≠ OpenClaw API — They are two completely separate sets of credentials!**
 >
 > - `LLM_API_KEY` / `LLM_BASE_URL` / `LLM_MODEL` → Your **LLM provider** (DeepSeek, OpenAI, Google, etc.). Used for the built-in Agent's conversations and OASIS experts.
-> - `OPENCLAW_GATEWAY_TOKEN` → Your **local OpenClaw service** gateway token. `OPENCLAW_API_URL` is **auto-detected by default** (can be manually overridden). Used only for orchestrating OpenClaw agents on the visual Canvas.
 >
 > Do **NOT** mix them up. They point to different services, use different keys, and serve different purposes.
 
@@ -1305,19 +1274,6 @@ bash selfskill/scripts/run.sh configure --batch \
 > The `OPENCLAW_*` variables below point to your **locally running OpenClaw service**, not to an external LLM provider. They have completely different URLs, keys, and purposes.
 
 These variables are used for the OASIS visual Canvas to orchestrate OpenClaw agents (**all auto-detected by default**):
-
-| Variable | Description | Example |
-|----------|-------------|---------|
-| `OPENCLAW_SESSIONS_FILE` | Absolute path to the OpenClaw `sessions.json` file. **Auto-detected** via `openclaw sessions` (parses the `Session store:` line). Can be manually overridden in `.env`. | Auto |
-| `OPENCLAW_API_URL` | The OpenClaw backend API endpoint. Default: **auto-detected** (ChatCompletions endpoint auto-enabled + port discovery via `openclaw config get gateway.port`) during `configure --init`. Can be manually overridden in `.env`. | Auto |
-| `OPENCLAW_GATEWAY_TOKEN` | The gateway token for accessing OpenClaw via its OpenAI-compatible endpoint. Required if your OpenClaw instance has authentication enabled. | `your-openclaw-token` |
-
-> **Auto-detection**: The system first runs `openclaw config set gateway.http.endpoints.chatCompletions.enabled true` to enable the endpoint, then runs `openclaw config get gateway.port` to discover the gateway port, constructing `http://127.0.0.1:<port>/v1/chat/completions`. It also runs `openclaw sessions` to parse the `Session store:` line for the sessions.json path. You can manually override either by setting `OPENCLAW_API_URL` or `OPENCLAW_SESSIONS_FILE` in `.env`.
-
-```bash
-bash selfskill/scripts/run.sh configure --batch \
-  OPENCLAW_GATEWAY_TOKEN=your-openclaw-token-if-needed
-```
 
 ### 3. Cloudflare Tunnel (Optional — for remote access)
 
@@ -1352,7 +1308,6 @@ When the tunnel starts, `cloudflared` is **auto-downloaded** if not present, and
 > ⚠️ **LLM API ≠ OpenClaw API —— 这是两组完全不同的配置！**
 >
 > - `LLM_API_KEY` / `LLM_BASE_URL` / `LLM_MODEL` → 你的 **LLM 服务商**（DeepSeek、OpenAI、Google 等）。用于内置 Agent 对话和 OASIS 专家调用。
-> - `OPENCLAW_GATEWAY_TOKEN` → 你的 **本地 OpenClaw 服务** Gateway Token。`OPENCLAW_API_URL` **默认自动探测**（也可手动覆盖）。仅用于在可视化画布上编排 OpenClaw Agent。
 >
 > **切勿混淆！** 它们指向不同的服务，使用不同的密钥，用途完全不同。
 
@@ -1374,21 +1329,6 @@ bash selfskill/scripts/run.sh configure --batch \
 > ⚠️ **再次提醒：OpenClaw API 和上面的 LLM API 不是同一个东西！**
 >
 > 下面的 `OPENCLAW_*` 变量指向你 **本地运行的 OpenClaw 服务**，而非外部 LLM 服务商。它们的 URL、密钥和用途完全不同。
-
-如果你需要使用 OASIS 可视化画布来编排 OpenClaw Agent，以下变量**默认自动探测**：
-
-| 变量 | 说明 | 示例 |
-|------|------|------|
-| `OPENCLAW_SESSIONS_FILE` | OpenClaw `sessions.json` 文件的绝对路径。**自动探测**：通过 `openclaw sessions` 解析 `Session store:` 行获取。也可在 `.env` 中手动覆盖。 | 自动 |
-| `OPENCLAW_API_URL` | OpenClaw 后端 API 地址。默认**自动探测**：`configure --init` 时先开启 ChatCompletions 端点，再通过 `openclaw config get gateway.port` 获取端口并自动设置；也可在 `.env` 中手动覆盖。 | 自动 |
-| `OPENCLAW_GATEWAY_TOKEN` | 通过 OpenAI 兼容接口访问 OpenClaw 时使用的 Gateway Token。如果你的 OpenClaw 实例启用了鉴权，则此项必填。 | `your-openclaw-token` |
-
-> **自动探测**：系统先运行 `openclaw config set gateway.http.endpoints.chatCompletions.enabled true` 开启端点，再通过 `openclaw config get gateway.port` 获取网关端口，自动拼接为 `http://127.0.0.1:<端口>/v1/chat/completions`。同时运行 `openclaw sessions` 解析 `Session store:` 行获取 sessions.json 路径。如需手动指定，在 `.env` 中设置 `OPENCLAW_API_URL` 或 `OPENCLAW_SESSIONS_FILE` 即可覆盖。
-
-```bash
-bash selfskill/scripts/run.sh configure --batch \
-  OPENCLAW_GATEWAY_TOKEN=your-openclaw-token-if-needed
-```
 
 ### 3. Cloudflare Tunnel（可选 — 用于远程访问）
 

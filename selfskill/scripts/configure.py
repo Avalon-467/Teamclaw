@@ -258,92 +258,13 @@ def detect_openclaw_api_url():
     return None
 
 
-def detect_openclaw_sessions_file():
-    """通过 openclaw sessions 输出中的 Session store 行自动探测 sessions.json 路径"""
-    try:
-        result = subprocess.run(
-            ["openclaw", "sessions"],
-            capture_output=True, text=True, timeout=10
-        )
-        if result.returncode == 0:
-            for line in result.stdout.splitlines():
-                if "Session store:" in line:
-                    path = line.split("Session store:", 1)[1].strip()
-                    if path:
-                        print(f"🔍 自动探测到 OpenClaw sessions 文件: {path}")
-                        return path
-    except FileNotFoundError:
-        print("⚠️  openclaw 命令未找到，跳过 OPENCLAW_SESSIONS_FILE 自动探测")
-    except subprocess.TimeoutExpired:
-        print("⚠️  openclaw sessions 命令超时，跳过 OPENCLAW_SESSIONS_FILE 自动探测")
-    except Exception as e:
-        print(f"⚠️  探测 OpenClaw sessions 路径失败: {e}")
-    return None
 
-
-def _auto_set_openclaw_url():
-    """自动探测 OpenClaw 端口并设置 OPENCLAW_API_URL（仅当用户未手动配置时）"""
-    _, kvs = read_env()
-    current = kvs.get("OPENCLAW_API_URL", "")
-    if current and current != "auto-detected":
-        print(f"ℹ️  OPENCLAW_API_URL 已手动配置: {current}，跳过自动探测")
-    else:
-        url = detect_openclaw_api_url()
-        if url:
-            set_env("OPENCLAW_API_URL", url)
-
-    # 确保 OPENCLAW_GATEWAY_TOKEN 已设置（自动探测）
-    _auto_set_openclaw_gateway_token()
-
-
-def _auto_set_openclaw_gateway_token():
-    """自动探测 OpenClaw gateway token 并设置（仅当用户未手动配置时）"""
-    _, kvs = read_env()
-    current = kvs.get("OPENCLAW_GATEWAY_TOKEN", "")
-    if current:
-        print(f"ℹ️  OPENCLAW_GATEWAY_TOKEN 已配置")
-        return
-    # 尝试通过 openclaw config get gateway.token 自动探测
-    try:
-        result = subprocess.run(
-            ["openclaw", "config", "get", "gateway.token"],
-            capture_output=True, text=True, timeout=10
-        )
-        if result.returncode == 0:
-            for line in result.stdout.strip().splitlines():
-                token = line.strip()
-                if token and not token.startswith("🦞") and not token.startswith("OpenClaw"):
-                    print(f"🔍 自动探测到 OpenClaw gateway token")
-                    set_env("OPENCLAW_GATEWAY_TOKEN", token)
-                    return
-    except FileNotFoundError:
-        pass
-    except subprocess.TimeoutExpired:
-        pass
-    except Exception:
-        pass
-    print("⚠️  OPENCLAW_GATEWAY_TOKEN 未设置，OpenClaw agent 需要此 token 才能通过 HTTP API 通信")
-
-
-# def _auto_set_openclaw_sessions_file():
-#     """不再需要：sessions 现通过 CLI 实时获取，无需持久化文件路径"""
-#     _, kvs = read_env()
-#     current = kvs.get("OPENCLAW_SESSIONS_FILE", "")
-#     if current and current != "auto-detected":
-#         print(f"ℹ️  OPENCLAW_SESSIONS_FILE 已手动配置: {current}，跳过自动探测")
-#         return
-#     path = detect_openclaw_sessions_file()
-#     if path:
-#         set_env("OPENCLAW_SESSIONS_FILE", path)
 
 
 def init_env():
     """从 .env.example 初始化 .env（不覆盖已有）；若模板不存在则使用内置默认值"""
     if os.path.exists(ENV_PATH):
         print(f"✅ config/.env 已存在，跳过初始化")
-        # 即使 .env 已存在，也尝试自动探测并更新 OpenClaw 配置
-        _auto_set_openclaw_url()
-        # _auto_set_openclaw_sessions_file()  # sessions 通过 CLI 实时获取
         return
     os.makedirs(os.path.dirname(ENV_PATH), exist_ok=True)
     if os.path.exists(ENV_EXAMPLE):
@@ -353,9 +274,6 @@ def init_env():
         with open(ENV_PATH, "w", encoding="utf-8") as f:
             f.write(_DEFAULT_ENV_TEMPLATE)
         print(f"✅ 已使用内置默认模板初始化 config/.env")
-    # 初始化后自动探测 OpenClaw 配置
-    _auto_set_openclaw_url()
-    # _auto_set_openclaw_sessions_file()  # 不再需要：sessions 通过 CLI 实时获取
     print(f"⚠️  请编辑 {ENV_PATH} 填入 LLM_API_KEY 等必要参数")
 
 

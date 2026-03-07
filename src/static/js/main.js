@@ -1615,7 +1615,6 @@ async function handleLogin() {
 const SETTINGS_GROUPS_ORDERED = [
     { id: 'llm', label: 'settings_group_llm', keys: ['LLM_API_KEY', 'LLM_BASE_URL', 'LLM_MODEL', 'LLM_PROVIDER', 'LLM_VISION_SUPPORT'] },
     { id: 'tts', label: 'settings_group_tts', keys: ['TTS_MODEL', 'TTS_VOICE'] },
-    { id: 'openclaw', label: 'settings_group_openclaw', keys: ['OPENCLAW_API_URL', 'OPENCLAW_SESSIONS_FILE', 'OPENCLAW_GATEWAY_TOKEN'] },
     { id: 'oasis', label: 'settings_group_oasis', keys: ['OASIS_BASE_URL'] },
     { id: 'ports', label: 'settings_group_ports', keys: ['PORT_AGENT', 'PORT_SCHEDULER', 'PORT_OASIS', 'PORT_FRONTEND', 'PORT_BARK'] },
     { id: 'network', label: 'settings_group_network', keys: ['PUBLIC_DOMAIN', 'BARK_PUBLIC_URL'] },

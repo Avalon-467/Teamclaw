@@ -255,19 +255,6 @@ This achieves **maximum parallelism** — no unnecessary waiting, no explicit to
 
 ### Prerequisites
 
-```bash
-bash selfskill/scripts/run.sh configure --batch \
-  OPENCLAW_SESSIONS_FILE=/path/to/agents/main/sessions/sessions.json \
-  OPENCLAW_API_URL=http://127.0.0.1:18789/v1/chat/completions \
-  OPENCLAW_GATEWAY_TOKEN=your-key
-```
-
-| Variable | Description |
-|----------|-------------|
-| `OPENCLAW_SESSIONS_FILE` | Path to OpenClaw `sessions.json`. Required for visual Canvas. |
-| `OPENCLAW_API_URL` | Full path with `/v1/chat/completions`. Must match gateway port. |
-| `OPENCLAW_GATEWAY_TOKEN gateway token (if auth enabled). |
-
 > LLM API and OpenClaw API are completely separate credentials!
 
 ### `model` Format
@@ -560,7 +547,7 @@ plan:
 | "name has no '#', skipping" | Use format: `tag#temp#N`, `tag#oasis#id`, `Title#sid`, `tag#ext#id` |
 | "missing 'api_url'" | Add `api_url` to Type 4 expert |
 | Wrong OpenClaw session | Ensure `model` uses `agent:<name>:<session>` format (CLI priority); or add `headers: {x-openclaw-session-key: ...}` for HTTP fallback |
-| Canvas missing OpenClaw sessions | Set `OPENCLAW_SESSIONS_FILE` in `.env` |
+| Canvas missing OpenClaw sessions | Ensure OpenClaw CLI is available |
 | API timeout | Check port, verify OpenAI-compatible interface enabled |
 
 **Debug**: Check `logs/launcher.log` for `[OASIS]` messages. Use SSE stream for real-time monitoring.
