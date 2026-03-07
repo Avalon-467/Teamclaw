@@ -710,11 +710,18 @@ def _fetch_openclaw_agents_via_cli() -> list[dict] | None:
             return _parse_agents_text(result_text.stdout)
         data = json.loads(result.stdout)
         # Expect {"agents": [...]} or a plain list
+        agents_raw: list[dict] = []
         if isinstance(data, dict):
-            return data.get("agents", [])
-        if isinstance(data, list):
-            return data
-        return None
+            agents_raw = data.get("agents", [])
+        elif isinstance(data, list):
+            agents_raw = data
+        else:
+            return None
+        # Normalise: JSON uses "id" and "isDefault" (camelCase)
+        for a in agents_raw:
+            a["name"] = a.get("id", "")
+            a["is_default"] = a.get("isDefault", False)
+        return agents_raw
     except subprocess.TimeoutExpired:
         print("  [OASIS] ⚠️ openclaw agents list timed out")
         return None
