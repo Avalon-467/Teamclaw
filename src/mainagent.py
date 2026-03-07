@@ -732,6 +732,23 @@ _SETTINGS_WHITELIST = [
 # 需要掩码显示的敏感字段
 _MASK_FIELDS = {"LLM_API_KEY", "OPENCLAW_API_KEY", "TELEGRAM_BOT_TOKEN", "QQ_BOT_SECRET"}
 
+# 可热生效的配置项（写入 .env 后同步更新 os.environ，下次请求立即生效）
+_HOT_RELOAD_KEYS = {
+    "LLM_API_KEY", "LLM_BASE_URL", "LLM_MODEL", "LLM_PROVIDER", "LLM_VISION_SUPPORT",
+    "TTS_MODEL", "TTS_VOICE",
+    "OPENCLAW_API_URL", "OPENCLAW_API_KEY", "OPENCLAW_SESSIONS_FILE",
+    "OASIS_BASE_URL", "PUBLIC_DOMAIN",
+    "ALLOWED_COMMANDS", "EXEC_TIMEOUT", "MAX_OUTPUT_LENGTH",
+}
+
+# 需要重启才能生效的配置项（端口绑定、进程级配置）
+_RESTART_REQUIRED_KEYS = {
+    "PORT_AGENT", "PORT_SCHEDULER", "PORT_OASIS", "PORT_FRONTEND",
+    "OPENAI_STANDARD_MODE",
+    "TELEGRAM_BOT_TOKEN", "TELEGRAM_ALLOWED_USERS",
+    "QQ_APP_ID", "QQ_BOT_SECRET", "QQ_BOT_USERNAME",
+}
+
 
 def _read_env_settings() -> dict:
     """从 .env 文件解析出白名单内的键值对。"""
@@ -807,7 +824,7 @@ async def get_settings(user_id: str, password: str):
 
 @app.post("/settings")
 async def update_settings(req: SettingsUpdateRequest):
-    """更新系统配置。"""
+    """更新系统配置。支持热生效的配置项会立即同步到 os.environ。"""
     if not verify_password(req.user_id, req.password):
         raise HTTPException(status_code=401, detail="用户名或密码错误")
 
@@ -823,7 +840,24 @@ async def update_settings(req: SettingsUpdateRequest):
     if filtered:
         _write_env_settings(filtered)
 
-    return {"status": "success", "updated": list(filtered.keys())}
+        # 将可热生效的配置同步到 os.environ，下次请求立即生效
+        hot_applied = []
+        restart_needed = []
+        for k, v in filtered.items():
+            if k in _HOT_RELOAD_KEYS:
+                os.environ[k] = v
+                hot_applied.append(k)
+            elif k in _RESTART_REQUIRED_KEYS:
+                restart_needed.append(k)
+
+        return {
+            "status": "success",
+            "updated": list(filtered.keys()),
+            "hot_applied": hot_applied,
+            "restart_required": restart_needed,
+        }
+
+    return {"status": "success", "updated": [], "hot_applied": [], "restart_required": []}
 
 
 @app.post("/system_trigger")

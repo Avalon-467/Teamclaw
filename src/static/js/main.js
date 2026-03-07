@@ -318,7 +318,9 @@ orch_openclaw_sessions: '🦞 OpenClaw',
         settings_saved: '✅ 设置已保存',
         settings_save_fail: '❌ 保存失败',
         settings_load_fail: '❌ 加载设置失败',
-        settings_restart_hint: '部分配置需要重启服务后生效',
+        settings_restart_hint: '🟢 LLM/TTS/OpenClaw 等配置保存后立即生效 | 🟡 端口/Bot 配置需重启服务',
+        settings_hot_applied: '🟢 已即时生效',
+        settings_restart_needed: '🟡 需重启服务才能生效',
         menu_settings: '⚙️ 设置',
         settings_group_llm: 'LLM 模型配置',
         settings_group_tts: 'TTS 语音配置',
@@ -658,7 +660,9 @@ orch_openclaw_sessions: '🦞 OpenClaw',
         settings_saved: '✅ Settings saved',
         settings_save_fail: '❌ Save failed',
         settings_load_fail: '❌ Failed to load settings',
-        settings_restart_hint: 'Some settings require a service restart to take effect',
+        settings_restart_hint: '🟢 LLM/TTS/OpenClaw settings take effect immediately | 🟡 Port/Bot settings require restart',
+        settings_hot_applied: '🟢 Applied immediately',
+        settings_restart_needed: '🟡 Restart required to take effect',
         menu_settings: '⚙️ Settings',
         settings_group_llm: 'LLM Model',
         settings_group_tts: 'TTS Voice',
@@ -1654,7 +1658,14 @@ async function saveSettings() {
         });
         const data = await r.json();
         if (data.status === 'success') {
-            appendMessage(t('settings_saved') + (data.updated?.length ? ': ' + data.updated.join(', ') : ''), false);
+            let msg = t('settings_saved');
+            if (data.hot_applied?.length) {
+                msg += '\n' + t('settings_hot_applied') + ': ' + data.hot_applied.join(', ');
+            }
+            if (data.restart_required?.length) {
+                msg += '\n' + t('settings_restart_needed') + ': ' + data.restart_required.join(', ');
+            }
+            appendMessage(msg, false);
             closeSettings();
         } else {
             alert(t('settings_save_fail'));
