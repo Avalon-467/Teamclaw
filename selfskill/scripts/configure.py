@@ -36,7 +36,7 @@ VALID_KEYS = {
     # TTS配置
     "TTS_MODEL", "TTS_VOICE",
     # OpenClaw配置
-    "OPENCLAW_API_URL", "OPENCLAW_GATEWAY_TOKEN", "OPENCLAW_SESSIONS_FILE",
+    "OPENCLAW_API_URL", "OPENCLAW_GATEWAY_TOKEN",
     # 内部配置
     "INTERNAL_TOKEN", "OPENAI_STANDARD_MODE",
     # 命令执行配置
@@ -295,16 +295,16 @@ def _auto_set_openclaw_url():
         set_env("OPENCLAW_API_URL", url)
 
 
-def _auto_set_openclaw_sessions_file():
-    """自动探测 OpenClaw sessions.json 路径并设置（仅当用户未手动配置时）"""
-    _, kvs = read_env()
-    current = kvs.get("OPENCLAW_SESSIONS_FILE", "")
-    if current and current != "auto-detected":
-        print(f"ℹ️  OPENCLAW_SESSIONS_FILE 已手动配置: {current}，跳过自动探测")
-        return
-    path = detect_openclaw_sessions_file()
-    if path:
-        set_env("OPENCLAW_SESSIONS_FILE", path)
+# def _auto_set_openclaw_sessions_file():
+#     """不再需要：sessions 现通过 CLI 实时获取，无需持久化文件路径"""
+#     _, kvs = read_env()
+#     current = kvs.get("OPENCLAW_SESSIONS_FILE", "")
+#     if current and current != "auto-detected":
+#         print(f"ℹ️  OPENCLAW_SESSIONS_FILE 已手动配置: {current}，跳过自动探测")
+#         return
+#     path = detect_openclaw_sessions_file()
+#     if path:
+#         set_env("OPENCLAW_SESSIONS_FILE", path)
 
 
 def init_env():
@@ -325,7 +325,7 @@ def init_env():
         print(f"✅ 已使用内置默认模板初始化 config/.env")
     # 初始化后自动探测 OpenClaw 配置
     _auto_set_openclaw_url()
-    _auto_set_openclaw_sessions_file()
+    # _auto_set_openclaw_sessions_file()  # 不再需要：sessions 通过 CLI 实时获取
     print(f"⚠️  请编辑 {ENV_PATH} 填入 LLM_API_KEY 等必要参数")
 
 

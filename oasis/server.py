@@ -11,6 +11,8 @@ Start with:
 """
 
 import os
+import shutil
+import subprocess
 import sys
 import asyncio
 import uuid
@@ -659,33 +661,45 @@ async def delete_user_expert_route(tag: str, user_id: str = Query(...)):
 # OpenClaw session discovery
 # ------------------------------------------------------------------
 
-_OPENCLAW_SESSIONS_FILE = os.getenv(
-    "OPENCLAW_SESSIONS_FILE",
-    None,
-)
+# _OPENCLAW_SESSIONS_FILE is no longer needed — we use CLI instead.
+# _OPENCLAW_SESSIONS_FILE = os.getenv("OPENCLAW_SESSIONS_FILE", None)
+
+_OPENCLAW_BIN = shutil.which("openclaw")
+
+
+def _fetch_openclaw_sessions_via_cli() -> list[dict] | None:
+    """Call ``openclaw sessions --all-agents --json`` and return parsed session list.
+
+    Returns None if the CLI is unavailable or the command fails.
+    """
+    if not _OPENCLAW_BIN:
+        return None
+    try:
+        result = subprocess.run(
+            [_OPENCLAW_BIN, "sessions", "--all-agents", "--json"],
+            capture_output=True, text=True, timeout=15,
+        )
+        if result.returncode != 0:
+            print(f"  [OASIS] ⚠️ openclaw sessions CLI failed (rc={result.returncode}): "
+                  f"{result.stderr.strip()[:200]}")
+            return None
+        data = json.loads(result.stdout)
+        return data.get("sessions", [])
+    except subprocess.TimeoutExpired:
+        print("  [OASIS] ⚠️ openclaw sessions --all-agents --json timed out")
+        return None
+    except (json.JSONDecodeError, Exception) as e:
+        print(f"  [OASIS] ⚠️ openclaw sessions CLI parse error: {e}")
+        return None
 
 
 @app.get("/sessions/openclaw")
 async def list_openclaw_sessions(filter: str = Query("")):
-    """List OpenClaw sessions from sessions.json file."""
-    if not _OPENCLAW_SESSIONS_FILE or not os.path.exists(_OPENCLAW_SESSIONS_FILE):
-        return {"sessions": [], "available": False, "message": "OpenClaw sessions file not found"}
-
-    try:
-        with open(_OPENCLAW_SESSIONS_FILE, "r", encoding="utf-8") as f:
-            data = json.load(f)
-    except Exception as e:
-        raise HTTPException(500, f"Failed to read OpenClaw sessions: {e}")
-
-    # Support both dict (key->session) and list formats
-    sessions = []
-    if isinstance(data, dict):
-        for k, v in data.items():
-            if isinstance(v, dict):
-                v.setdefault("key", k)
-                sessions.append(v)
-    elif isinstance(data, list):
-        sessions = data
+    """List OpenClaw sessions via ``openclaw sessions --all-agents --json``."""
+    sessions = _fetch_openclaw_sessions_via_cli()
+    if sessions is None:
+        return {"sessions": [], "available": False,
+                "message": "openclaw CLI not available or command failed"}
 
     # Keyword filter
     if filter:
@@ -702,16 +716,12 @@ async def list_openclaw_sessions(filter: str = Query("")):
             "channel": s.get("channel"),
             "model": s.get("model"),
             "updatedAt": s.get("updatedAt"),
+            "agentId": s.get("agentId"),
             "contextTokens": s.get("contextTokens", 0),
             "totalTokens": s.get("totalTokens", 0),
         }
         for s in sessions
     ]
-
-    # Strip /v1/chat/completions suffix — .env stores the full URL,
-    # but canvas / YAML only needs the base URL (engine auto-appends the path)
-    raw_url = os.getenv("OPENCLAW_API_URL", "")
-    base_url = raw_url.replace("/v1/chat/completions", "").rstrip("/")
 
     # Mask the API key: if set in env, return "****" so the frontend
     # knows a key exists but never sees the plaintext.
@@ -721,8 +731,7 @@ async def list_openclaw_sessions(filter: str = Query("")):
     return {
         "sessions": result,
         "available": True,
-        # Provide OpenClaw-specific endpoint config for auto-fill when dragging into canvas
-        "openclaw_api_url": base_url,
+        "openclaw_api_url": "",   # No longer needed — CLI priority
         "openclaw_api_key": masked_key,
     }
 
