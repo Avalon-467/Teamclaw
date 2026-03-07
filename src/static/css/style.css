@@ -508,6 +508,14 @@ header {
     line-height: 18px; text-align: center; cursor: pointer; display: none; z-index: 20;
 }
 .orch-node:hover .orch-node-del { display: block; }
+
+/* 移动端添加节点闪烁动画 */
+@keyframes orch-flash {
+    0%, 100% { box-shadow: 0 0 0 0 rgba(37,99,235,0); }
+    25%, 75% { box-shadow: 0 0 0 6px rgba(37,99,235,0.3); border-color: #2563eb; }
+    50% { box-shadow: 0 0 0 10px rgba(37,99,235,0.15); border-color: #3b82f6; }
+}
+.orch-node-flash { animation: orch-flash 0.9s ease-out; }
 .orch-node .orch-node-status {
     position: absolute; bottom: -4px; right: 6px; width: 8px; height: 8px;
     border-radius: 50%; border: 2px solid white;
@@ -669,6 +677,17 @@ header {
     .orch-sidebar-grid {
         grid-template-columns: 1fr !important;
         gap: 6px !important;
+    }
+    /* 移动端专家卡片：点击即添加，不需要拖拽 */
+    .orch-expert-card, .orch-manual-card {
+        cursor: pointer !important;
+        -webkit-user-drag: none;
+        -webkit-touch-callout: none;
+    }
+    .orch-expert-card:active, .orch-manual-card:active {
+        background: #dbeafe !important;
+        border-color: #2563eb !important;
+        transform: scale(0.97);
     }
     /* 工具栏更紧凑 */
     .orch-toolbar { padding: 4px 6px; gap: 2px; }

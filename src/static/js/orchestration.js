@@ -47,6 +47,42 @@ function orchClientToCanvas(clientX, clientY) {
     };
 }
 
+/** 判断当前是否为移动端视图 */
+function orchIsMobile() { return window.innerWidth <= 768; }
+
+/** 移动端点击专家卡片 → 添加节点 + 收起专家池 + 高亮动画 */
+function orchMobileTapAdd(data) {
+    const node = orchAddNodeCenter(data);
+    // 收起专家池侧边栏
+    if (typeof orchCloseMobilePanels === 'function') orchCloseMobilePanels();
+    // 高亮动画：新节点闪烁
+    const el = document.getElementById('onode-' + node.id);
+    if (el) {
+        el.classList.add('orch-node-flash');
+        setTimeout(() => el.classList.remove('orch-node-flash'), 900);
+    }
+    orchToast('✅ ' + (data.emoji||'') + ' ' + (data.name||'Node') + ' ' + t('orch_toast_added_mobile'));
+}
+
+/** 给专家卡片绑定移动端 click 和桌面端 dblclick */
+function orchBindCardEvents(card, data) {
+    // 移动端禁用拖拽，改为点击添加
+    if (orchIsMobile()) {
+        card.draggable = false;
+    } else {
+        card.addEventListener('dragstart', e => {
+            e.dataTransfer.setData('application/json', JSON.stringify(data));
+            e.dataTransfer.effectAllowed = 'copy';
+        });
+    }
+    card.addEventListener('dblclick', () => orchAddNodeCenter(data));
+    card.addEventListener('click', e => {
+        if (!orchIsMobile()) return;
+        if (e.target.closest('.orch-expert-del-btn')) return;
+        orchMobileTapAdd(data);
+    });
+}
+
 function orchInit() {
     orchLoadExperts();
     orchLoadSessionAgents();
@@ -54,14 +90,11 @@ function orchInit() {
     orchSetupCanvas();
     orchSetupSettings();
     orchSetupFileDrop();
-    // Bind manual injection card events (dragstart + dblclick)
+    // Bind manual injection card events
     const mc = document.getElementById('orch-manual-card');
     if (mc) {
-        mc.addEventListener('dragstart', e => {
-            e.dataTransfer.setData('application/json', JSON.stringify({type:'manual', name:t('orch_manual_inject'), tag:'manual', emoji:'📝', temperature:0}));
-            e.dataTransfer.effectAllowed = 'copy';
-        });
-        mc.addEventListener('dblclick', () => orchAddNodeCenter({type:'manual', name:t('orch_manual_inject'), tag:'manual', emoji:'📝', temperature:0}));
+        const manualData = {type:'manual', name:t('orch_manual_inject'), tag:'manual', emoji:'📝', temperature:0};
+        orchBindCardEvents(mc, manualData);
     }
 }
 
@@ -86,11 +119,7 @@ function orchRenderExpertSidebar() {
         card.draggable = true;
         const isCustom = exp.source === 'custom';
         card.innerHTML = `<span class="orch-emoji">${exp.emoji}</span><div style="min-width:0;flex:1;"><div class="orch-name" title="${escapeHtml(exp.name)}">${escapeHtml(exp.name)}</div><div class="orch-tag">${escapeHtml(exp.tag)}</div></div><span class="orch-temp">${exp.temperature||''}</span>${isCustom ? '<button class="orch-expert-del-btn" title="' + t('orch_ctx_delete') + '" style="font-size:10px;background:none;border:none;cursor:pointer;color:#dc2626;padding:0 2px;margin-left:2px;">✕</button>' : ''}`;
-        card.addEventListener('dragstart', e => {
-            e.dataTransfer.setData('application/json', JSON.stringify({type:'expert', ...exp}));
-            e.dataTransfer.effectAllowed = 'copy';
-        });
-        card.addEventListener('dblclick', () => orchAddNodeCenter({type:'expert', ...exp}));
+        orchBindCardEvents(card, {type:'expert', ...exp});
         if (isCustom) {
             card.querySelector('.orch-expert-del-btn').addEventListener('click', async (ev) => {
                 ev.stopPropagation();
@@ -132,11 +161,7 @@ async function orchLoadSessionAgents() {
             const title = s.title || 'Untitled';
             card.innerHTML = `<span class="orch-emoji">🤖</span><div style="min-width:0;flex:1;"><div class="orch-name" title="${escapeHtml(title)}">${escapeHtml(title)}</div><div class="orch-tag" style="color:#6366f1;font-family:monospace;">#${s.session_id.slice(-8)}</div></div><span class="orch-temp" style="font-size:9px;color:#9ca3af;">${s.message_count||0}msg</span>`;
             const sessionData = {type:'session_agent', name: title, tag: 'session', emoji:'🤖', temperature: 0.7, session_id: s.session_id};
-            card.addEventListener('dragstart', e => {
-                e.dataTransfer.setData('application/json', JSON.stringify(sessionData));
-                e.dataTransfer.effectAllowed = 'copy';
-            });
-            card.addEventListener('dblclick', () => orchAddNodeCenter(sessionData));
+            orchBindCardEvents(card, sessionData);
             list.appendChild(card);
         }
     } catch(e) {
@@ -178,11 +203,7 @@ async function orchLoadOpenClawSessions() {
                 model: modelStr,
                 ext_id: agentName,  // use agent name as ext_id to distinguish different agents
             };
-            card.addEventListener('dragstart', e => {
-                e.dataTransfer.setData('application/json', JSON.stringify(nodeData));
-                e.dataTransfer.effectAllowed = 'copy';
-            });
-            card.addEventListener('dblclick', () => orchAddNodeCenter(nodeData));
+            orchBindCardEvents(card, nodeData);
             list.appendChild(card);
         }
     } catch(e) {
@@ -240,13 +261,12 @@ function orchShowAddExpertModal() {
 
 function orchRenderSidebar() {
     orchRenderExpertSidebar();
-    // Manual card
+    // Manual card (re-bind with unified events)
     const mc = document.getElementById('orch-manual-card');
-    mc.addEventListener('dragstart', e => {
-        e.dataTransfer.setData('application/json', JSON.stringify({type:'manual', name:t('orch_manual_inject'), tag:'manual', emoji:'📝', temperature:0}));
-        e.dataTransfer.effectAllowed = 'copy';
-    });
-    mc.addEventListener('dblclick', () => orchAddNodeCenter({type:'manual', name:t('orch_manual_inject'), tag:'manual', emoji:'📝', temperature:0}));
+    if (mc) {
+        const manualData = {type:'manual', name:t('orch_manual_inject'), tag:'manual', emoji:'📝', temperature:0};
+        orchBindCardEvents(mc, manualData);
+    }
 }
 
 // ── Settings ──
