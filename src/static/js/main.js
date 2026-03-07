@@ -1580,7 +1580,7 @@ async function handleLogin() {
 const SETTINGS_GROUPS = {
     llm: { label: 'settings_group_llm', keys: ['LLM_API_KEY', 'LLM_BASE_URL', 'LLM_MODEL', 'LLM_PROVIDER', 'LLM_VISION_SUPPORT'] },
     tts: { label: 'settings_group_tts', keys: ['TTS_MODEL', 'TTS_VOICE'] },
-    openclaw: { label: 'settings_group_openclaw', keys: ['OPENCLAW_API_URL', 'OPENCLAW_GATEWAY_TOKEN', 'OPENCLAW_SESSIONS_FILE'] },
+    openclaw: { label: 'settings_group_openclaw', keys: ['OPENCLAW_API_URL'] },
     ports: { label: 'settings_group_ports', keys: ['PORT_AGENT', 'PORT_SCHEDULER', 'PORT_OASIS', 'PORT_FRONTEND', 'PORT_BARK'] },
     bots: { label: 'settings_group_bots', keys: ['TELEGRAM_BOT_TOKEN', 'TELEGRAM_ALLOWED_USERS', 'QQ_APP_ID', 'QQ_BOT_SECRET', 'QQ_BOT_USERNAME'] },
     other: { label: 'settings_group_other', keys: ['PUBLIC_DOMAIN', 'OPENAI_STANDARD_MODE', 'ALLOWED_COMMANDS', 'EXEC_TIMEOUT', 'MAX_OUTPUT_LENGTH'] },

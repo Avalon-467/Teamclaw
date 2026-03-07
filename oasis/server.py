@@ -39,6 +39,27 @@ if _project_root not in sys.path:
 env_path = os.path.join(_project_root, "config", ".env")
 load_dotenv(dotenv_path=env_path)
 
+
+def _get_env(key: str, default: str = "") -> str:
+    """Read from os.environ first; fall back to .env file if missing.
+
+    configure.py's set_env() writes to .env but does NOT update
+    os.environ in *this* process, so a freshly-written value might
+    only exist on disk.  Re-read the file as a fallback.
+    """
+    val = os.getenv(key, "")
+    if val:
+        return val
+    try:
+        with open(env_path, "r", encoding="utf-8") as f:
+            for line in f:
+                s = line.strip()
+                if s and not s.startswith("#") and s.startswith(key + "="):
+                    return s.split("=", 1)[1].strip()
+    except FileNotFoundError:
+        pass
+    return default
+
 from oasis.models import (
     CreateTopicRequest,
     TopicDetail,
@@ -658,17 +679,14 @@ async def delete_user_expert_route(tag: str, user_id: str = Query(...)):
 
 
 # ------------------------------------------------------------------
-# OpenClaw session discovery
+# OpenClaw agent discovery
 # ------------------------------------------------------------------
-
-# _OPENCLAW_SESSIONS_FILE is no longer needed — we use CLI instead.
-# _OPENCLAW_SESSIONS_FILE = os.getenv("OPENCLAW_SESSIONS_FILE", None)
 
 _OPENCLAW_BIN = shutil.which("openclaw")
 
 
-def _fetch_openclaw_sessions_via_cli() -> list[dict] | None:
-    """Call ``openclaw sessions --all-agents --json`` and return parsed session list.
+def _fetch_openclaw_agents_via_cli() -> list[dict] | None:
+    """Call ``openclaw agents list --json`` and return parsed agent list.
 
     Returns None if the CLI is unavailable or the command fails.
     """
@@ -676,63 +694,124 @@ def _fetch_openclaw_sessions_via_cli() -> list[dict] | None:
         return None
     try:
         result = subprocess.run(
-            [_OPENCLAW_BIN, "sessions", "--all-agents", "--json"],
+            [_OPENCLAW_BIN, "agents", "list", "--json"],
             capture_output=True, text=True, timeout=15,
         )
         if result.returncode != 0:
-            print(f"  [OASIS] ⚠️ openclaw sessions CLI failed (rc={result.returncode}): "
-                  f"{result.stderr.strip()[:200]}")
-            return None
+            # --json may not be supported; fall back to text parsing
+            result_text = subprocess.run(
+                [_OPENCLAW_BIN, "agents", "list"],
+                capture_output=True, text=True, timeout=15,
+            )
+            if result_text.returncode != 0:
+                print(f"  [OASIS] ⚠️ openclaw agents list failed (rc={result_text.returncode}): "
+                      f"{result_text.stderr.strip()[:200]}")
+                return None
+            return _parse_agents_text(result_text.stdout)
         data = json.loads(result.stdout)
-        return data.get("sessions", [])
+        # Expect {"agents": [...]} or a plain list
+        if isinstance(data, dict):
+            return data.get("agents", [])
+        if isinstance(data, list):
+            return data
+        return None
     except subprocess.TimeoutExpired:
-        print("  [OASIS] ⚠️ openclaw sessions --all-agents --json timed out")
+        print("  [OASIS] ⚠️ openclaw agents list timed out")
         return None
     except (json.JSONDecodeError, Exception) as e:
-        print(f"  [OASIS] ⚠️ openclaw sessions CLI parse error: {e}")
+        # JSON parse failed — try text fallback
+        try:
+            result_text = subprocess.run(
+                [_OPENCLAW_BIN, "agents", "list"],
+                capture_output=True, text=True, timeout=15,
+            )
+            if result_text.returncode == 0:
+                return _parse_agents_text(result_text.stdout)
+        except Exception:
+            pass
+        print(f"  [OASIS] ⚠️ openclaw agents list parse error: {e}")
         return None
+
+
+def _parse_agents_text(text: str) -> list[dict]:
+    """Parse the human-readable output of ``openclaw agents list``.
+
+    Example output::
+
+        Agents:
+        - main (default)
+          Workspace: ~/.openclaw/workspace
+          Agent dir: /projects/.openclaw/agents/main/agent
+          Model: gongfeng/auto
+          Routing rules: 0
+          Routing: default (no explicit rules)
+        - test1
+          Workspace: /projects/.openclaw/test1
+          Agent dir: /projects/.openclaw/agents/test1/agent
+          Model: gongfeng/auto
+          Routing rules: 0
+
+    Returns a list of dicts with keys: name, model, workspace, is_default.
+    """
+    agents: list[dict] = []
+    current: dict | None = None
+    for line in text.splitlines():
+        stripped = line.strip()
+        if stripped.startswith("- "):
+            # New agent entry
+            if current:
+                agents.append(current)
+            name_part = stripped[2:].strip()
+            is_default = "(default)" in name_part
+            name = name_part.replace("(default)", "").strip()
+            current = {"name": name, "is_default": is_default, "model": "", "workspace": ""}
+        elif current and stripped.startswith("Model:"):
+            current["model"] = stripped.split(":", 1)[1].strip()
+        elif current and stripped.startswith("Workspace:"):
+            current["workspace"] = stripped.split(":", 1)[1].strip()
+    if current:
+        agents.append(current)
+    return agents
 
 
 @app.get("/sessions/openclaw")
-async def list_openclaw_sessions(filter: str = Query("")):
-    """List OpenClaw sessions via ``openclaw sessions --all-agents --json``."""
-    sessions = _fetch_openclaw_sessions_via_cli()
-    if sessions is None:
-        return {"sessions": [], "available": False,
+async def list_openclaw_agents(filter: str = Query("")):
+    """List OpenClaw agents via ``openclaw agents list``.
+
+    Returns agent-level entries (not individual sessions).
+    Each agent card uses ``agent:<name>`` as the model identifier.
+    """
+    agents = _fetch_openclaw_agents_via_cli()
+    if agents is None:
+        return {"agents": [], "available": False,
                 "message": "openclaw CLI not available or command failed"}
 
     # Keyword filter
     if filter:
-        sessions = [s for s in sessions if filter.lower() in s.get("key", "").lower()]
+        agents = [a for a in agents if filter.lower() in a.get("name", "").lower()]
 
-    # Sort by updatedAt descending
-    sessions.sort(key=lambda s: s.get("updatedAt", 0), reverse=True)
+    # Sort: default agent first, then alphabetical
+    agents.sort(key=lambda a: (not a.get("is_default", False), a.get("name", "")))
 
     result = [
         {
-            "key": s.get("key"),
-            "sessionId": s.get("sessionId"),
-            "kind": s.get("kind"),
-            "channel": s.get("channel"),
-            "model": s.get("model"),
-            "updatedAt": s.get("updatedAt"),
-            "agentId": s.get("agentId"),
-            "contextTokens": s.get("contextTokens", 0),
-            "totalTokens": s.get("totalTokens", 0),
+            "name": a.get("name", ""),
+            "model": a.get("model", ""),
+            "workspace": a.get("workspace", ""),
+            "is_default": a.get("is_default", False),
         }
-        for s in sessions
+        for a in agents
     ]
 
-    # Mask the API key: if set in env, return "****" so the frontend
-    # knows a key exists but never sees the plaintext.
-    raw_key = os.getenv("OPENCLAW_GATEWAY_TOKEN", "")
-    masked_key = "****" if raw_key else ""
+    # Strip /v1/chat/completions suffix — .env stores the full URL,
+    # but canvas / YAML only needs the base URL (engine auto-appends the path)
+    raw_url = _get_env("OPENCLAW_API_URL", "")
+    base_url = raw_url.replace("/v1/chat/completions", "").rstrip("/")
 
     return {
-        "sessions": result,
+        "agents": result,
         "available": True,
-        "openclaw_api_url": "",   # No longer needed — CLI priority
-        "openclaw_api_key": masked_key,
+        "openclaw_api_url": base_url,
     }
 
 

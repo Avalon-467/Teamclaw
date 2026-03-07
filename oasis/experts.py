@@ -614,35 +614,36 @@ class ExternalExpert:
     ExternalExpert directly calls any OpenAI-compatible endpoint (DeepSeek,
     GPT-4, Moonshot, Ollama, another mini_timebot instance, etc).
 
-    **OpenClaw Agent Detection**: When the ``model`` field matches the pattern
-    ``agent:<agent_name>:<session_id>``, this expert is recognized as an
-    OpenClaw agent. In that case, the CLI command
-    ``openclaw agent --agent <name> --session-id <session> --message <msg>``
-    is used **preferentially**. If the CLI is unavailable or fails, the call
-    falls back to the standard OpenAI-compatible HTTP API.
+    **OpenClaw Agent Support**: When the ``model`` field matches the pattern
+    ``agent:<agent_name>`` (e.g. ``agent:main``), this expert is recognized
+    as an OpenClaw agent. Communication uses the **CLI** as the primary
+    method via ``openclaw agent --agent <name> --message <msg>``.
+    If the CLI is unavailable or fails, the call falls back to the
+    OpenAI-compatible HTTP API (ChatCompletions endpoint).
+
+    Session management is handled entirely by OpenClaw internally —
+    users cannot and do not need to specify session IDs.
 
     The external service is assumed to be **stateful** (maintaining its own
-    conversation history server-side, e.g. via x-openclaw-session-key or
-    similar session tracking headers). Therefore this class sends only
+    conversation history server-side). Therefore this class sends only
     incremental context: first call sends full forum state + identity;
     subsequent calls send only new posts since last participation.
     No local message history is accumulated.
 
     Features:
-      - OpenClaw CLI priority for ``agent:*:*`` model patterns
-      - Automatic fallback to OpenAI HTTP API when CLI unavailable
+      - OpenClaw agents: CLI priority, HTTP API fallback
+      - Non-OpenClaw externals: direct HTTP API call
       - Incremental context (first call = full, subsequent = delta only)
       - Identity injection via system prompt on first call (persona from presets)
       - Works in both discussion mode (JSON reply/vote) and execute mode
       - Supports custom headers via YAML for service-specific needs
-        (e.g. x-openclaw-session-key for OpenClaw session routing)
 
     The external service does NOT need to support session_id or any
     non-standard fields — just standard /v1/chat/completions.
     """
 
-    # Regex to match OpenClaw agent model format: agent:<agent_name>:<session_id>
-    _OPENCLAW_MODEL_RE = re.compile(r"^agent:([^:]+):(.+)$")
+    # Regex to match OpenClaw agent model format: agent:<agent_name>
+    _OPENCLAW_MODEL_RE = re.compile(r"^agent:([^:]+)$")
 
     def __init__(
         self,
@@ -665,23 +666,18 @@ class ExternalExpert:
         self.model = model
         self._extra_headers = extra_headers or {}
 
-        # Detect OpenClaw agent model pattern: agent:<agent_name>:<session_id>
+        # Detect OpenClaw agent model pattern: agent:<agent_name>
         m = self._OPENCLAW_MODEL_RE.match(model)
         if m:
             self._is_openclaw_agent = True
             self._oc_agent_name = m.group(1)
-            self._oc_session_id = m.group(2)
             self._openclaw_bin = shutil.which("openclaw")
-            if self._openclaw_bin:
-                print(f"  [OASIS] 🦞 OpenClaw agent detected: agent={self._oc_agent_name}, "
-                      f"session={self._oc_session_id} — will use CLI priority")
-            else:
-                print(f"  [OASIS] 🦞 OpenClaw agent detected: agent={self._oc_agent_name}, "
-                      f"session={self._oc_session_id} — CLI not found, will use HTTP API")
+            print(f"  [OASIS] 🦞 OpenClaw agent detected: agent={self._oc_agent_name}"
+                  f" — CLI priority"
+                  f"{', CLI available' if self._openclaw_bin else ', CLI NOT found (HTTP only)'}")
         else:
             self._is_openclaw_agent = False
             self._oc_agent_name = ""
-            self._oc_session_id = ""
             self._openclaw_bin = None
 
         # Normalize api_url: strip trailing slash, build full URL
@@ -707,7 +703,7 @@ class ExternalExpert:
     async def _call_openclaw_cli(self, message: str) -> str:
         """Call OpenClaw agent via CLI command.
 
-        Runs: openclaw agent --agent <name> --session-id <session> --message <msg>
+        Runs: openclaw agent --agent <name> --message <msg>
         Returns the stdout output (agent's reply).
         Raises RuntimeError if CLI fails.
         """
@@ -715,11 +711,10 @@ class ExternalExpert:
             self._openclaw_bin,
             "agent",
             "--agent", self._oc_agent_name,
-            "--session-id", self._oc_session_id,
             "--message", message,
         ]
         print(f"  [OASIS] 🦞 CLI call: openclaw agent --agent {self._oc_agent_name} "
-              f"--session-id {self._oc_session_id} --message <{len(message)} chars>")
+              f"--message <{len(message)} chars>")
         try:
             proc = await asyncio.create_subprocess_exec(
                 *cmd,
@@ -778,17 +773,17 @@ class ExternalExpert:
     async def _call_api(self, messages: list[dict], timeout_override: float | None = ...) -> str:
         """Send messages to external API and return the assistant response text.
 
-        If this is an OpenClaw agent (model matches agent:<name>:<session>),
-        the CLI is tried first. Falls back to HTTP API on CLI failure.
+        For OpenClaw agents: CLI priority, HTTP API fallback.
+        For non-OpenClaw externals: direct HTTP API call.
 
         Args:
             timeout_override: Explicit timeout value. None = no timeout;
                               ... (default sentinel) = use self.timeout.
         """
-        # ── OpenClaw CLI priority ──
+        effective_timeout = self.timeout if timeout_override is ... else timeout_override
+
+        # ── OpenClaw agents: CLI priority ──
         if self._is_openclaw_agent and self._openclaw_bin:
-            # Build a single message string from the messages list
-            # Use the last user message as the CLI input
             cli_message = ""
             for msg in reversed(messages):
                 if msg.get("role") == "user":
@@ -796,28 +791,30 @@ class ExternalExpert:
                     break
             if not cli_message:
                 cli_message = messages[-1].get("content", "") if messages else ""
-
             try:
                 reply = await self._call_openclaw_cli(cli_message)
                 print(f"  [OASIS] 🦞 CLI success for {self.name}")
                 return reply
-            except Exception as e:
-                print(f"  [OASIS] ⚠️ OpenClaw CLI failed for {self.name}: {e}")
-                print(f"  [OASIS] 🔄 Falling back to HTTP API: {self._api_url}")
+            except Exception as cli_err:
+                print(f"  [OASIS] ⚠️ CLI failed for {self.name}: {cli_err}")
+                print(f"  [OASIS] 🔄 Falling back to HTTP API")
+                # Fall through to HTTP API below
 
-        # ── Standard HTTP API call ──
-        effective_timeout = self.timeout if timeout_override is ... else timeout_override
+        # ── HTTP API call (primary for non-OpenClaw, fallback for OpenClaw) ──
         body = {
             "model": self.model,
             "messages": messages,
             "stream": False,
         }
-        async with httpx.AsyncClient(timeout=httpx.Timeout(timeout=effective_timeout)) as client:
-            resp = await client.post(self._api_url, json=body, headers=self._headers())
-        if resp.status_code != 200:
-            raise RuntimeError(f"External API error {resp.status_code}: {resp.text[:300]}")
-        data = resp.json()
-        return data["choices"][0]["message"]["content"]
+        try:
+            async with httpx.AsyncClient(timeout=httpx.Timeout(timeout=effective_timeout)) as client:
+                resp = await client.post(self._api_url, json=body, headers=self._headers())
+            if resp.status_code != 200:
+                raise RuntimeError(f"External API error {resp.status_code}: {resp.text[:300]}")
+            data = resp.json()
+            return data["choices"][0]["message"]["content"]
+        except Exception as api_err:
+            raise RuntimeError(f"API call failed for {self.name}: {api_err}")
 
     async def participate(self, forum: DiscussionForum, instruction: str = "", discussion: bool = True):
         others = await forum.browse(viewer=self.name, exclude_self=True)

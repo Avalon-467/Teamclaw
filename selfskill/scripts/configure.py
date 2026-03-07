@@ -203,13 +203,11 @@ AI_MODEL_QQ=gemini-3-flash-preview
 AI_MODEL_TG=gemini-2.0-flash
 
 # === OpenClaw 集成配置（默认自动探测，也可手动覆盖）===
-# OPENCLAW_SESSIONS_FILE: 默认通过 openclaw sessions 命令自动探测
-# 如需手动指定，取消注释并填写绝对路径
-# OPENCLAW_SESSIONS_FILE=/projects/.openclaw/agents/main/sessions/sessions.json
 # OPENCLAW_API_URL: 默认通过 openclaw config get gateway.port 自动探测
 # 如需手动指定，取消注释并填写完整地址（含 /v1/chat/completions）
 # OPENCLAW_API_URL=http://127.0.0.1:23001/v1/chat/completions
-# OPENCLAW_GATEWAY_TOKEN=your-openclaw-token-if-needed
+# OPENCLAW_GATEWAY_TOKEN: 自动探测，不在前端暴露
+# 注：Agents 通过 openclaw agents list CLI 实时获取
 """
 
 
@@ -235,8 +233,8 @@ AI_MODEL_TG=gemini-2.0-flash
 
 
 def detect_openclaw_api_url():
-    """通过 gateway.port 自动探测 OPENCLAW_API_URL（仅作为 HTTP 回退备用）"""
-    # _enable_openclaw_chat_completions()  # 不再需要：CLI 优先，无需开启 OpenAI 端口
+    """确保 ChatCompletions 已开启，然后通过 gateway.port 自动探测 OPENCLAW_API_URL"""
+    _enable_openclaw_chat_completions()
     try:
         result = subprocess.run(
             ["openclaw", "config", "get", "gateway.port"],
@@ -289,10 +287,42 @@ def _auto_set_openclaw_url():
     current = kvs.get("OPENCLAW_API_URL", "")
     if current and current != "auto-detected":
         print(f"ℹ️  OPENCLAW_API_URL 已手动配置: {current}，跳过自动探测")
+    else:
+        url = detect_openclaw_api_url()
+        if url:
+            set_env("OPENCLAW_API_URL", url)
+
+    # 确保 OPENCLAW_GATEWAY_TOKEN 已设置（自动探测）
+    _auto_set_openclaw_gateway_token()
+
+
+def _auto_set_openclaw_gateway_token():
+    """自动探测 OpenClaw gateway token 并设置（仅当用户未手动配置时）"""
+    _, kvs = read_env()
+    current = kvs.get("OPENCLAW_GATEWAY_TOKEN", "")
+    if current:
+        print(f"ℹ️  OPENCLAW_GATEWAY_TOKEN 已配置")
         return
-    url = detect_openclaw_api_url()
-    if url:
-        set_env("OPENCLAW_API_URL", url)
+    # 尝试通过 openclaw config get gateway.token 自动探测
+    try:
+        result = subprocess.run(
+            ["openclaw", "config", "get", "gateway.token"],
+            capture_output=True, text=True, timeout=10
+        )
+        if result.returncode == 0:
+            for line in result.stdout.strip().splitlines():
+                token = line.strip()
+                if token and not token.startswith("🦞") and not token.startswith("OpenClaw"):
+                    print(f"🔍 自动探测到 OpenClaw gateway token")
+                    set_env("OPENCLAW_GATEWAY_TOKEN", token)
+                    return
+    except FileNotFoundError:
+        pass
+    except subprocess.TimeoutExpired:
+        pass
+    except Exception:
+        pass
+    print("⚠️  OPENCLAW_GATEWAY_TOKEN 未设置，OpenClaw agent 需要此 token 才能通过 HTTP API 通信")
 
 
 # def _auto_set_openclaw_sessions_file():
@@ -313,7 +343,7 @@ def init_env():
         print(f"✅ config/.env 已存在，跳过初始化")
         # 即使 .env 已存在，也尝试自动探测并更新 OpenClaw 配置
         _auto_set_openclaw_url()
-        _auto_set_openclaw_sessions_file()
+        # _auto_set_openclaw_sessions_file()  # sessions 通过 CLI 实时获取
         return
     os.makedirs(os.path.dirname(ENV_PATH), exist_ok=True)
     if os.path.exists(ENV_EXAMPLE):

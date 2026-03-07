@@ -142,7 +142,7 @@ async function orchLoadSessionAgents() {
     }
 }
 
-// ── Load OpenClaw sessions ──
+// ── Load OpenClaw agents ──
 async function orchLoadOpenClawSessions() {
     const list = document.getElementById('orch-expert-list-openclaw');
     if (!list) return;
@@ -155,30 +155,25 @@ async function orchLoadOpenClawSessions() {
             list.innerHTML = '<div style="padding:6px 10px;font-size:10px;color:#d1d5db;text-align:center;">🚫 Not configured</div>';
             return;
         }
-        if (!data.sessions || data.sessions.length === 0) {
-            list.innerHTML = '<div style="padding:6px 10px;font-size:10px;color:#d1d5db;text-align:center;">No OpenClaw sessions</div>';
+        if (!data.agents || data.agents.length === 0) {
+            list.innerHTML = '<div style="padding:6px 10px;font-size:10px;color:#d1d5db;text-align:center;">No OpenClaw agents</div>';
             return;
         }
         const openclawUrl = data.openclaw_api_url || '';
-        const openclawKey = data.openclaw_api_key || '';
-        for (const s of data.sessions) {
+        for (const a of data.agents) {
             const card = document.createElement('div');
             card.className = 'orch-expert-card';
             card.draggable = true;
-            const title = s.key || 'Untitled';
-            const chan = (s.channel && s.channel !== 'unknown' && s.channel !== 'auto') ? s.channel : '';
-            const mdl = (s.model && s.model !== 'unknown' && s.model !== 'auto') ? s.model : '';
-            const tagParts = [chan, mdl].filter(Boolean).join(' · ');
-            card.innerHTML = `<span class="orch-emoji">🦞</span><div style="min-width:0;flex:1;"><div class="orch-name" title="${escapeHtml(title)}">${escapeHtml(title)}</div>${tagParts ? '<div class="orch-tag" style="color:#10b981;font-family:monospace;">' + escapeHtml(tagParts) + '</div>' : ''}</div><span class="orch-temp" style="font-size:9px;color:#9ca3af;">${s.contextTokens||0}tk</span>`;
-            // s.key is already in full format like "agent:main:sessionName"
-            const sessionKey = s.key || 'default';
-            const modelStr = sessionKey.startsWith('agent:') ? sessionKey : ('agent:main:' + sessionKey);
+            const agentName = a.name || 'unknown';
+            const title = agentName + (a.is_default ? ' ⭐' : '');
+            const mdl = (a.model && a.model !== 'unknown' && a.model !== 'auto') ? a.model : '';
+            card.innerHTML = `<span class="orch-emoji">🦞</span><div style="min-width:0;flex:1;"><div class="orch-name" title="${escapeHtml(agentName)}">${escapeHtml(title)}</div>${mdl ? '<div class="orch-tag" style="color:#10b981;font-family:monospace;">' + escapeHtml(mdl) + '</div>' : ''}</div>`;
+            // model format: agent:<name> (CLI uses --agent <name>, no session-id)
+            const modelStr = 'agent:' + agentName;
             const nodeData = {
-                type: 'external', name: title, tag: 'openclaw', emoji: '🦞', temperature: 0.7,
-                api_url: openclawUrl, api_key: openclawKey,
+                type: 'external', name: agentName, tag: 'openclaw', emoji: '🦞', temperature: 0.7,
+                api_url: openclawUrl, api_key: '****',
                 model: modelStr,
-                headers: {'x-openclaw-session-key': sessionKey}, ext_id: sessionKey,
-                openclaw_session: s
             };
             card.addEventListener('dragstart', e => {
                 e.dataTransfer.setData('application/json', JSON.stringify(nodeData));
