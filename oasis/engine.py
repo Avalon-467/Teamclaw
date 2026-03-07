@@ -12,6 +12,7 @@ Three expert backends:
   3. ExternalExpert — external OpenAI-compatible API (name="title#ext#id")
      - Directly calls external endpoints (DeepSeek, GPT-4, Ollama, etc)
      - Configured per-expert via YAML: api_url, api_key, model
+     - OpenClaw CLI priority: model "agent:<name>:<session>" uses CLI first, HTTP fallback
 
 Expert pool sourcing (YAML-only, schedule_file or schedule_yaml required):
   Pool is built entirely from YAML expert names (deduplicated).

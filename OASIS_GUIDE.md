@@ -279,9 +279,17 @@ agent:<agent_name>:<session_name>
 Examples: `agent:main:default`, `agent:main:test1`, `agent:main:code-review`
 Non-existent sessions are auto-created.
 
-### `x-openclaw-session-key` — Deterministic Session Routing
+### OpenClaw CLI Priority
 
-**The key mechanism** for routing to a specific OpenClaw session.
+When the `model` field matches `agent:<name>:<session>`, the system **automatically** prefers the OpenClaw CLI:
+```
+openclaw agent --agent "<name>" --session-id "<session>" --message "<message>"
+```
+If the `openclaw` CLI is not in PATH or the call fails, it **falls back** to the HTTP API below.
+
+### `x-openclaw-session-key` — Deterministic Session Routing (HTTP fallback)
+
+**The key mechanism** for routing to a specific OpenClaw session when using HTTP API.
 
 - Visual Canvas **auto-sets** this header when dragging OpenClaw sessions
 - Manual YAML: **must** include in `headers`
@@ -551,7 +559,7 @@ plan:
 |---------|----------|
 | "name has no '#', skipping" | Use format: `tag#temp#N`, `tag#oasis#id`, `Title#sid`, `tag#ext#id` |
 | "missing 'api_url'" | Add `api_url` to Type 4 expert |
-| Wrong OpenClaw session | Add `headers: {x-openclaw-session-key: ...}` matching `model` |
+| Wrong OpenClaw session | Ensure `model` uses `agent:<name>:<session>` format (CLI priority); or add `headers: {x-openclaw-session-key: ...}` for HTTP fallback |
 | Canvas missing OpenClaw sessions | Set `OPENCLAW_SESSIONS_FILE` in `.env` |
 | API timeout | Check port, verify OpenAI-compatible interface enabled |
 
@@ -566,7 +574,7 @@ plan:
 | Quick opinions | `tag#temp#N` + `discussion: true` |
 | Stateful sessions | `tag#oasis#id` + `repeat: true` |
 | Existing bot | `Title#session_id` |
-| OpenClaw agents | `tag#ext#id` + `api_url` + `model` + `headers: {x-openclaw-session-key}` |
+| OpenClaw agents | `tag#ext#id` + `api_url` + `model: agent:<name>:<session>` (CLI priority, HTTP fallback) |
 | External LLMs | `tag#ext#id` + `api_url` + `api_key` |
 | Simple pipeline | `repeat: false` (linear steps) |
 | DAG pipeline | `repeat: false` + steps with `id` + `depends_on` |

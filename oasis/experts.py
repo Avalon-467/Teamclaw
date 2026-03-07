@@ -15,7 +15,10 @@ Three expert backends:
      Connects to external endpoints (DeepSeek, GPT-4, Moonshot, Ollama, etc)
      with their own URL and API key. External service is assumed stateful
      (holds conversation history server-side); only incremental context is sent.
-     To integrate with OpenClaw sessions, pass x-openclaw-session-key
+     **OpenClaw CLI priority**: When model matches "agent:<name>:<session>",
+     prefers `openclaw agent --agent <name> --session-id <session> --message ...`
+     CLI over HTTP API. Falls back to HTTP if CLI unavailable or fails.
+     To integrate with OpenClaw sessions via HTTP, pass x-openclaw-session-key
      via the YAML headers field, e.g.:
        headers:
          x-openclaw-session-key: "my-session-id"
@@ -33,8 +36,11 @@ Both participate() methods accept an optional `instruction` parameter,
 which is injected into the expert's prompt to guide their focus.
 """
 
+import asyncio
 import json
 import os
+import re
+import shutil
 import sys
 
 import httpx
@@ -608,6 +614,13 @@ class ExternalExpert:
     ExternalExpert directly calls any OpenAI-compatible endpoint (DeepSeek,
     GPT-4, Moonshot, Ollama, another mini_timebot instance, etc).
 
+    **OpenClaw Agent Detection**: When the ``model`` field matches the pattern
+    ``agent:<agent_name>:<session_id>``, this expert is recognized as an
+    OpenClaw agent. In that case, the CLI command
+    ``openclaw agent --agent <name> --session-id <session> --message <msg>``
+    is used **preferentially**. If the CLI is unavailable or fails, the call
+    falls back to the standard OpenAI-compatible HTTP API.
+
     The external service is assumed to be **stateful** (maintaining its own
     conversation history server-side, e.g. via x-openclaw-session-key or
     similar session tracking headers). Therefore this class sends only
@@ -616,6 +629,8 @@ class ExternalExpert:
     No local message history is accumulated.
 
     Features:
+      - OpenClaw CLI priority for ``agent:*:*`` model patterns
+      - Automatic fallback to OpenAI HTTP API when CLI unavailable
       - Incremental context (first call = full, subsequent = delta only)
       - Identity injection via system prompt on first call (persona from presets)
       - Works in both discussion mode (JSON reply/vote) and execute mode
@@ -625,6 +640,9 @@ class ExternalExpert:
     The external service does NOT need to support session_id or any
     non-standard fields — just standard /v1/chat/completions.
     """
+
+    # Regex to match OpenClaw agent model format: agent:<agent_name>:<session_id>
+    _OPENCLAW_MODEL_RE = re.compile(r"^agent:([^:]+):(.+)$")
 
     def __init__(
         self,
@@ -647,6 +665,25 @@ class ExternalExpert:
         self.model = model
         self._extra_headers = extra_headers or {}
 
+        # Detect OpenClaw agent model pattern: agent:<agent_name>:<session_id>
+        m = self._OPENCLAW_MODEL_RE.match(model)
+        if m:
+            self._is_openclaw_agent = True
+            self._oc_agent_name = m.group(1)
+            self._oc_session_id = m.group(2)
+            self._openclaw_bin = shutil.which("openclaw")
+            if self._openclaw_bin:
+                print(f"  [OASIS] 🦞 OpenClaw agent detected: agent={self._oc_agent_name}, "
+                      f"session={self._oc_session_id} — will use CLI priority")
+            else:
+                print(f"  [OASIS] 🦞 OpenClaw agent detected: agent={self._oc_agent_name}, "
+                      f"session={self._oc_session_id} — CLI not found, will use HTTP API")
+        else:
+            self._is_openclaw_agent = False
+            self._oc_agent_name = ""
+            self._oc_session_id = ""
+            self._openclaw_bin = None
+
         # Normalize api_url: strip trailing slash, build full URL
         api_url = api_url.rstrip("/")
         if not api_url.endswith("/v1/chat/completions"):
@@ -667,13 +704,108 @@ class ExternalExpert:
         h.update(self._extra_headers)
         return h
 
+    async def _call_openclaw_cli(self, message: str) -> str:
+        """Call OpenClaw agent via CLI command.
+
+        Runs: openclaw agent --agent <name> --session-id <session> --message <msg>
+        Returns the stdout output (agent's reply).
+        Raises RuntimeError if CLI fails.
+        """
+        cmd = [
+            self._openclaw_bin,
+            "agent",
+            "--agent", self._oc_agent_name,
+            "--session-id", self._oc_session_id,
+            "--message", message,
+        ]
+        print(f"  [OASIS] 🦞 CLI call: openclaw agent --agent {self._oc_agent_name} "
+              f"--session-id {self._oc_session_id} --message <{len(message)} chars>")
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                *cmd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            stdout, stderr = await asyncio.wait_for(
+                proc.communicate(), timeout=self.timeout
+            )
+            stdout_text = stdout.decode("utf-8", errors="replace").strip()
+            stderr_text = stderr.decode("utf-8", errors="replace").strip()
+
+            if proc.returncode != 0:
+                raise RuntimeError(
+                    f"openclaw CLI exit code {proc.returncode}: "
+                    f"{stderr_text or stdout_text}"
+                )
+
+            # OpenClaw CLI output may contain a header line like:
+            # "🦞 OpenClaw 2026.3.1 (unknown) — Less middlemen, more messages."
+            # and decorative lines (│, ◇, etc). Extract the actual reply.
+            reply = self._parse_openclaw_output(stdout_text)
+            if not reply:
+                raise RuntimeError(f"Empty response from openclaw CLI. Raw: {stdout_text[:200]}")
+            return reply
+        except asyncio.TimeoutError:
+            raise RuntimeError(f"openclaw CLI timed out after {self.timeout}s")
+
+    @staticmethod
+    def _parse_openclaw_output(raw: str) -> str:
+        """Parse openclaw agent CLI output, stripping decorative lines.
+
+        The CLI typically outputs:
+            🦞 OpenClaw 2026.3.1 (unknown) — Less middlemen, more messages.
+            │
+            ◇
+            <actual reply content>
+
+        We strip the header/decorative lines and return the meaningful content.
+        """
+        lines = raw.split("\n")
+        content_lines = []
+        skip_header = True
+        for line in lines:
+            stripped = line.strip()
+            # Skip known decorative/header patterns
+            if skip_header:
+                if (stripped.startswith("🦞") or
+                    stripped in ("│", "◇", "◆", "└", "") or
+                    stripped.startswith("OpenClaw")):
+                    continue
+                skip_header = False
+            content_lines.append(line)
+        return "\n".join(content_lines).strip()
+
     async def _call_api(self, messages: list[dict], timeout_override: float | None = ...) -> str:
         """Send messages to external API and return the assistant response text.
+
+        If this is an OpenClaw agent (model matches agent:<name>:<session>),
+        the CLI is tried first. Falls back to HTTP API on CLI failure.
 
         Args:
             timeout_override: Explicit timeout value. None = no timeout;
                               ... (default sentinel) = use self.timeout.
         """
+        # ── OpenClaw CLI priority ──
+        if self._is_openclaw_agent and self._openclaw_bin:
+            # Build a single message string from the messages list
+            # Use the last user message as the CLI input
+            cli_message = ""
+            for msg in reversed(messages):
+                if msg.get("role") == "user":
+                    cli_message = msg.get("content", "")
+                    break
+            if not cli_message:
+                cli_message = messages[-1].get("content", "") if messages else ""
+
+            try:
+                reply = await self._call_openclaw_cli(cli_message)
+                print(f"  [OASIS] 🦞 CLI success for {self.name}")
+                return reply
+            except Exception as e:
+                print(f"  [OASIS] ⚠️ OpenClaw CLI failed for {self.name}: {e}")
+                print(f"  [OASIS] 🔄 Falling back to HTTP API: {self._api_url}")
+
+        # ── Standard HTTP API call ──
         effective_timeout = self.timeout if timeout_override is ... else timeout_override
         body = {
             "model": self.model,

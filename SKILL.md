@@ -309,11 +309,14 @@ plan:
   - expert: "deepseek#ext#ds1"
 
   # Type 4: OpenClaw External API (local Agent service)
+  # When model matches "agent:<name>:<session>", CLI is used first:
+  #   openclaw agent --agent "main" --session-id "test1" --message "..."
+  # Falls back to HTTP API if CLI unavailable
   # api_key auto-resolved from OPENCLAW_GATEWAY_TOKEN env var when set to "****"
   - expert: "coder#ext#oc1"
     api_url: "http://127.0.0.1:23001/v1/chat/completions"
     api_key: "****"              # Masked — real key read from OPENCLAW_GATEWAY_TOKEN env var at runtime
-    model: "agent:main:test1"    # agent:<agent_name>:<session>, session auto-created if not exists
+    model: "agent:main:test1"    # agent:<agent_name>:<session> → triggers CLI priority
 
   # Parallel execution
   - parallel:
@@ -414,12 +417,20 @@ Examples:
 - `agent:main:test1`  Use main agent's test1 session (auto-created if not exists)
 - `agent:main:code-review`  Use main agent's code-review session
 
-**Request Header Assembly Logic:**
+**OpenClaw CLI Priority:**
+
+When the `model` field matches `agent:<agent_name>:<session_id>`, the system **automatically** uses the OpenClaw CLI as the preferred invocation method:
+```
+openclaw agent --agent "<agent_name>" --session-id "<session_id>" --message "<message>"
+```
+If the `openclaw` CLI is not available in PATH or the CLI call fails, it **falls back** to the standard HTTP API (using the `api_url` and `x-openclaw-session-key` header). This ensures both maximum reliability and simplicity — no extra headers needed when CLI is available.
+
+**Request Header Assembly Logic (HTTP fallback):**
 Final request headers = `Content-Type: application/json` + `Authorization: Bearer <api_key>` (if present) + all key-value pairs from YAML `headers`.
 
-**`x-openclaw-session-key` — Deterministic OpenClaw Session Routing:**
+**`x-openclaw-session-key` — Deterministic OpenClaw Session Routing (HTTP mode):**
 
-When calling an OpenClaw agent via External API (Type 4), the `x-openclaw-session-key` HTTP header is the **key mechanism** for routing requests to a specific, deterministic OpenClaw session. Without this header, OpenClaw may not correctly associate the request with the intended session.
+When CLI is unavailable and falling back to HTTP API, the `x-openclaw-session-key` HTTP header is the **key mechanism** for routing requests to a specific, deterministic OpenClaw session. Without this header, OpenClaw may not correctly associate the request with the intended session.
 
 - The frontend orchestration panel **automatically** sets this header when you drag an OpenClaw session onto the canvas.
 - When writing YAML manually or calling the API programmatically, you **must** include this header in the `headers` field to ensure session determinism.
@@ -908,11 +919,14 @@ plan:
   - expert: "deepseek#ext#ds1"
 
   # Type 4: OpenClaw External API Agent 
+  # model 匹配 "agent:<name>:<session>" 时优先使用 CLI 调用：
+  #   openclaw agent --agent "main" --session-id "test1" --message "..."
+  # CLI 不可用时自动回退到 HTTP API
   # api_key 从 OPENCLAW_GATEWAY_TOKEN 环境变量自动读取，YAML 中使用 "****" 掩码
   - expert: "coder#ext#oc1"
     api_url: "http://127.0.0.1:23001/v1/chat/completions"
     api_key: "****"              # 掩码 — 运行时自动从 OPENCLAW_GATEWAY_TOKEN 环境变量读取真实密钥
-    model: "agent:main:test1"    # agent:<agent_name>:<session>session 
+    model: "agent:main:test1"    # agent:<agent_name>:<session> → 触发 CLI 优先调用
 
   # 
   - parallel:
@@ -1014,12 +1028,20 @@ agent:<agent_name>:<session_name>
 - `agent:main:test1`   main agent  test1 session
 - `agent:main:code-review`   main agent  code-review session
 
-****
- = `Content-Type: application/json` + `Authorization: Bearer <api_key>` + YAML `headers` 
+**OpenClaw CLI 优先调用：**
 
-**`x-openclaw-session-key` —— OpenClaw 确定性 Session 路由：**
+当 `model` 字段匹配 `agent:<agent_name>:<session_id>` 格式时，系统**自动优先**使用 OpenClaw CLI 调用：
+```
+openclaw agent --agent "<agent_name>" --session-id "<session_id>" --message "<message>"
+```
+如果 `openclaw` CLI 不在 PATH 中或 CLI 调用失败，则**自动回退**到标准 HTTP API（使用 `api_url` 和 `x-openclaw-session-key` header）。这确保了最大的可靠性和简洁性 —— 当 CLI 可用时无需额外配置 headers。
 
-通过 External API（Type 4）调用 OpenClaw agent 时，`x-openclaw-session-key` HTTP header 是**将请求路由到指定 OpenClaw session 的关键机制**。缺少此 header，OpenClaw 可能无法正确关联到目标 session。
+**请求头组装逻辑（HTTP 回退模式）：**
+最终请求头 = `Content-Type: application/json` + `Authorization: Bearer <api_key>` + YAML `headers` 中的所有键值对。
+
+**`x-openclaw-session-key` —— OpenClaw 确定性 Session 路由（HTTP 模式）：**
+
+当 CLI 不可用而回退到 HTTP API 时，`x-openclaw-session-key` HTTP header 是**将请求路由到指定 OpenClaw session 的关键机制**。缺少此 header，OpenClaw 可能无法正确关联到目标 session。
 
 - 前端编排面板在拖拽 OpenClaw session 到画布时会**自动设置**此 header。
 - 手动编写 YAML 或通过 API 调用时，**必须**在 `headers` 字段中包含此 header 以确保 session 的确定性。
