@@ -450,6 +450,8 @@ header {
 .orch-canvas {
     flex: 1; position: relative; overflow: hidden;
     background-color: #fafbfc;
+    /* 禁用中键自动滚动 */
+    overscroll-behavior: none;
 }
 .orch-canvas-inner {
     position: absolute; top: 0; left: 0; width: 100%; height: 100%;

@@ -9,6 +9,8 @@ const orch = {
     dragging: null,
     connecting: null,
     selecting: null,
+    panning: null,       // 画布拖拽平移状态
+    spaceDown: false,    // 空格键按下状态
     contextMenu: null,
     sessionStatuses: {},
     // Zoom & pan state
@@ -514,18 +516,59 @@ function orchSetupCanvas() {
         } catch(err) {}
     });
 
-    // ── Mousedown: selection rect ──
+    // ── Wheel: zoom towards cursor ──
+    canvas.addEventListener('wheel', e => {
+        e.preventDefault();
+        const rect = canvas.getBoundingClientRect();
+        const mx = e.clientX - rect.left;
+        const my = e.clientY - rect.top;
+        const oldZoom = orch.zoom;
+        const delta = e.deltaY > 0 ? -0.08 : 0.08;
+        orch.zoom = Math.min(3, Math.max(0.15, oldZoom + delta));
+        // 以鼠标位置为中心缩放：调整 panX/panY 使鼠标下方的画布点不变
+        orch.panX = mx - (mx - orch.panX) * (orch.zoom / oldZoom);
+        orch.panY = my - (my - orch.panY) * (orch.zoom / oldZoom);
+        orchApplyTransform();
+    }, { passive: false });
+
+    // ── Mousedown: left on blank = pan, Shift+left on blank = select rect ──
     canvas.addEventListener('mousedown', e => {
         const inner = document.getElementById('orch-canvas-inner');
-        if (e.target === canvas || e.target === inner || e.target.id === 'orch-canvas-hint') {
-            orchClearSelection();
-            const cp = orchClientToCanvas(e.clientX, e.clientY);
-            orch.selecting = { sx: cp.x, sy: cp.y };
+        const isBlank = e.target === canvas || e.target === inner || e.target.id === 'orch-canvas-hint';
+
+        // 中键 → 平移
+        if (e.button === 1) {
+            e.preventDefault();
+            orch.panning = { startX: e.clientX, startY: e.clientY, origPanX: orch.panX, origPanY: orch.panY };
+            canvas.style.cursor = 'grabbing';
+            return;
+        }
+
+        if (isBlank && e.button === 0) {
+            // Shift+左键空白区 → 框选
+            if (e.shiftKey) {
+                orchClearSelection();
+                const cp = orchClientToCanvas(e.clientX, e.clientY);
+                orch.selecting = { sx: cp.x, sy: cp.y };
+            } else {
+                // 左键空白区 → 抓住画布平移
+                orchClearSelection();
+                orch.panning = { startX: e.clientX, startY: e.clientY, origPanX: orch.panX, origPanY: orch.panY };
+                canvas.style.cursor = 'grabbing';
+            }
         }
     });
 
-    // ── Mousemove: drag nodes / connect / select ──
+    // ── Mousemove: pan / drag nodes / connect / select ──
     canvas.addEventListener('mousemove', e => {
+        // 画布平移优先
+        if (orch.panning) {
+            const p = orch.panning;
+            orch.panX = p.origPanX + (e.clientX - p.startX);
+            orch.panY = p.origPanY + (e.clientY - p.startY);
+            orchApplyTransform();
+            return;
+        }
         if (orch.dragging) {
             const d = orch.dragging;
             const cp = orchClientToCanvas(e.clientX, e.clientY);
@@ -559,6 +602,11 @@ function orchSetupCanvas() {
 
     // ── Mouseup ──
     canvas.addEventListener('mouseup', e => {
+        if (orch.panning) {
+            orch.panning = null;
+            canvas.style.cursor = '';
+            return;
+        }
         if (orch.dragging) { orch.dragging = null; orchUpdateYaml(); }
         if (orch.connecting) { orch.connecting = null; orchRemoveTempLine(); }
         if (orch.selecting) {
@@ -583,6 +631,13 @@ function orchSetupCanvas() {
     // ── Keyboard shortcuts ──
     document.addEventListener('keydown', e => {
         if (currentPage !== 'orchestrate') return;
+        // 空格键：进入画布拖拽模式
+        if (e.key === ' ' && !e.repeat) {
+            if (document.activeElement.tagName === 'INPUT' || document.activeElement.tagName === 'TEXTAREA') return;
+            e.preventDefault();
+            orch.spaceDown = true;
+            canvas.style.cursor = 'grab';
+        }
         if (e.key === 'Delete' || e.key === 'Backspace') {
             if (document.activeElement.tagName === 'INPUT' || document.activeElement.tagName === 'TEXTAREA') return;
             orch.selectedNodes.forEach(id => orchRemoveNode(id));
@@ -597,7 +652,12 @@ function orchSetupCanvas() {
         }
         if (e.key === 'Escape') { orchClearSelection(); orchHideContextMenu(); }
     });
-    document.addEventListener('keyup', e => {});
+    document.addEventListener('keyup', e => {
+        if (e.key === ' ') {
+            orch.spaceDown = false;
+            if (!orch.panning) canvas.style.cursor = '';
+        }
+    });
 }
 
 function orchShowContextMenu(x, y, targetNode) {
