@@ -668,7 +668,7 @@ _OPENCLAW_SESSIONS_FILE = os.getenv(
 @app.get("/sessions/openclaw")
 async def list_openclaw_sessions(filter: str = Query("")):
     """List OpenClaw sessions from sessions.json file."""
-    if not os.path.exists(_OPENCLAW_SESSIONS_FILE):
+    if not _OPENCLAW_SESSIONS_FILE or not os.path.exists(_OPENCLAW_SESSIONS_FILE):
         return {"sessions": [], "available": False, "message": "OpenClaw sessions file not found"}
 
     try:

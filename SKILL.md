@@ -11,7 +11,7 @@ compatibility:
   - "ollama"
 
 
-argument-hint: "[BEFORE FIRST LAUNCH - MUST CONFIGURE] (1) LLM_API_KEY: your LLM provider API key (required). (2) LLM_BASE_URL: the base URL of your LLM provider (e.g. https://api.deepseek.com). (3) LLM_MODEL: the model name to use (e.g. deepseek-chat, gpt-4o, gemini-2.5-flash). (4) OPENCLAW_SESSIONS_FILE: absolute path to OpenClaw sessions.json, used to discover existing OpenClaw agent sessions for workflow orchestration on the visual Canvas. (5) OPENCLAW_API_URL: OpenClaw backend API endpoint (changes with gateway port; you MUST first enable OpenClaw's OpenAI-compatible API interface, e.g. http://127.0.0.1:18789/v1/chat/completions). (6) OPENCLAW_API_KEY: the API key for accessing OpenClaw via its OpenAI-compatible endpoint. [NETWORK] Requires outbound access for LLM/TTS APIs. Uses ports 51200-51209 and 58010 (Bark). [BOTS] Optional integrations: TELEGRAM_BOT_TOKEN, QQ_APP_ID, QQ_BOT_SECRET. [TUNNEL] Set PUBLIC_DOMAIN to enable secure Cloudflare Tunneling."
+argument-hint: "[BEFORE FIRST LAUNCH - MUST CONFIGURE] (1) LLM_API_KEY: your LLM provider API key (required). (2) LLM_BASE_URL: the base URL of your LLM provider (e.g. https://api.deepseek.com). (3) LLM_MODEL: the model name to use (e.g. deepseek-chat, gpt-4o, gemini-2.5-flash). [AUTO-DETECT] OPENCLAW_SESSIONS_FILE is auto-detected via `openclaw sessions` (Session store line); OPENCLAW_API_URL is auto-detected via `openclaw config get gateway.port`. Both can be manually overridden in .env if needed. (5) OPENCLAW_API_KEY: the API key for accessing OpenClaw via its OpenAI-compatible endpoint. [NETWORK] Requires outbound access for LLM/TTS APIs. Uses ports 51200-51209. [BOTS] Optional integrations: TELEGRAM_BOT_TOKEN, QQ_APP_ID, QQ_BOT_SECRET. [TUNNEL] Set PUBLIC_DOMAIN to enable secure Cloudflare Tunneling."
 
 metadata:
   version: "1.0.1"
@@ -21,7 +21,6 @@ metadata:
     scheduler: 51201
     oasis: 51202
     frontend: 51209
-    bark: 58010
   auth_methods:
     - "user_password"
     - "internal_token"
@@ -47,7 +46,6 @@ TeamClaw is a versatile AI Agent service providing:
 - **Conversational Agent**: A LangGraph-based multi-tool AI assistant supporting streaming/non-streaming conversations
 - **OASIS Forum**: A multi-expert parallel discussion/execution engine for orchestrating multiple agents
 - **Scheduled Tasks**: An APScheduler-based task scheduling center
-- **Bark Push**: Mobile push notifications
 - **Frontend Web UI**: A complete chat interface
 
 ## Skill Scripts
@@ -83,10 +81,14 @@ bash selfskill/scripts/run.sh configure --batch \
   LLM_MODEL=deepseek-chat
 
 # ⚠️ Create user account (REQUIRED — without this you CANNOT log in to the Web UI or call API)
-bash selfskill/scripts/run.sh add-user system MySecurePass123
+# ⚠️ AGENT: You MUST ASK the user for their desired username and password BEFORE running this command!
+#    Do NOT use default/example credentials like "admin/admin123" or "system/MySecurePass123".
+#    Example prompt: "Please provide the username and password you'd like to use for the TeamClaw Web UI."
+bash selfskill/scripts/run.sh add-user <username> <password>
 ```
 
 > ⚠️ **You MUST create at least one user account before starting the service!**
+> - **AGENT MUST ask the user** for their preferred username and password. Do NOT invent credentials.
 > - The Web UI login page requires username + password.
 > - All API calls require `Authorization: Bearer <user_id>:<password>` (or `INTERNAL_TOKEN:<user_id>`).
 > - If you skip this step, you will be locked out of the entire system.
@@ -100,11 +102,10 @@ bash selfskill/scripts/run.sh status    # Check status
 bash selfskill/scripts/run.sh stop      # Stop service
 ```
 
-### 3. Bark Push vs Chatbot (Telegram/QQ) — Startup Differences
+### 3. Chatbot (Telegram/QQ) — Startup Differences
 
 | Component | How it starts | Configuration needed | Notes |
 |-----------|--------------|---------------------|-------|
-| **Bark Push** (port 58010) | **Automatically** started by `launcher.py` | None — works out of the box | A standalone binary (`bin/bark-server`). Auto-downloaded on first `setup`. No env vars needed. |
 | **Telegram Bot** | **Requires manual setup** | `TELEGRAM_BOT_TOKEN`, `TELEGRAM_ALLOWED_USERS` in `.env` | `launcher.py` calls `chatbot/setup.py` which has an **interactive menu** (`input()`). In headless/background mode this will **block**. To avoid blocking, configure the bot tokens in `.env` beforehand and start the bot separately: `nohup python chatbot/telegrambot.py > logs/telegrambot.log 2>&1 &` |
 | **QQ Bot** | **Requires manual setup** | `QQ_APP_ID`, `QQ_BOT_SECRET`, `QQ_BOT_USERNAME` in `.env` | Same as Telegram — interactive setup will block in headless mode. Start separately: `nohup python chatbot/QQbot.py > logs/qqbot.log 2>&1 &` |
 
@@ -134,17 +135,16 @@ bash selfskill/scripts/run.sh configure --batch TTS_MODEL=gemini-2.5-flash-previ
 | `LLM_MODEL` | Model name | `deepseek-chat` |
 | `LLM_PROVIDER` | Provider (google/anthropic/deepseek/openai, auto-inferred) | Auto |
 | `LLM_VISION_SUPPORT` | Vision support (auto-inferred) | Auto |
-| `PORT_AGENT` | Agent main service port | `51200` |
-| `PORT_SCHEDULER` | Scheduled task port | `51201` |
-| `PORT_OASIS` | OASIS forum port | `51202` |
-| `PORT_FRONTEND` | Web UI port | `51209` |
-| `PORT_BARK` | Bark push port | `58010` |
+| `PORT_AGENT` | Agent main service port (optional, has default) | `51200` |
+| `PORT_SCHEDULER` | Scheduled task port (optional, has default) | `51201` |
+| `PORT_OASIS` | OASIS forum port (optional, has default) | `51202` |
+| `PORT_FRONTEND` | Web UI port (optional, has default) | `51209` |
 | `TTS_MODEL` | TTS model (optional) |  |
 | `TTS_VOICE` | TTS voice (optional) |  |
-| `OPENCLAW_API_URL` | OpenClaw backend service URL (full path, including `/v1/chat/completions`) | `http://127.0.0.1:18789/v1/chat/completions` |
+| `OPENCLAW_API_URL` | OpenClaw backend service URL (default: **auto-detected** via `openclaw config get gateway.port`; ChatCompletions endpoint is auto-enabled; can be manually overridden in `.env`) | Auto |
 | `OPENCLAW_API_KEY` | OpenClaw backend service API key (optional) |  |
-| `OPENCLAW_SESSIONS_FILE` | Absolute path to OpenClaw sessions.json file (**required when using OpenClaw**) | `None` |
-| `INTERNAL_TOKEN` | Internal communication secret (auto-generated) | Auto |
+| `OPENCLAW_SESSIONS_FILE` | Absolute path to OpenClaw sessions.json file (default: **auto-detected** via `openclaw sessions`; can be manually overridden in `.env`) | Auto |
+| `INTERNAL_TOKEN` | Internal communication secret (**auto-generated on first startup, no manual config needed**) | Auto |
 
 ## Ports & Services
 
@@ -389,19 +389,16 @@ plan:
 OpenClaw is a locally running OpenAI-compatible Agent service. After setting up OpenClaw-specific endpoints in `.env`, the frontend orchestration panel will **auto-fill** `api_url` and `api_key` when dragging in an OpenClaw expert, no manual input needed:
 
 ```bash
-# Configure OpenClaw endpoint and sessions file path
+# Configure OpenClaw (all auto-detected by default; only OPENCLAW_API_KEY needs manual config if auth is enabled)
 bash selfskill/scripts/run.sh configure --batch \
-OPENCLAW_SESSIONS_FILE=./data/sessions.json \
-  OPENCLAW_API_URL=http://127.0.0.1:18789/v1/chat/completions \
   OPENCLAW_API_KEY=your-openclaw-key-if-needed
 ```
 
 > ** Note:**
-> - `OPENCLAW_SESSIONS_FILE` is a **prerequisite** for using the OpenClaw feature and must point to the absolute path of OpenClaw's `sessions.json` file. The frontend orchestration panel will not load OpenClaw sessions if unconfigured.
-> - **Path Convention**: `./agents/main/sessions/sessions.json` is a common path structure for OpenClaw agent sessions. This path convention allows the system to properly access and orchestrate OpenClaw agents.
+> - **`OPENCLAW_API_URL` is auto-detected**: The system first enables the ChatCompletions endpoint (`openclaw config set gateway.http.endpoints.chatCompletions.enabled true`), then runs `openclaw config get gateway.port` to discover the gateway port and automatically sets `OPENCLAW_API_URL=http://127.0.0.1:<port>/v1/chat/completions`. If you need to override, manually set `OPENCLAW_API_URL` in `.env`.
+> - **`OPENCLAW_SESSIONS_FILE` is auto-detected**: The system runs `openclaw sessions` and parses the `Session store:` line to get the sessions.json path. If you need to override, manually set `OPENCLAW_SESSIONS_FILE` in `.env`.
+> - **Path Convention**: `./agents/main/sessions/sessions.json` is a common path structure for OpenClaw agent sessions.
 > - **Session Management**: Accessing session information is a necessary process for OpenClaw agent orchestration, enabling multi-agent workflow coordination and visual canvas operations.
-> - `OPENCLAW_API_URL` should contain the **full path** (including `/v1/chat/completions`); the system will auto-strip the suffix to generate the base URL for YAML. The `api_url` field in YAML only needs the base URL (e.g., `http://127.0.0.1:18789`); the engine auto-completes the path.
-> - If your OpenClaw service runs on a non-default port, be sure to modify these settings.
 
 **OpenClaw `model` Field Format:**
 
@@ -590,11 +587,11 @@ bash selfskill/scripts/run.sh configure --batch \
   PORT_SCHEDULER=51201 \
   PORT_OASIS=51202 \
   PORT_FRONTEND=51209 \
-  PORT_BARK=58010 \
-  OPENCLAW_API_URL=http://127.0.0.1:18789/v1/chat/completions \
   OPENAI_STANDARD_MODE=false
 bash selfskill/scripts/run.sh add-user system <your-password>
 ```
+
+> Note: `OPENCLAW_API_URL` is auto-detected (ChatCompletions endpoint auto-enabled + port discovery via `openclaw config get gateway.port`) during `configure --init`. Can be manually overridden in `.env`.
 
 Output after `configure --show`:
 
@@ -604,7 +601,6 @@ Output after `configure --show`:
   PORT_FRONTEND=51209
   PORT_OASIS=51202
   OASIS_BASE_URL=http://127.0.0.1:51202
-  PORT_BARK=58010
   INTERNAL_TOKEN=f1aa****57e7          # Auto-generated, do not leak
   LLM_API_KEY=sk-7****4c74
   LLM_BASE_URL=https://deepseek.com
@@ -615,7 +611,7 @@ Output after `configure --show`:
   OPENAI_STANDARD_MODE=false
 ```
 
-> Note: `INTERNAL_TOKEN` is auto-generated on first startup; `PUBLIC_DOMAIN` / `BARK_PUBLIC_URL` are auto-written by the tunnel; no manual configuration needed.
+> Note: `INTERNAL_TOKEN` is auto-generated on first startup; `PUBLIC_DOMAIN` is auto-written by the tunnel; no manual configuration needed.
 
 ## Typical Usage Flow
 
@@ -626,7 +622,8 @@ cd /home/avalon/TeamClaw
 bash selfskill/scripts/run.sh setup
 bash selfskill/scripts/run.sh configure --init
 bash selfskill/scripts/run.sh configure --batch LLM_API_KEY=sk-xxx LLM_BASE_URL=https://api.deepseek.com LLM_MODEL=deepseek-chat
-bash selfskill/scripts/run.sh add-user system MyPass123
+# ⚠️ ASK the user for username and password first!
+bash selfskill/scripts/run.sh add-user <username> <password>
 
 # Start
 bash selfskill/scripts/run.sh start
@@ -634,7 +631,7 @@ bash selfskill/scripts/run.sh start
 # Call API
 curl -X POST http://127.0.0.1:51200/v1/chat/completions \
   -H "Content-Type: application/json" \
-  -H "Authorization: Bearer system:MyPass123" \
+  -H "Authorization: Bearer <username>:<password>" \
   -d '{"model":"mini-timebot","messages":[{"role":"user","content":"Hello"}],"stream":false,"session_id":"default"}'
 
 # Stop
@@ -667,7 +664,6 @@ TeamClaw  AI Agent
 - ** Agent** LangGraph  AI /
 - **OASIS **/ Agent 
 - **** APScheduler 
-- **Bark **
 - ** Web UI**
 
 ## Skill 
@@ -703,7 +699,10 @@ bash selfskill/scripts/run.sh configure --batch \
   LLM_MODEL=deepseek-chat
 
 # 
-bash selfskill/scripts/run.sh add-user system MySecurePass123
+# ⚠️ AGENT：执行此命令前，必须先询问用户想要的用户名和密码！
+#    禁止使用默认凭据（如 admin/admin123 或 system/MySecurePass123）。
+#    示例提示："请告诉我你想为 TeamClaw Web UI 设置的用户名和密码。"
+bash selfskill/scripts/run.sh add-user <username> <password>
 ```
 
 ### 2. //
@@ -736,17 +735,16 @@ bash selfskill/scripts/run.sh configure --batch TTS_MODEL=gemini-2.5-flash-previ
 | `LLM_MODEL` |  | `deepseek-chat` |
 | `LLM_PROVIDER` | google/anthropic/deepseek/openai |  |
 | `LLM_VISION_SUPPORT` |  |  |
-| `PORT_AGENT` | Agent  | `51200` |
-| `PORT_SCHEDULER` |  | `51201` |
-| `PORT_OASIS` | OASIS  | `51202` |
-| `PORT_FRONTEND` | Web UI  | `51209` |
-| `PORT_BARK` | Bark  | `58010` |
-| `TTS_MODEL` | TTS  |  |
-| `TTS_VOICE` | TTS  |  |
-| `OPENCLAW_API_URL` | OpenClaw  `/v1/chat/completions` | `http://127.0.0.1:18789/v1/chat/completions` |
-| `OPENCLAW_API_KEY` | OpenClaw  API Key |  |
-| `OPENCLAW_SESSIONS_FILE` | OpenClaw sessions.json ** OpenClaw ** | `None` |
-| `INTERNAL_TOKEN` |  |  |
+| `PORT_AGENT` | Agent 主服务端口（可选，有默认值） | `51200` |
+| `PORT_SCHEDULER` | 定时任务端口（可选，有默认值） | `51201` |
+| `PORT_OASIS` | OASIS 论坛端口（可选，有默认值） | `51202` |
+| `PORT_FRONTEND` | Web UI 端口（可选，有默认值） | `51209` |
+| `TTS_MODEL` | TTS 模型（可选） |  |
+| `TTS_VOICE` | TTS 声音（可选） |  |
+| `OPENCLAW_API_URL` | OpenClaw 后端服务地址（默认**自动探测**，通过 `openclaw config get gateway.port`；也可在 `.env` 中手动覆盖） | 自动 |
+| `OPENCLAW_API_KEY` | OpenClaw API Key（可选） |  |
+| `OPENCLAW_SESSIONS_FILE` | OpenClaw sessions.json 绝对路径（默认**自动探测**，通过 `openclaw sessions`；也可在 `.env` 中手动覆盖） | 自动 |
+| `INTERNAL_TOKEN` | 内部通信密钥（**首次启动自动生成，无需手动配置**） | 自动 |
 
 ## 
 
@@ -991,19 +989,16 @@ plan:
 OpenClaw  OpenAI  Agent  `.env`  OpenClaw  endpoint  OpenClaw **** `api_url`  `api_key`
 
 ```bash
-#  OpenClaw endpoint  sessions 
+# 配置 OpenClaw（默认全部自动探测；仅 OPENCLAW_API_KEY 需手动配置，且仅在 OpenClaw 开启鉴权时）
 bash selfskill/scripts/run.sh configure --batch \
-OPENCLAW_SESSIONS_FILE=./data/sessions.json \
-  OPENCLAW_API_URL=http://127.0.0.1:18789/v1/chat/completions \
   OPENCLAW_API_KEY=your-openclaw-key-if-needed
 ```
 
-> ** **
-> - `OPENCLAW_SESSIONS_FILE`  OpenClaw **** OpenClaw  `sessions.json`  OpenClaw sessions
-> - **Path Convention**: `./agents/main/sessions/sessions.json`  OpenClaw agent sessions  OpenClaw agents
-> - **Session Management**: Accessing session information is a necessary process for OpenClaw agent orchestration, enabling multi-agent workflow coordination and visual canvas operations.
-> - `OPENCLAW_API_URL` **** `/v1/chat/completions` base URL  YAMLYAML  `api_url`  base URL `http://127.0.0.1:18789`
-> -  OpenClaw 
+> ** 说明：**
+> - **`OPENCLAW_API_URL` 默认自动探测**：系统先开启 ChatCompletions 端点（`openclaw config set gateway.http.endpoints.chatCompletions.enabled true`），再通过 `openclaw config get gateway.port` 获取网关端口，自动设置 `OPENCLAW_API_URL=http://127.0.0.1:<端口>/v1/chat/completions`。如需手动指定，在 `.env` 中设置 `OPENCLAW_API_URL` 即可覆盖。
+> - **`OPENCLAW_SESSIONS_FILE` 默认自动探测**：系统运行 `openclaw sessions` 并解析 `Session store:` 行获取 sessions.json 路径。如需手动指定，在 `.env` 中设置 `OPENCLAW_SESSIONS_FILE` 即可覆盖。
+> - **Path Convention**: `./agents/main/sessions/sessions.json` 是 OpenClaw agent sessions 的常用路径结构。
+> - **Session Management**: 获取 session 信息是 OpenClaw agent 编排的必要过程，用于多 agent 工作流协调和可视化画布操作。
 
 **OpenClaw  `model` **
 
@@ -1192,11 +1187,11 @@ bash selfskill/scripts/run.sh configure --batch \
   PORT_SCHEDULER=51201 \
   PORT_OASIS=51202 \
   PORT_FRONTEND=51209 \
-  PORT_BARK=58010 \
-  OPENCLAW_API_URL=http://127.0.0.1:18789/v1/chat/completions \
   OPENAI_STANDARD_MODE=false
 bash selfskill/scripts/run.sh add-user system <your-password>
 ```
+
+> 注：`OPENCLAW_API_URL` 和 `OPENCLAW_SESSIONS_FILE` 均在 `configure --init` 时自动探测，也可在 `.env` 中手动覆盖。
 
  `configure --show` 
 
@@ -1206,7 +1201,6 @@ bash selfskill/scripts/run.sh add-user system <your-password>
   PORT_FRONTEND=51209
   PORT_OASIS=51202
   OASIS_BASE_URL=http://127.0.0.1:51202
-  PORT_BARK=58010
   INTERNAL_TOKEN=f1aa****57e7          # 
   LLM_API_KEY=sk-7****4c74
   LLM_BASE_URL=https://deepseek.com
@@ -1217,7 +1211,7 @@ bash selfskill/scripts/run.sh add-user system <your-password>
   OPENAI_STANDARD_MODE=false
 ```
 
-> `INTERNAL_TOKEN` `PUBLIC_DOMAIN` / `BARK_PUBLIC_URL`  tunnel 
+> `INTERNAL_TOKEN` `PUBLIC_DOMAIN`  tunnel 
 
 ## 
 
@@ -1228,7 +1222,8 @@ cd /home/avalon/TeamClaw
 bash selfskill/scripts/run.sh setup
 bash selfskill/scripts/run.sh configure --init
 bash selfskill/scripts/run.sh configure --batch LLM_API_KEY=sk-xxx LLM_BASE_URL=https://api.deepseek.com LLM_MODEL=deepseek-chat
-bash selfskill/scripts/run.sh add-user system MyPass123
+# ⚠️ 必须先询问用户想要的用户名和密码！
+bash selfskill/scripts/run.sh add-user <username> <password>
 
 # 
 bash selfskill/scripts/run.sh start
@@ -1236,7 +1231,7 @@ bash selfskill/scripts/run.sh start
 #  API
 curl -X POST http://127.0.0.1:51200/v1/chat/completions \
   -H "Content-Type: application/json" \
-  -H "Authorization: Bearer system:MyPass123" \
+  -H "Authorization: Bearer <username>:<password>" \
   -d '{"model":"mini-timebot","messages":[{"role":"user","content":""}],"stream":false,"session_id":"default"}'
 
 # 
@@ -1264,7 +1259,7 @@ Before starting TeamClaw for the first time, the following environment variables
 > ⚠️ **LLM API ≠ OpenClaw API — They are two completely separate sets of credentials!**
 >
 > - `LLM_API_KEY` / `LLM_BASE_URL` / `LLM_MODEL` → Your **LLM provider** (DeepSeek, OpenAI, Google, etc.). Used for the built-in Agent's conversations and OASIS experts.
-> - `OPENCLAW_API_URL` / `OPENCLAW_API_KEY` → Your **local OpenClaw service** endpoint. Used only for orchestrating OpenClaw agents on the visual Canvas.
+> - `OPENCLAW_API_KEY` → Your **local OpenClaw service** API key. `OPENCLAW_API_URL` is **auto-detected by default** (can be manually overridden). Used only for orchestrating OpenClaw agents on the visual Canvas.
 >
 > Do **NOT** mix them up. They point to different services, use different keys, and serve different purposes.
 
@@ -1287,20 +1282,18 @@ bash selfskill/scripts/run.sh configure --batch \
 >
 > The `OPENCLAW_*` variables below point to your **locally running OpenClaw service**, not to an external LLM provider. They have completely different URLs, keys, and purposes.
 
-These variables are **required** if you intend to use the OASIS visual Canvas to orchestrate OpenClaw agents:
+These variables are used for the OASIS visual Canvas to orchestrate OpenClaw agents (**all auto-detected by default**):
 
 | Variable | Description | Example |
 |----------|-------------|---------|
-| `OPENCLAW_SESSIONS_FILE` | Absolute path to the OpenClaw `sessions.json` file. Used to discover existing OpenClaw agent sessions and make them available for drag-and-drop orchestration on the visual Canvas. **The frontend orchestration panel will NOT load OpenClaw sessions if this is not set.** | `/projects/.moltbot/agents/main/sessions/sessions.json` |
-| `OPENCLAW_API_URL` | The OpenClaw backend API endpoint. This changes with the gateway port. **You MUST first enable OpenClaw's OpenAI-compatible API interface** before configuring this. Include the full path with `/v1/chat/completions`. | `http://127.0.0.1:18789/v1/chat/completions` |
+| `OPENCLAW_SESSIONS_FILE` | Absolute path to the OpenClaw `sessions.json` file. **Auto-detected** via `openclaw sessions` (parses the `Session store:` line). Can be manually overridden in `.env`. | Auto |
+| `OPENCLAW_API_URL` | The OpenClaw backend API endpoint. Default: **auto-detected** (ChatCompletions endpoint auto-enabled + port discovery via `openclaw config get gateway.port`) during `configure --init`. Can be manually overridden in `.env`. | Auto |
 | `OPENCLAW_API_KEY` | The API key for accessing OpenClaw via its OpenAI-compatible endpoint. Required if your OpenClaw instance has authentication enabled. | `your-openclaw-key` |
 
-> **Important**: `OPENCLAW_API_URL` changes whenever the OpenClaw gateway port changes. Always verify the port is correct and that the OpenClaw OpenAI-compatible interface is enabled before starting TeamClaw.
+> **Auto-detection**: The system first runs `openclaw config set gateway.http.endpoints.chatCompletions.enabled true` to enable the endpoint, then runs `openclaw config get gateway.port` to discover the gateway port, constructing `http://127.0.0.1:<port>/v1/chat/completions`. It also runs `openclaw sessions` to parse the `Session store:` line for the sessions.json path. You can manually override either by setting `OPENCLAW_API_URL` or `OPENCLAW_SESSIONS_FILE` in `.env`.
 
 ```bash
 bash selfskill/scripts/run.sh configure --batch \
-  OPENCLAW_SESSIONS_FILE=/projects/.moltbot/agents/main/sessions/sessions.json \
-  OPENCLAW_API_URL=http://127.0.0.1:18789/v1/chat/completions \
   OPENCLAW_API_KEY=your-openclaw-key-if-needed
 ```
 
@@ -1308,7 +1301,7 @@ bash selfskill/scripts/run.sh configure --batch \
 
 To expose the Web UI to the public internet for remote visual workflow programming (e.g., from a mobile phone):
 
-- The `tunnel.py` script will automatically write `PUBLIC_DOMAIN` and `BARK_PUBLIC_URL` into `.env` when a Cloudflare Tunnel is established.
+- The `tunnel.py` script will automatically write `PUBLIC_DOMAIN` into `.env` when a Cloudflare Tunnel is established.
 - No manual configuration is needed — just run the tunnel script and the frontend becomes accessible via HTTPS on the public domain.
 - **Non-blocking start**: `tunnel.py` blocks the terminal by default (main thread joins tunnel threads). To start it without blocking the agent or terminal, run it in the background:
 
@@ -1328,7 +1321,7 @@ sleep 30  # Wait for tunnels to be established and PUBLIC_DOMAIN written to .env
 > ⚠️ **LLM API ≠ OpenClaw API —— 这是两组完全不同的配置！**
 >
 > - `LLM_API_KEY` / `LLM_BASE_URL` / `LLM_MODEL` → 你的 **LLM 服务商**（DeepSeek、OpenAI、Google 等）。用于内置 Agent 对话和 OASIS 专家调用。
-> - `OPENCLAW_API_URL` / `OPENCLAW_API_KEY` → 你的 **本地 OpenClaw 服务** 端点。仅用于在可视化画布上编排 OpenClaw Agent。
+> - `OPENCLAW_API_KEY` → 你的 **本地 OpenClaw 服务** API 密钥。`OPENCLAW_API_URL` **默认自动探测**（也可手动覆盖）。仅用于在可视化画布上编排 OpenClaw Agent。
 >
 > **切勿混淆！** 它们指向不同的服务，使用不同的密钥，用途完全不同。
 
@@ -1351,20 +1344,18 @@ bash selfskill/scripts/run.sh configure --batch \
 >
 > 下面的 `OPENCLAW_*` 变量指向你 **本地运行的 OpenClaw 服务**，而非外部 LLM 服务商。它们的 URL、密钥和用途完全不同。
 
-如果你需要使用 OASIS 可视化画布来编排 OpenClaw Agent，以下变量**必须配置**：
+如果你需要使用 OASIS 可视化画布来编排 OpenClaw Agent，以下变量**默认自动探测**：
 
 | 变量 | 说明 | 示例 |
 |------|------|------|
-| `OPENCLAW_SESSIONS_FILE` | OpenClaw `sessions.json` 文件的绝对路径。用于获取已有的 OpenClaw Agent session 号，使其可以在可视化画布中被拖拽使用。**未配置此项时前端编排面板将无法加载 OpenClaw sessions。** | `/projects/.moltbot/agents/main/sessions/sessions.json` |
-| `OPENCLAW_API_URL` | OpenClaw 后端 API 地址。该地址随 gateway 端口变化而变化。**必须先开启 OpenClaw 的 OpenAI 兼容接口**，填写包含 `/v1/chat/completions` 的完整路径。 | `http://127.0.0.1:18789/v1/chat/completions` |
+| `OPENCLAW_SESSIONS_FILE` | OpenClaw `sessions.json` 文件的绝对路径。**自动探测**：通过 `openclaw sessions` 解析 `Session store:` 行获取。也可在 `.env` 中手动覆盖。 | 自动 |
+| `OPENCLAW_API_URL` | OpenClaw 后端 API 地址。默认**自动探测**：`configure --init` 时先开启 ChatCompletions 端点，再通过 `openclaw config get gateway.port` 获取端口并自动设置；也可在 `.env` 中手动覆盖。 | 自动 |
 | `OPENCLAW_API_KEY` | 通过 OpenAI 兼容接口访问 OpenClaw 时使用的 API Key。如果你的 OpenClaw 实例启用了鉴权，则此项必填。 | `your-openclaw-key` |
 
-> **重要提醒**：`OPENCLAW_API_URL` 会随着 OpenClaw gateway 端口的改变而改变，启动前请务必确认端口正确，且 OpenClaw 的 OpenAI 兼容接口已开启。
+> **自动探测**：系统先运行 `openclaw config set gateway.http.endpoints.chatCompletions.enabled true` 开启端点，再通过 `openclaw config get gateway.port` 获取网关端口，自动拼接为 `http://127.0.0.1:<端口>/v1/chat/completions`。同时运行 `openclaw sessions` 解析 `Session store:` 行获取 sessions.json 路径。如需手动指定，在 `.env` 中设置 `OPENCLAW_API_URL` 或 `OPENCLAW_SESSIONS_FILE` 即可覆盖。
 
 ```bash
 bash selfskill/scripts/run.sh configure --batch \
-  OPENCLAW_SESSIONS_FILE=/projects/.moltbot/agents/main/sessions/sessions.json \
-  OPENCLAW_API_URL=http://127.0.0.1:18789/v1/chat/completions \
   OPENCLAW_API_KEY=your-openclaw-key-if-needed
 ```
 
@@ -1372,7 +1363,7 @@ bash selfskill/scripts/run.sh configure --batch \
 
 如需将前端 Web UI 通过公网 HTTPS 安全暴露，以便在手机或其他远程设备上进行可视化多 Agent 工作流编排：
 
-- 运行 `tunnel.py` 脚本后，Cloudflare Tunnel 会自动建立，并将 `PUBLIC_DOMAIN` 和 `BARK_PUBLIC_URL` 写入 `.env`。
+- 运行 `tunnel.py` 脚本后，Cloudflare Tunnel 会自动建立，并将 `PUBLIC_DOMAIN` 写入 `.env`。
 - 无需手动配置，启动隧道后即可通过 HTTPS 公网域名访问前端。
 - **非阻塞启动**：`tunnel.py` 默认会阻塞终端（主线程 join 等待隧道线程）。如需避免阻塞 Agent 或终端，请后台启动：
 

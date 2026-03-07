@@ -17,6 +17,7 @@
 """
 import os
 import re
+import subprocess
 import sys
 import shutil
 
@@ -140,17 +141,191 @@ def show_env(raw=False):
     print(f"💡 提示: 使用 '--show-raw' 查看原始值（包含敏感信息）")
 
 
+_DEFAULT_ENV_TEMPLATE = """\
+# === LLM API 配置（支持 DeepSeek / OpenAI / Gemini / Claude 等多厂商）===
+LLM_API_KEY=your_api_key_here
+LLM_BASE_URL=https://api.deepseek.com
+LLM_MODEL=deepseek-chat
+# LLM_PROVIDER: 可选，显式指定模型厂商（google / anthropic / deepseek / openai）
+# 不设置时根据模型名自动推断（gemini→google, claude→anthropic, deepseek→deepseek），
+# 推断失败则 fallback 到 openai 兼容格式
+# LLM_PROVIDER=
+# 是否支持图片识别（vision），可选，不设置时根据模型名自动推断：
+#   gpt-4o/gpt-5/o1/o3/o4/gemini/claude → 自动开启
+#   deepseek/qwen/glm 等 → 自动关闭
+# 如需强制覆盖，显式设为 true 或 false
+# LLM_VISION_SUPPORT=
+
+# === TTS 文本转语音配置（可选，使用与 LLM 相同的 API 代理）===
+# TTS_MODEL=gemini-2.5-flash-preview-tts
+# TTS_VOICE=charon
+
+# === 前端与 Agent 通信模式 ===
+# true: 前端使用 OpenAI 标准 /v1/chat/completions 格式与 agent 交互
+# false: 使用自定义 WebSocket 协议（默认）
+OPENAI_STANDARD_MODE=false
+
+# === 端口配置（可选，以下为默认值，一般无需修改）===
+PORT_SCHEDULER=51201
+PORT_AGENT=51200
+PORT_FRONTEND=51209
+
+# === 指令执行模块配置（可选，以下为默认值）===
+# 命令白名单，逗号分隔。留空或不设置则使用内置默认白名单
+# ALLOWED_COMMANDS=ls,cat,head,tail,wc,du,find,file,stat,grep,awk,sed,sort,uniq,cut,tr,diff,comm,echo,date,cal,whoami,uname,hostname,uptime,free,df,env,printenv,pwd,which,expr,seq,yes,true,false,base64,md5sum,sha256sum,xxd,python,python3,ping,curl,wget
+# 命令执行超时（秒）
+# EXEC_TIMEOUT=30
+# 输出最大字符数
+# MAX_OUTPUT_LENGTH=8000
+
+# === OASIS 论坛服务配置（可选，以下为默认值）===
+PORT_OASIS=51202
+OASIS_BASE_URL=http://127.0.0.1:51202
+
+# === 内部服务通信密钥（可选）===
+# 保护 /system_trigger、/oasis/ask、/_internal/oasis_response 等内部端点
+# 留空则 mainagent 首次启动时自动生成并写入 .env
+# INTERNAL_TOKEN=
+
+# === QQ Bot 配置 ===
+QQ_APP_ID=your_qq_app_id
+QQ_BOT_SECRET=your_qq_bot_secret
+# QQ Bot 以哪个系统用户身份调用 Agent（默认 qquser）
+QQ_BOT_USERNAME=qquser
+
+# === Telegram Bot 配置 ===
+TELEGRAM_BOT_TOKEN=your_telegram_bot_token
+
+# === Chatbot 通用配置 ===
+# TG/QQ Bot 通过 INTERNAL_TOKEN + 白名单中的用户名以用户身份调用 Agent
+AI_API_URL=http://127.0.0.1:51200/v1/chat/completions
+AI_MODEL_QQ=gemini-3-flash-preview
+AI_MODEL_TG=gemini-2.0-flash
+
+# === OpenClaw 集成配置（默认自动探测，也可手动覆盖）===
+# OPENCLAW_SESSIONS_FILE: 默认通过 openclaw sessions 命令自动探测
+# 如需手动指定，取消注释并填写绝对路径
+# OPENCLAW_SESSIONS_FILE=/projects/.openclaw/agents/main/sessions/sessions.json
+# OPENCLAW_API_URL: 默认通过 openclaw config get gateway.port 自动探测
+# 如需手动指定，取消注释并填写完整地址（含 /v1/chat/completions）
+# OPENCLAW_API_URL=http://127.0.0.1:23001/v1/chat/completions
+# OPENCLAW_API_KEY=your-openclaw-key-if-needed
+"""
+
+
+def _enable_openclaw_chat_completions():
+    """确保 OpenClaw 的 ChatCompletions 端点已开启"""
+    try:
+        result = subprocess.run(
+            ["openclaw", "config", "set",
+             "gateway.http.endpoints.chatCompletions.enabled", "true"],
+            capture_output=True, text=True, timeout=10
+        )
+        if result.returncode == 0:
+            print("✅ OpenClaw ChatCompletions 端点已开启")
+        else:
+            print(f"⚠️  开启 ChatCompletions 端点失败: {result.stderr.strip()}")
+    except FileNotFoundError:
+        pass  # openclaw 不存在，后续 detect 会统一报错
+    except subprocess.TimeoutExpired:
+        print("⚠️  openclaw config set 命令超时")
+    except Exception as e:
+        print(f"⚠️  开启 ChatCompletions 端点失败: {e}")
+
+
+def detect_openclaw_api_url():
+    """确保 ChatCompletions 已开启，然后通过 gateway.port 自动探测 OPENCLAW_API_URL"""
+    _enable_openclaw_chat_completions()
+    try:
+        result = subprocess.run(
+            ["openclaw", "config", "get", "gateway.port"],
+            capture_output=True, text=True, timeout=10
+        )
+        if result.returncode == 0:
+            # 从输出中提取纯数字端口号（跳过 banner 行）
+            for line in result.stdout.strip().splitlines():
+                port = line.strip()
+                if port.isdigit():
+                    url = f"http://127.0.0.1:{port}/v1/chat/completions"
+                    print(f"🔍 自动探测到 OpenClaw gateway 端口: {port}")
+                    print(f"✅ OPENCLAW_API_URL={url}")
+                    return url
+    except FileNotFoundError:
+        print("⚠️  openclaw 命令未找到，跳过 OPENCLAW_API_URL 自动探测")
+    except subprocess.TimeoutExpired:
+        print("⚠️  openclaw 命令超时，跳过 OPENCLAW_API_URL 自动探测")
+    except Exception as e:
+        print(f"⚠️  探测 OpenClaw 端口失败: {e}")
+    return None
+
+
+def detect_openclaw_sessions_file():
+    """通过 openclaw sessions 输出中的 Session store 行自动探测 sessions.json 路径"""
+    try:
+        result = subprocess.run(
+            ["openclaw", "sessions"],
+            capture_output=True, text=True, timeout=10
+        )
+        if result.returncode == 0:
+            for line in result.stdout.splitlines():
+                if "Session store:" in line:
+                    path = line.split("Session store:", 1)[1].strip()
+                    if path:
+                        print(f"🔍 自动探测到 OpenClaw sessions 文件: {path}")
+                        return path
+    except FileNotFoundError:
+        print("⚠️  openclaw 命令未找到，跳过 OPENCLAW_SESSIONS_FILE 自动探测")
+    except subprocess.TimeoutExpired:
+        print("⚠️  openclaw sessions 命令超时，跳过 OPENCLAW_SESSIONS_FILE 自动探测")
+    except Exception as e:
+        print(f"⚠️  探测 OpenClaw sessions 路径失败: {e}")
+    return None
+
+
+def _auto_set_openclaw_url():
+    """自动探测 OpenClaw 端口并设置 OPENCLAW_API_URL（仅当用户未手动配置时）"""
+    _, kvs = read_env()
+    current = kvs.get("OPENCLAW_API_URL", "")
+    if current and current != "auto-detected":
+        print(f"ℹ️  OPENCLAW_API_URL 已手动配置: {current}，跳过自动探测")
+        return
+    url = detect_openclaw_api_url()
+    if url:
+        set_env("OPENCLAW_API_URL", url)
+
+
+def _auto_set_openclaw_sessions_file():
+    """自动探测 OpenClaw sessions.json 路径并设置（仅当用户未手动配置时）"""
+    _, kvs = read_env()
+    current = kvs.get("OPENCLAW_SESSIONS_FILE", "")
+    if current and current != "auto-detected":
+        print(f"ℹ️  OPENCLAW_SESSIONS_FILE 已手动配置: {current}，跳过自动探测")
+        return
+    path = detect_openclaw_sessions_file()
+    if path:
+        set_env("OPENCLAW_SESSIONS_FILE", path)
+
+
 def init_env():
-    """从 .env.example 初始化 .env（不覆盖已有）"""
+    """从 .env.example 初始化 .env（不覆盖已有）；若模板不存在则使用内置默认值"""
     if os.path.exists(ENV_PATH):
         print(f"✅ config/.env 已存在，跳过初始化")
+        # 即使 .env 已存在，也尝试自动探测并更新 OpenClaw 配置
+        _auto_set_openclaw_url()
+        _auto_set_openclaw_sessions_file()
         return
-    if not os.path.exists(ENV_EXAMPLE):
-        print(f"❌ config/.env.example 不存在", file=sys.stderr)
-        sys.exit(1)
     os.makedirs(os.path.dirname(ENV_PATH), exist_ok=True)
-    shutil.copy2(ENV_EXAMPLE, ENV_PATH)
-    print(f"✅ 已从 .env.example 初始化 config/.env")
+    if os.path.exists(ENV_EXAMPLE):
+        shutil.copy2(ENV_EXAMPLE, ENV_PATH)
+        print(f"✅ 已从 .env.example 初始化 config/.env")
+    else:
+        with open(ENV_PATH, "w", encoding="utf-8") as f:
+            f.write(_DEFAULT_ENV_TEMPLATE)
+        print(f"✅ 已使用内置默认模板初始化 config/.env")
+    # 初始化后自动探测 OpenClaw 配置
+    _auto_set_openclaw_url()
+    _auto_set_openclaw_sessions_file()
+    print(f"⚠️  请编辑 {ENV_PATH} 填入 LLM_API_KEY 等必要参数")
 
 
 def main():
