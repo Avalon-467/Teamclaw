@@ -979,23 +979,28 @@ class ExternalExpert:
                     f"【第 {forum.current_round} 轮讨论更新】\n"
                     f"以下是自你上次发言后的 {len(new_posts)} 条新帖子：\n\n"
                     f"{new_text}\n\n"
-                    "请基于这些新观点以及你之前看到的讨论内容，以 JSON 格式回复：\n"
+                    "请基于这些新观点以及你之前看到的讨论内容，以严格的 JSON 格式回复"
+                    "（不要包含 markdown 代码块标记，不要包含注释）：\n"
+                    "[oasis reply start]\n"
                     "{\n"
                     '  "reply_to": <某个帖子ID>,\n'
-                    '  "content": "你的观点（200字以内）",\n'
+                    '  "content": "你的观点（200字以内，观点鲜明）",\n'
                     '  "votes": [{"post_id": <ID>, "direction": "up或down"}]\n'
-                    "}"
+                    "}\n"
+                    "[oasis reply end]"
                 )
             else:
                 prompt = (
                     f"【第 {forum.current_round} 轮讨论更新】\n"
                     "本轮没有新的帖子。如果你有新的想法或补充，可以继续发言；"
                     "如果没有，回复一个空 content 即可。\n"
+                    "[oasis reply start]\n"
                     "{\n"
                     '  "reply_to": null,\n'
                     '  "content": "",\n'
                     '  "votes": []\n'
-                    "}"
+                    "}\n"
+                    "[oasis reply end]"
                 )
             if instruction:
                 prompt += f"\n\n📋 本轮你的专项指令：{instruction}\n请在回复中重点关注和执行这个指令。"
