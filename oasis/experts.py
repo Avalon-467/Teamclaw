@@ -645,18 +645,26 @@ class ExternalExpert:
     # Regex to match OpenClaw agent model format: agent:<agent_name>
     _OPENCLAW_MODEL_RE = re.compile(r"^agent:([^:]+)$")
 
-    # Oasis reply protocol: require agent to prefix reply with this tag
-    _OASIS_REPLY_TAG = "[oasis reply]"
+    # Oasis reply protocol: require agent to wrap reply with start/end tags
+    _OASIS_REPLY_START = "[oasis reply start]"
+    _OASIS_REPLY_END = "[oasis reply end]"
     _OASIS_REPLY_INSTRUCTION = (
         "\n\n⚠️ IMPORTANT — [oasis reply] protocol:\n"
-        "1. You MUST start your final reply with exactly \"[oasis reply]\" (including brackets).\n"
-        "2. Only use \"[oasis reply]\" when you have reached a CONCLUSION for this round.\n"
-        "3. The content after \"[oasis reply]\" is your FINAL statement/answer to present — "
-        "NOT your reasoning process, NOT intermediate thoughts.\n"
-        "4. Replies without the \"[oasis reply]\" prefix will be rejected.\n"
-        "Example: [oasis reply] 我认为方案A更优，因为……"
+        "1. When you have reached a CONCLUSION, wrap your final answer with:\n"
+        "   [oasis reply start]\n"
+        "   你的最终发言内容……\n"
+        "   [oasis reply end]\n"
+        "2. Only use this when you have a CONCLUSION for this round — "
+        "NOT for reasoning process, NOT for intermediate thoughts.\n"
+        "3. The content between the tags is your FINAL statement to present.\n"
+        "4. Replies without the tags will be rejected.\n"
+        "Example:\n"
+        "经过分析，我得出了结论。\n"
+        "[oasis reply start]\n"
+        "我认为方案A更优，因为……\n"
+        "[oasis reply end]"
     )
-    _OASIS_REPLY_MAX_RETRIES = 3
+    _OASIS_REPLY_MAX_RETRIES = 10
 
     def __init__(
         self,
@@ -674,7 +682,7 @@ class ExternalExpert:
         self.ext_id = ext_id
         self.name = f"{name}#ext#{ext_id}"
         self.persona = persona
-        self.timeout = timeout or 120.0
+        self.timeout = timeout or 500.0
         self.tag = tag
         self.model = model
         self._extra_headers = extra_headers or {}
@@ -839,31 +847,75 @@ class ExternalExpert:
                 msg["content"] = msg["content"] + self._OASIS_REPLY_INSTRUCTION
                 return
 
-    def _validate_oasis_reply(self, reply: str) -> str | None:
-        """Check if reply starts with [oasis reply] tag. Return stripped content or None."""
-        if not self._is_openclaw_agent:
-            return reply
-        stripped = reply.strip()
-        if stripped.lower().startswith(self._OASIS_REPLY_TAG):
-            return stripped[len(self._OASIS_REPLY_TAG):].strip()
-        return None
+    @staticmethod
+    def _extract_oasis_reply(text: str, start_tag: str, end_tag: str) -> tuple[str, str | None]:
+        """Parse a single reply for [oasis reply start/end] tags.
+
+        Returns (status, content):
+          - ("complete", final_text)  — both start and end found
+          - ("started", after_start)  — start found but no end, returns content after start
+          - ("missing", None)         — no start tag found
+        """
+        low = text.lower()
+        s = low.find(start_tag)
+        if s < 0:
+            return ("missing", None)
+        after = text[s + len(start_tag):]
+        e = after.lower().find(end_tag)
+        if e >= 0:
+            return ("complete", after[:e].strip())
+        return ("started", after.strip())
 
     async def _call_api_with_oasis_check(self, messages: list[dict], **kwargs) -> str:
-        """Call API with [oasis reply] validation. Retry if tag missing (openclaw only)."""
+        """Call API up to _OASIS_REPLY_MAX_RETRIES times within one participate turn.
+
+        Within a single turn, call the API repeatedly (up to 3 times):
+          - If a complete [oasis reply start]...[oasis reply end] is found → return content
+          - If start is found without end → buffer and call again
+          - If neither tag is found → buffer raw reply and call again
+          - After 3 calls without complete → return all buffered content joined together
+
+        Each participate() call is independent; no state carries across rounds.
+        """
+        if not self._is_openclaw_agent:
+            return await self._call_api(messages, **kwargs)
+
         self._inject_oasis_reply_instruction(messages)
+
+        buf: list[str] = []
+        start_tag = self._OASIS_REPLY_START
+        end_tag = self._OASIS_REPLY_END
+
         for attempt in range(1, self._OASIS_REPLY_MAX_RETRIES + 1):
             raw_reply = await self._call_api(messages, **kwargs)
-            validated = self._validate_oasis_reply(raw_reply)
-            if validated is not None:
-                return validated
-            print(f"  [OASIS] ⚠️ {self.name} reply missing [oasis reply] tag "
-                  f"(attempt {attempt}/{self._OASIS_REPLY_MAX_RETRIES}), retrying...")
+            status, content = self._extract_oasis_reply(raw_reply, start_tag, end_tag)
+
+            if status == "complete":
+                # If we had buffered content before this, prepend it
+                if buf:
+                    buf.append(content)
+                    return "\n\n".join(seg for seg in buf if seg)
+                return content
+
+            if status == "started":
+                # Start tag found but no end — buffer content after start
+                buf.append(content)
+                print(f"  [OASIS] 📝 {self.name} [oasis reply start] found, no end yet "
+                      f"(call {attempt}/{self._OASIS_REPLY_MAX_RETRIES})")
+            else:
+                # "missing" — no tags, expert still thinking
+                buf.append(raw_reply.strip())
+                print(f"  [OASIS] 💭 {self.name} thinking, no oasis reply tags "
+                      f"(call {attempt}/{self._OASIS_REPLY_MAX_RETRIES})")
+
+            # Feed reply back into conversation for next attempt
             messages.append({"role": "assistant", "content": raw_reply})
-            messages.append({"role": "user",
-                             "content": "Your reply MUST start with \"[oasis reply]\". Please try again."})
-        # Last attempt failed — use raw reply as fallback
-        print(f"  [OASIS] ⚠️ {self.name} gave up waiting for [oasis reply] tag, using raw reply")
-        return raw_reply
+            messages.append({"role": "user", "content": "请继续。如果你已经结束发言，请添加 [oasis reply end] 标签。"})
+
+        # All attempts exhausted — return everything we collected
+        print(f"  [OASIS] ⚠️ {self.name} {self._OASIS_REPLY_MAX_RETRIES} calls without "
+              f"[oasis reply end], publishing collected content")
+        return "\n\n".join(seg for seg in buf if seg)
 
     async def participate(self, forum: DiscussionForum, instruction: str = "", discussion: bool = True):
         others = await forum.browse(viewer=self.name, exclude_self=True)
@@ -896,8 +948,11 @@ class ExternalExpert:
 
             try:
                 reply = await self._call_api_with_oasis_check(messages, timeout_override=None)
-                await forum.publish(author=self.name, content=reply.strip()[:2000])
-                print(f"  [OASIS] ✅ {self.name} (external) 执行完成")
+                if reply is None:
+                    print(f"  [OASIS] 📝 {self.name} (external) collecting oasis reply, skipping publish")
+                else:
+                    await forum.publish(author=self.name, content=reply.strip()[:2000])
+                    print(f"  [OASIS] ✅ {self.name} (external) 执行完成")
             except Exception as e:
                 print(f"  [OASIS] ❌ {self.name} (external) error: {e}")
             return
