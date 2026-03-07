@@ -1981,7 +1981,7 @@ function createTtsButton(textRef) {
     return btn;
 }
 
-function appendMessage(content, isUser = false, images = [], fileNames = [], audioNames = []) {
+function appendMessage(content, isUser = false, images = [], fileNames = [], audioNames = [], workflowNames = []) {
     const wrapper = document.createElement('div');
     wrapper.className = `flex ${isUser ? 'justify-end' : 'justify-start'} animate-in fade-in duration-300`;
     const div = document.createElement('div');
@@ -1997,8 +1997,11 @@ function appendMessage(content, isUser = false, images = [], fileNames = [], aud
         if (audioNames && audioNames.length > 0) {
             extraHtml += audioNames.map(n => `<div class="chat-audio-tag">🎤 ${escapeHtml(n)}</div>`).join('');
         }
+        if (workflowNames && workflowNames.length > 0) {
+            extraHtml += workflowNames.map(n => `<div class="chat-workflow-tag">📋 ${escapeHtml(n)}</div>`).join('');
+        }
         if (extraHtml) {
-            div.innerHTML = extraHtml + '<div style="margin-top:6px">' + escapeHtml(content) + '</div>';
+            div.innerHTML = extraHtml + (content ? '<div style="margin-top:6px">' + escapeHtml(content) + '</div>' : '');
         } else {
             div.innerText = content;
         }
@@ -2032,22 +2035,24 @@ function showTyping() {
 
 async function handleSend() {
     const text = inputField.value.trim();
-    if (!text && pendingImages.length === 0 && pendingFiles.length === 0 && pendingAudios.length === 0) return;
+    if (!text && pendingImages.length === 0 && pendingFiles.length === 0 && pendingAudios.length === 0 && pendingWorkflows.length === 0) return;
     if (sendBtn.disabled) return;
 
     // Stop recording if active
     if (isRecording) stopRecording();
 
-    // Capture images, files, audios before clearing
+    // Capture images, files, audios, workflows before clearing
     const imagesToSend = pendingImages.map(img => img.base64);
     const imagePreviewSrcs = [...imagesToSend];
     const filesToSend = pendingFiles.map(f => ({ name: f.name, content: f.content, type: f.type }));
     const fileNames = pendingFiles.map(f => f.name);
     const audiosToSend = pendingAudios.map(a => ({ base64: a.base64, name: a.name, format: a.format }));
     const audioNames = pendingAudios.map(a => a.name);
+    const workflowsToSend = pendingWorkflows.map(w => ({ name: w.name, yaml: w.yaml }));
+    const workflowNames = pendingWorkflows.map(w => w.name);
 
-    const label = text || (imagePreviewSrcs.length ? '('+t('image_placeholder')+')' : audioNames.length ? '('+t('audio_placeholder')+')' : '('+t('file_placeholder')+')');
-    appendMessage(label, true, imagePreviewSrcs, fileNames, audioNames);
+    const label = text || (imagePreviewSrcs.length ? '('+t('image_placeholder')+')' : audioNames.length ? '('+t('audio_placeholder')+')' : workflowNames.length ? '(workflow)' : '('+t('file_placeholder')+')');
+    appendMessage(label, true, imagePreviewSrcs, fileNames, audioNames, workflowNames);
     inputField.value = '';
     inputField.style.height = 'auto';
     pendingImages = [];
@@ -2068,10 +2073,18 @@ async function handleSend() {
     let fullText = '';
 
     try {
+        // --- 构造 workflow 前缀（隐藏在消息中发送给后端） ---
+        let workflowPrefix = '';
+        for (const wf of workflowsToSend) {
+            workflowPrefix += `【oasis workflow，use it now】\nWorkflow: ${wf.name}\n` +
+                (wf.yaml ? `---\n${wf.yaml}\n---\n` : '');
+        }
+        const fullText_to_send = workflowPrefix + text;
+
         // --- 构造 OpenAI 格式的 content parts ---
         const contentParts = [];
-        if (text) {
-            contentParts.push({ type: 'text', text: text });
+        if (fullText_to_send) {
+            contentParts.push({ type: 'text', text: fullText_to_send });
         }
         // 图片 → image_url
         for (const img of imagesToSend) {
@@ -2382,12 +2395,6 @@ async function addWorkflowToContext(name) {
 
     pendingWorkflows.push({ name, yaml: yamlText });
     renderWorkflowPreviews();
-
-    // Build descriptive prompt with workflow settings and YAML
-    const prompt = `【oasis workflow，use it now】\n` +
-        `Workflow: ${name}\n` +
-        (yamlText ? `---\n${yamlText}\n---\n` : '');
-    inputField.value = prompt + inputField.value;
     inputField.focus();
 }
 

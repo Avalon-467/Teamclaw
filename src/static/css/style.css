@@ -779,6 +779,7 @@ header {
 .audio-preview-item .file-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .audio-preview-item .remove-btn { width: 16px; height: 16px; background: #ef4444; color: white; border: none; border-radius: 50%; font-size: 9px; cursor: pointer; display: flex; align-items: center; justify-content: center; line-height: 1; flex-shrink: 0; }
 .chat-audio-tag { display: inline-flex; align-items: center; gap: 4px; padding: 2px 8px; border-radius: 6px; background: rgba(255,255,255,0.15); font-size: 12px; margin-bottom: 4px; }
+.chat-workflow-tag { display: inline-flex; align-items: center; gap: 4px; padding: 2px 8px; border-radius: 6px; background: rgba(124,58,237,0.25); font-size: 12px; margin-bottom: 4px; }
 /* Inline image in chat messages */
 .chat-inline-image { max-width: 240px; max-height: 180px; border-radius: 8px; margin: 4px 0; cursor: pointer; }
 .chat-inline-image:hover { opacity: 0.9; }
