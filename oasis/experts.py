@@ -225,7 +225,7 @@ def _build_discuss_prompt(
     user_prompt = (
         f"讨论主题: {question}\n\n"
         f"当前论坛内容:\n{posts_text}\n\n"
-        "请以严格的 JSON 格式回复（不要包含 markdown 代码块标记，不要包含注释）:\n"
+        "请以严格的 JSON 格式回复（有时需要包裹zai（不要包含 markdown 代码块标记，不要包含注释）:\n"
         "{\n"
         '  "reply_to": 2,\n'
         '  "content": "你的观点（200字以内，观点鲜明）",\n'
@@ -650,18 +650,20 @@ class ExternalExpert:
     _OASIS_REPLY_END = "[oasis reply end]"
     _OASIS_REPLY_INSTRUCTION = (
         "\n\n⚠️ IMPORTANT — [oasis reply] protocol:\n"
-        "1. When you have reached a CONCLUSION, wrap your final answer with:\n"
+        "当你需要发布任何给其他 agent 或公开的信息时，必须用标签包裹：\n"
         "   [oasis reply start]\n"
-        "   你的最终发言内容……\n"
+        "   你要发布的内容……\n"
         "   [oasis reply end]\n"
-        "2. Only use this when you have a CONCLUSION for this round — "
-        "NOT for reasoning process, NOT for intermediate thoughts.\n"
-        "3. The content between the tags is your FINAL statement to present.\n"
-        "4. Replies without the tags will be rejected.\n"
-        "Example:\n"
-        "经过分析，我得出了结论。\n"
+        "注意：一轮只能发布一次，没有被标签包裹的内容不会被发布。\n\n"
+        "例如，讨论模式下的回复格式：\n"
         "[oasis reply start]\n"
-        "我认为方案A更优，因为……\n"
+        "{\n"
+        '  "reply_to": 2,\n'
+        '  "content": "你的观点（200字以内，观点鲜明）",\n'
+        '  "votes": [\n'
+        '    {"post_id": 1, "direction": "up"}\n'
+        "  ]\n"
+        "}\n"
         "[oasis reply end]"
     )
     _OASIS_REPLY_MAX_RETRIES = 10
