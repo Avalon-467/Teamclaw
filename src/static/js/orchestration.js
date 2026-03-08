@@ -194,7 +194,8 @@ async function orchLoadOpenClawSessions() {
             const agentName = a.name || 'unknown';
             const title = agentName + (a.is_default ? ' ⭐' : '');
             const mdl = (a.model && a.model !== 'unknown' && a.model !== 'auto') ? a.model : '';
-            card.innerHTML = `<span class="orch-emoji">🦞</span><div style="min-width:0;flex:1;"><div class="orch-name" title="${escapeHtml(agentName)}">${escapeHtml(title)}</div>${mdl ? '<div class="orch-tag" style="color:#10b981;font-family:monospace;">' + escapeHtml(mdl) + '</div>' : ''}</div>`;
+            const agentWs = a.workspace || '';
+            card.innerHTML = `<span class="orch-emoji">🦞</span><div style="min-width:0;flex:1;"><div class="orch-name" title="${escapeHtml(agentName)}">${escapeHtml(title)}</div>${mdl ? '<div class="orch-tag" style="color:#10b981;font-family:monospace;">' + escapeHtml(mdl) + '</div>' : ''}</div>${agentWs ? '<button class="orch-oc-edit-btn" data-ws="' + escapeHtml(agentWs) + '" data-agent="' + escapeHtml(agentName) + '" title="' + t('orch_oc_edit_files') + '" style="background:none;border:none;cursor:pointer;font-size:14px;padding:2px 4px;flex-shrink:0;opacity:0.5;" onmouseenter="this.style.opacity=1" onmouseleave="this.style.opacity=0.5">📝</button>' : ''}`;
             // model format: agent:<name> (CLI uses --agent <name>, no session-id)
             const modelStr = 'agent:' + agentName;
             const nodeData = {
@@ -204,6 +205,15 @@ async function orchLoadOpenClawSessions() {
                 ext_id: agentName,  // use agent name as ext_id to distinguish different agents
             };
             orchBindCardEvents(card, nodeData);
+            // Bind edit button (stop propagation so it doesn't trigger card add)
+            const editBtn = card.querySelector('.orch-oc-edit-btn');
+            if (editBtn) {
+                editBtn.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    orchShowWorkspaceEditor(editBtn.dataset.agent, editBtn.dataset.ws);
+                });
+                editBtn.addEventListener('dblclick', (e) => e.stopPropagation());
+            }
             list.appendChild(card);
         }
     } catch(e) {
@@ -257,6 +267,135 @@ function orchShowAddExpertModal() {
             }
         } catch(e) { orchToast(t('orch_toast_net_error')); }
     });
+}
+
+// ── OpenClaw Workspace File Editor ──
+function orchShowWorkspaceEditor(agentName, workspace) {
+    const overlay = document.createElement('div');
+    overlay.className = 'orch-modal-overlay';
+    overlay.id = 'orch-ws-editor-overlay';
+    overlay.innerHTML = `
+        <div class="orch-modal" style="min-width:380px;max-width:700px;width:90vw;max-height:85vh;display:flex;flex-direction:column;">
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
+                <h3 style="margin:0;">🦞 ${escapeHtml(agentName)} — Core Files</h3>
+                <button id="orch-ws-close" style="background:none;border:none;font-size:18px;cursor:pointer;padding:2px 6px;color:#6b7280;">✕</button>
+            </div>
+            <div style="font-size:10px;color:#9ca3af;margin-bottom:8px;font-family:monospace;word-break:break-all;">${escapeHtml(workspace)}</div>
+            <div id="orch-ws-file-list" style="display:flex;flex-wrap:wrap;gap:4px;margin-bottom:10px;padding-bottom:8px;border-bottom:1px solid #e5e7eb;">
+                <span style="font-size:10px;color:#9ca3af;">⏳ ${t('loading')}</span>
+            </div>
+            <div id="orch-ws-editor-area" style="flex:1;min-height:0;display:flex;flex-direction:column;">
+                <div style="text-align:center;color:#d1d5db;padding:30px;font-size:12px;">${t('orch_oc_select_file')}</div>
+            </div>
+        </div>
+    `;
+    document.body.appendChild(overlay);
+    overlay.querySelector('#orch-ws-close').addEventListener('click', () => overlay.remove());
+    overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.remove(); });
+
+    let currentFile = null;
+    let dirty = false;
+
+    // Load file list
+    fetch('/proxy_openclaw_workspace_files?workspace=' + encodeURIComponent(workspace))
+        .then(r => r.json())
+        .then(res => {
+            const listEl = document.getElementById('orch-ws-file-list');
+            if (!res.ok || !res.files) {
+                listEl.innerHTML = '<span style="color:#ef4444;font-size:10px;">❌ ' + (res.error || 'Error') + '</span>';
+                return;
+            }
+            listEl.innerHTML = '';
+            for (const f of res.files) {
+                const btn = document.createElement('button');
+                btn.className = 'orch-ws-file-tab';
+                btn.dataset.filename = f.name;
+                btn.style.cssText = 'padding:3px 8px;border-radius:4px;border:1px solid #d1d5db;background:white;cursor:pointer;font-size:10px;font-family:monospace;color:#374151;white-space:nowrap;';
+                const sizeStr = f.exists ? (f.size >= 1024 ? (f.size / 1024).toFixed(1) + ' KB' : f.size + ' B') : t('orch_oc_file_missing');
+                btn.textContent = f.name + (f.exists ? '' : ' ⚠️');
+                btn.title = f.name + ' — ' + sizeStr;
+                if (!f.exists) btn.style.color = '#d1d5db';
+                btn.addEventListener('click', () => orchWsOpenFile(agentName, workspace, f.name, overlay));
+                listEl.appendChild(btn);
+            }
+        })
+        .catch(() => {
+            document.getElementById('orch-ws-file-list').innerHTML =
+                '<span style="color:#ef4444;font-size:10px;">❌ ' + t('orch_toast_net_error') + '</span>';
+        });
+}
+
+async function orchWsOpenFile(agentName, workspace, filename, overlay) {
+    const editorArea = overlay.querySelector('#orch-ws-editor-area');
+    // Highlight active tab
+    overlay.querySelectorAll('.orch-ws-file-tab').forEach(b => {
+        b.style.background = b.dataset.filename === filename ? '#dbeafe' : 'white';
+        b.style.borderColor = b.dataset.filename === filename ? '#2563eb' : '#d1d5db';
+    });
+    editorArea.innerHTML = '<div style="text-align:center;color:#9ca3af;padding:20px;font-size:11px;">⏳ ' + t('loading') + '</div>';
+    try {
+        const r = await fetch('/proxy_openclaw_workspace_file?workspace=' + encodeURIComponent(workspace) + '&filename=' + encodeURIComponent(filename));
+        const res = await r.json();
+        const content = res.content || '';
+        editorArea.innerHTML = `
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;">
+                <span style="font-size:11px;font-weight:600;color:#374151;font-family:monospace;">${escapeHtml(filename)}</span>
+                <div style="display:flex;gap:4px;align-items:center;">
+                    <span id="orch-ws-status" style="font-size:10px;color:#9ca3af;"></span>
+                    <button id="orch-ws-save" style="padding:3px 10px;border-radius:4px;border:none;background:#2563eb;color:white;cursor:pointer;font-size:11px;">${t('orch_oc_save')}</button>
+                </div>
+            </div>
+            <textarea id="orch-ws-textarea" spellcheck="false"
+                style="flex:1;width:100%;min-height:250px;max-height:55vh;border:1px solid #d1d5db;border-radius:6px;padding:8px;font-size:11px;font-family:monospace;line-height:1.5;resize:vertical;color:#1f2937;background:#fafafa;"
+            >${escapeHtml(content)}</textarea>
+        `;
+        const textarea = editorArea.querySelector('#orch-ws-textarea');
+        const statusEl = editorArea.querySelector('#orch-ws-status');
+        const saveBtn = editorArea.querySelector('#orch-ws-save');
+
+        if (!res.exists) statusEl.textContent = '🆕 ' + t('orch_oc_new_file');
+
+        textarea.addEventListener('input', () => { statusEl.textContent = '● ' + t('orch_oc_unsaved'); statusEl.style.color = '#f59e0b'; });
+
+        // Ctrl+S / Cmd+S to save
+        textarea.addEventListener('keydown', (e) => {
+            if ((e.ctrlKey || e.metaKey) && e.key === 's') {
+                e.preventDefault();
+                saveBtn.click();
+            }
+        });
+
+        saveBtn.addEventListener('click', async () => {
+            saveBtn.disabled = true;
+            saveBtn.textContent = '⏳';
+            try {
+                const sr = await fetch('/proxy_openclaw_workspace_file', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ workspace, filename, content: textarea.value }),
+                });
+                const sres = await sr.json();
+                if (sr.ok && sres.ok) {
+                    statusEl.textContent = '✅ ' + t('orch_oc_saved');
+                    statusEl.style.color = '#10b981';
+                    orchToast('✅ ' + filename + ' ' + t('orch_oc_saved'));
+                    // Update tab to remove missing indicator
+                    const tab = overlay.querySelector(`.orch-ws-file-tab[data-filename="${filename}"]`);
+                    if (tab) { tab.style.color = '#374151'; tab.textContent = filename; }
+                } else {
+                    statusEl.textContent = '❌ ' + (sres.error || 'Error');
+                    statusEl.style.color = '#ef4444';
+                }
+            } catch(e) {
+                statusEl.textContent = '❌ ' + t('orch_toast_net_error');
+                statusEl.style.color = '#ef4444';
+            }
+            saveBtn.disabled = false;
+            saveBtn.textContent = t('orch_oc_save');
+        });
+    } catch(e) {
+        editorArea.innerHTML = '<div style="color:#ef4444;padding:20px;text-align:center;font-size:11px;">❌ ' + t('orch_toast_net_error') + '</div>';
+    }
 }
 
 // ── Add OpenClaw Agent modal ──

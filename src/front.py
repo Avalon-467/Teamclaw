@@ -441,6 +441,49 @@ def proxy_openclaw_default_workspace():
         return jsonify({"ok": False, "error": str(e)}), 500
 
 
+@app.route("/proxy_openclaw_workspace_files", methods=["GET"])
+def proxy_openclaw_workspace_files():
+    """Proxy to list core files in an OpenClaw agent's workspace."""
+    try:
+        r = requests.get(
+            f"{OASIS_BASE_URL}/sessions/openclaw/workspace-files",
+            params={"workspace": request.args.get("workspace", "")},
+            timeout=10,
+        )
+        return jsonify(r.json()), r.status_code
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
+@app.route("/proxy_openclaw_workspace_file", methods=["GET"])
+def proxy_openclaw_workspace_file_read():
+    """Proxy to read a single workspace file."""
+    try:
+        r = requests.get(
+            f"{OASIS_BASE_URL}/sessions/openclaw/workspace-file",
+            params={"workspace": request.args.get("workspace", ""),
+                    "filename": request.args.get("filename", "")},
+            timeout=10,
+        )
+        return jsonify(r.json()), r.status_code
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
+@app.route("/proxy_openclaw_workspace_file", methods=["POST"])
+def proxy_openclaw_workspace_file_save():
+    """Proxy to save a workspace file."""
+    try:
+        r = requests.post(
+            f"{OASIS_BASE_URL}/sessions/openclaw/workspace-file",
+            json=request.get_json(force=True),
+            timeout=15,
+        )
+        return jsonify(r.json()), r.status_code
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
 @app.route("/proxy_session_history", methods=["POST"])
 def proxy_session_history():
     """代理获取指定会话的历史消息"""

@@ -911,6 +911,85 @@ async def add_openclaw_agent(req: Request):
         return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
 
 
+# Core files that OpenClaw agents typically have
+_OPENCLAW_CORE_FILES = [
+    "BOOTSTRAP.md", "SOUL.md", "IDENTITY.md", "AGENTS.md",
+    "TOOLS.md", "USER.md", "HEARTBEAT.md", "MEMORY.md",
+]
+
+
+@app.get("/sessions/openclaw/workspace-files")
+async def list_openclaw_workspace_files(workspace: str = Query(...)):
+    """List core .md files in an OpenClaw agent's workspace directory."""
+    ws = os.path.expanduser(workspace.strip())
+    if not os.path.isdir(ws):
+        return JSONResponse({"ok": False, "error": f"Workspace not found: {workspace}"}, status_code=404)
+
+    files = []
+    for fname in _OPENCLAW_CORE_FILES:
+        fpath = os.path.join(ws, fname)
+        exists = os.path.isfile(fpath)
+        size = os.path.getsize(fpath) if exists else 0
+        files.append({"name": fname, "exists": exists, "size": size})
+
+    # Also include any other .md files not in the predefined list
+    try:
+        for f in sorted(os.listdir(ws)):
+            if f.endswith(".md") and f not in _OPENCLAW_CORE_FILES and os.path.isfile(os.path.join(ws, f)):
+                fpath = os.path.join(ws, f)
+                files.append({"name": f, "exists": True, "size": os.path.getsize(fpath)})
+    except OSError:
+        pass
+
+    return {"ok": True, "workspace": ws, "files": files}
+
+
+@app.get("/sessions/openclaw/workspace-file")
+async def read_openclaw_workspace_file(workspace: str = Query(...), filename: str = Query(...)):
+    """Read a single file from an OpenClaw agent's workspace."""
+    ws = os.path.expanduser(workspace.strip())
+    # Security: prevent path traversal
+    safe_name = os.path.basename(filename.strip())
+    fpath = os.path.join(ws, safe_name)
+
+    if not os.path.isfile(fpath):
+        return {"ok": True, "content": "", "exists": False, "filename": safe_name}
+
+    try:
+        with open(fpath, "r", encoding="utf-8", errors="replace") as f:
+            content = f.read()
+        return {"ok": True, "content": content, "exists": True, "filename": safe_name,
+                "size": os.path.getsize(fpath)}
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
+
+@app.post("/sessions/openclaw/workspace-file")
+async def save_openclaw_workspace_file(req: Request):
+    """Save/create a file in an OpenClaw agent's workspace."""
+    body = await req.json()
+    workspace = (body.get("workspace") or "").strip()
+    filename = (body.get("filename") or "").strip()
+    content = body.get("content", "")
+
+    if not workspace or not filename:
+        return JSONResponse({"ok": False, "error": "workspace and filename are required"}, status_code=400)
+
+    ws = os.path.expanduser(workspace)
+    safe_name = os.path.basename(filename)
+    fpath = os.path.join(ws, safe_name)
+
+    if not os.path.isdir(ws):
+        return JSONResponse({"ok": False, "error": f"Workspace not found: {workspace}"}, status_code=404)
+
+    try:
+        with open(fpath, "w", encoding="utf-8") as f:
+            f.write(content)
+        return {"ok": True, "filename": safe_name, "size": os.path.getsize(fpath)}
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
+
 # --- System Info ---
 
 _TUNNEL_PIDFILE = os.path.join(_project_root, ".tunnel.pid")
