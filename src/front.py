@@ -484,6 +484,54 @@ def proxy_openclaw_workspace_file_save():
         return jsonify({"ok": False, "error": str(e)}), 500
 
 
+@app.route("/proxy_openclaw_agent_detail", methods=["GET"])
+def proxy_openclaw_agent_detail():
+    """Proxy to get detailed agent config (skills, tools, profile)."""
+    try:
+        r = requests.get(
+            f"{OASIS_BASE_URL}/sessions/openclaw/agent-detail",
+            params={"name": request.args.get("name", "")},
+            timeout=15,
+        )
+        return jsonify(r.json()), r.status_code
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
+@app.route("/proxy_openclaw_skills", methods=["GET"])
+def proxy_openclaw_skills():
+    """Proxy to list all available OpenClaw skills."""
+    try:
+        r = requests.get(f"{OASIS_BASE_URL}/sessions/openclaw/skills", timeout=20)
+        return jsonify(r.json()), r.status_code
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
+@app.route("/proxy_openclaw_tool_groups", methods=["GET"])
+def proxy_openclaw_tool_groups():
+    """Proxy to get available tool groups and profiles."""
+    try:
+        r = requests.get(f"{OASIS_BASE_URL}/sessions/openclaw/tool-groups", timeout=10)
+        return jsonify(r.json()), r.status_code
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
+@app.route("/proxy_openclaw_update_config", methods=["POST"])
+def proxy_openclaw_update_config():
+    """Proxy to update an agent's skills/tools config."""
+    try:
+        r = requests.post(
+            f"{OASIS_BASE_URL}/sessions/openclaw/update-config",
+            json=request.get_json(force=True),
+            timeout=15,
+        )
+        return jsonify(r.json()), r.status_code
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
 @app.route("/proxy_session_history", methods=["POST"])
 def proxy_session_history():
     """代理获取指定会话的历史消息"""

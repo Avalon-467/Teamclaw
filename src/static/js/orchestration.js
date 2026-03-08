@@ -195,7 +195,15 @@ async function orchLoadOpenClawSessions() {
             const title = agentName + (a.is_default ? ' ⭐' : '');
             const mdl = (a.model && a.model !== 'unknown' && a.model !== 'auto') ? a.model : '';
             const agentWs = a.workspace || '';
-            card.innerHTML = `<span class="orch-emoji">🦞</span><div style="min-width:0;flex:1;"><div class="orch-name" title="${escapeHtml(agentName)}">${escapeHtml(title)}</div>${mdl ? '<div class="orch-tag" style="color:#10b981;font-family:monospace;">' + escapeHtml(mdl) + '</div>' : ''}</div>${agentWs ? '<button class="orch-oc-edit-btn" data-ws="' + escapeHtml(agentWs) + '" data-agent="' + escapeHtml(agentName) + '" title="' + t('orch_oc_edit_files') + '" style="background:none;border:none;cursor:pointer;font-size:14px;padding:2px 4px;flex-shrink:0;opacity:0.5;" onmouseenter="this.style.opacity=1" onmouseleave="this.style.opacity=0.5">📝</button>' : ''}`;
+
+            // Build subtitle with tools/skills summary
+            const toolProfile = (a.tools && a.tools.profile) ? a.tools.profile : '';
+            const skillCount = a.skills_all ? '∞' : (a.skills ? a.skills.length : 0);
+            let metaLine = '';
+            if (toolProfile) metaLine += '🔧' + toolProfile;
+            if (skillCount) metaLine += (metaLine ? ' · ' : '') + '🧩' + skillCount;
+
+            card.innerHTML = `<span class="orch-emoji">🦞</span><div style="min-width:0;flex:1;"><div class="orch-name" title="${escapeHtml(agentName)}">${escapeHtml(title)}</div>${mdl ? '<div class="orch-tag" style="color:#10b981;font-family:monospace;">' + escapeHtml(mdl) + '</div>' : ''}${metaLine ? '<div class="orch-tag" style="color:#6b7280;font-size:9px;">' + escapeHtml(metaLine) + '</div>' : ''}</div><div style="display:flex;flex-direction:column;gap:2px;flex-shrink:0;">${agentWs ? '<button class="orch-oc-edit-btn" data-ws="' + escapeHtml(agentWs) + '" data-agent="' + escapeHtml(agentName) + '" title="' + t('orch_oc_edit_files') + '" style="background:none;border:none;cursor:pointer;font-size:12px;padding:1px 3px;opacity:0.5;line-height:1;" onmouseenter="this.style.opacity=1" onmouseleave="this.style.opacity=0.5">📝</button>' : ''}<button class="orch-oc-cfg-btn" data-agent="${escapeHtml(agentName)}" title="${t('orch_oc_config')}" style="background:none;border:none;cursor:pointer;font-size:12px;padding:1px 3px;opacity:0.5;line-height:1;" onmouseenter="this.style.opacity=1" onmouseleave="this.style.opacity=0.5">⚙️</button></div>`;
             // model format: agent:<name> (CLI uses --agent <name>, no session-id)
             const modelStr = 'agent:' + agentName;
             const nodeData = {
@@ -213,6 +221,15 @@ async function orchLoadOpenClawSessions() {
                     orchShowWorkspaceEditor(editBtn.dataset.agent, editBtn.dataset.ws);
                 });
                 editBtn.addEventListener('dblclick', (e) => e.stopPropagation());
+            }
+            // Bind config button
+            const cfgBtn = card.querySelector('.orch-oc-cfg-btn');
+            if (cfgBtn) {
+                cfgBtn.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    orchShowAgentConfigModal(cfgBtn.dataset.agent);
+                });
+                cfgBtn.addEventListener('dblclick', (e) => e.stopPropagation());
             }
             list.appendChild(card);
         }
@@ -398,6 +415,212 @@ async function orchWsOpenFile(agentName, workspace, filename, overlay) {
     }
 }
 
+// ── OpenClaw Agent Config Modal (Skills + Tools) ──
+async function orchShowAgentConfigModal(agentName) {
+    const overlay = document.createElement('div');
+    overlay.className = 'orch-modal-overlay';
+    overlay.id = 'orch-agent-config-overlay';
+    overlay.innerHTML = `
+        <div class="orch-modal" style="min-width:400px;max-width:700px;width:90vw;max-height:85vh;display:flex;flex-direction:column;">
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
+                <h3 style="margin:0;">⚙️ ${escapeHtml(agentName)} — ${t('orch_oc_config')}</h3>
+                <button id="orch-cfg-close" style="background:none;border:none;font-size:18px;cursor:pointer;padding:2px 6px;color:#6b7280;">✕</button>
+            </div>
+            <div id="orch-cfg-status" style="font-size:10px;color:#9ca3af;margin-bottom:8px;">⏳ ${t('loading')}</div>
+            <div id="orch-cfg-body" style="flex:1;overflow-y:auto;min-height:0;display:flex;flex-direction:column;gap:12px;">
+            </div>
+        </div>
+    `;
+    document.body.appendChild(overlay);
+    overlay.querySelector('#orch-cfg-close').addEventListener('click', () => overlay.remove());
+    overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.remove(); });
+
+    const statusEl = overlay.querySelector('#orch-cfg-status');
+    const bodyEl = overlay.querySelector('#orch-cfg-body');
+
+    // Fetch agent detail + available skills + tool groups in parallel
+    try {
+        const [detailRes, skillsRes, toolsRes] = await Promise.all([
+            fetch('/proxy_openclaw_agent_detail?name=' + encodeURIComponent(agentName)).then(r => r.json()),
+            fetch('/proxy_openclaw_skills').then(r => r.json()),
+            fetch('/proxy_openclaw_tool_groups').then(r => r.json()),
+        ]);
+
+        if (!detailRes.ok) {
+            statusEl.textContent = '❌ ' + (detailRes.error || 'Error');
+            statusEl.style.color = '#ef4444';
+            return;
+        }
+
+        const agent = detailRes.agent;
+        const allSkills = (skillsRes.ok ? skillsRes.skills : []) || [];
+        const toolGroups = (toolsRes.ok ? toolsRes.groups : {}) || {};
+        const toolProfiles = (toolsRes.ok ? toolsRes.profiles : {}) || {};
+        const agentSkills = new Set(agent.skills || []);
+        const skillsAll = agent.skills_all;
+
+        statusEl.textContent = '✅ ' + t('orch_oc_cfg_loaded');
+        statusEl.style.color = '#10b981';
+
+        // ── Tools Section ──
+        const toolProfile = (agent.tools && agent.tools.profile) || '';
+        const alsoAllow = (agent.tools && agent.tools.alsoAllow) || [];
+        const deny = (agent.tools && agent.tools.deny) || [];
+
+        let toolsHtml = `<div style="border:1px solid #e5e7eb;border-radius:8px;padding:10px;">
+            <div style="font-size:12px;font-weight:600;color:#374151;margin-bottom:8px;">🔧 ${t('orch_oc_cfg_tools')}</div>
+            <div style="margin-bottom:8px;">
+                <label style="font-size:11px;color:#6b7280;">${t('orch_oc_cfg_profile')}</label>
+                <select id="orch-cfg-profile" style="width:100%;padding:4px 8px;border:1px solid #d1d5db;border-radius:4px;font-size:11px;margin-top:2px;">
+                    <option value="">${t('orch_oc_cfg_no_profile')}</option>`;
+        for (const [pname, pinfo] of Object.entries(toolProfiles)) {
+            toolsHtml += `<option value="${pname}" ${pname === toolProfile ? 'selected' : ''}>${pname} — ${pinfo.description}</option>`;
+        }
+        toolsHtml += `</select></div>`;
+
+        // Individual tool toggles by group
+        toolsHtml += `<div style="font-size:10px;color:#6b7280;margin-bottom:6px;">${t('orch_oc_cfg_tool_toggles')}</div>`;
+        toolsHtml += `<div style="display:flex;flex-wrap:wrap;gap:4px;" id="orch-cfg-tool-toggles">`;
+        const allToolNames = new Set();
+        for (const [gname, tools] of Object.entries(toolGroups)) {
+            for (const tn of tools) allToolNames.add(tn);
+            toolsHtml += `<div style="width:100%;font-size:10px;font-weight:600;color:#374151;margin-top:4px;">${gname}</div>`;
+            for (const tn of tools) {
+                const isDenied = deny.includes(tn) || deny.includes(gname);
+                const isAllowed = alsoAllow.includes(tn) || alsoAllow.includes(gname);
+                // 3-state: default (from profile) / allow / deny
+                let state = 'default';
+                if (isDenied) state = 'deny';
+                else if (isAllowed) state = 'allow';
+                toolsHtml += `<label style="display:inline-flex;align-items:center;gap:3px;font-size:10px;padding:2px 6px;border:1px solid #e5e7eb;border-radius:4px;cursor:pointer;background:${state === 'deny' ? '#fef2f2' : state === 'allow' ? '#f0fdf4' : '#fff'};" data-tool="${tn}" data-state="${state}">
+                    <span class="orch-cfg-tool-icon">${state === 'deny' ? '🚫' : state === 'allow' ? '✅' : '⚪'}</span>
+                    <span>${tn}</span>
+                </label>`;
+            }
+        }
+        toolsHtml += `</div></div>`;
+
+        // ── Skills Section ──
+        let skillsHtml = `<div style="border:1px solid #e5e7eb;border-radius:8px;padding:10px;">
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
+                <div style="font-size:12px;font-weight:600;color:#374151;">🧩 ${t('orch_oc_cfg_skills')}</div>
+                <label style="font-size:10px;display:flex;align-items:center;gap:4px;color:#6b7280;">
+                    <input type="checkbox" id="orch-cfg-skills-all" ${skillsAll ? 'checked' : ''} style="margin:0;">
+                    ${t('orch_oc_cfg_skills_all')}
+                </label>
+            </div>
+            <div id="orch-cfg-skills-list" style="display:flex;flex-wrap:wrap;gap:3px;max-height:200px;overflow-y:auto;${skillsAll ? 'opacity:0.4;pointer-events:none;' : ''}">`;
+        for (const sk of allSkills) {
+            const sname = sk.name || sk;
+            const checked = skillsAll || agentSkills.has(sname);
+            skillsHtml += `<label style="display:inline-flex;align-items:center;gap:3px;font-size:10px;padding:2px 6px;border:1px solid #e5e7eb;border-radius:4px;cursor:pointer;background:${checked ? '#dbeafe' : '#fff'};">
+                <input type="checkbox" class="orch-cfg-skill-cb" value="${escapeHtml(sname)}" ${checked ? 'checked' : ''} style="margin:0;width:12px;height:12px;">
+                <span>${escapeHtml(sname)}</span>
+            </label>`;
+        }
+        skillsHtml += `</div></div>`;
+
+        // ── Save Button ──
+        const saveHtml = `<div style="display:flex;justify-content:flex-end;gap:8px;padding-top:8px;border-top:1px solid #e5e7eb;">
+            <button id="orch-cfg-save" style="padding:6px 16px;border-radius:6px;border:none;background:#2563eb;color:white;cursor:pointer;font-size:12px;">💾 ${t('orch_oc_save')}</button>
+        </div>`;
+
+        bodyEl.innerHTML = toolsHtml + skillsHtml + saveHtml;
+
+        // ── Skills "all" toggle ──
+        overlay.querySelector('#orch-cfg-skills-all').addEventListener('change', (e) => {
+            const listEl = overlay.querySelector('#orch-cfg-skills-list');
+            if (e.target.checked) {
+                listEl.style.opacity = '0.4';
+                listEl.style.pointerEvents = 'none';
+            } else {
+                listEl.style.opacity = '1';
+                listEl.style.pointerEvents = '';
+            }
+        });
+
+        // ── Skill checkbox visual ──
+        overlay.querySelectorAll('.orch-cfg-skill-cb').forEach(cb => {
+            cb.addEventListener('change', () => {
+                cb.parentElement.style.background = cb.checked ? '#dbeafe' : '#fff';
+            });
+        });
+
+        // ── Tool toggle click (3-state: default → allow → deny → default) ──
+        overlay.querySelectorAll('[data-tool]').forEach(label => {
+            label.addEventListener('click', (e) => {
+                if (e.target.tagName === 'INPUT') return;
+                e.preventDefault();
+                const current = label.dataset.state;
+                let next = 'default';
+                if (current === 'default') next = 'allow';
+                else if (current === 'allow') next = 'deny';
+                else next = 'default';
+                label.dataset.state = next;
+                const icon = label.querySelector('.orch-cfg-tool-icon');
+                icon.textContent = next === 'deny' ? '🚫' : next === 'allow' ? '✅' : '⚪';
+                label.style.background = next === 'deny' ? '#fef2f2' : next === 'allow' ? '#f0fdf4' : '#fff';
+            });
+        });
+
+        // ── Save handler ──
+        overlay.querySelector('#orch-cfg-save').addEventListener('click', async () => {
+            const saveBtn = overlay.querySelector('#orch-cfg-save');
+            saveBtn.disabled = true;
+            saveBtn.textContent = '⏳';
+
+            // Collect skills
+            const isSkillsAll = overlay.querySelector('#orch-cfg-skills-all').checked;
+            let skillsValue = null; // null = unrestricted
+            if (!isSkillsAll) {
+                skillsValue = [];
+                overlay.querySelectorAll('.orch-cfg-skill-cb:checked').forEach(cb => {
+                    skillsValue.push(cb.value);
+                });
+            }
+
+            // Collect tools
+            const profile = overlay.querySelector('#orch-cfg-profile').value;
+            const newAlsoAllow = [];
+            const newDeny = [];
+            overlay.querySelectorAll('[data-tool]').forEach(label => {
+                const tn = label.dataset.tool;
+                const st = label.dataset.state;
+                if (st === 'allow') newAlsoAllow.push(tn);
+                else if (st === 'deny') newDeny.push(tn);
+            });
+
+            try {
+                const r = await fetch('/proxy_openclaw_update_config', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({
+                        agent_name: agentName,
+                        skills: skillsValue,
+                        tools: { profile, alsoAllow: newAlsoAllow, deny: newDeny },
+                    }),
+                });
+                const res = await r.json();
+                if (r.ok && res.ok) {
+                    orchToast('✅ ' + t('orch_oc_cfg_saved', {name: agentName}));
+                    overlay.remove();
+                    orchLoadOpenClawSessions();
+                } else {
+                    orchToast('❌ ' + (res.error || res.errors?.join(', ') || 'Error'));
+                }
+            } catch(e) {
+                orchToast('❌ ' + t('orch_toast_net_error'));
+            }
+            saveBtn.disabled = false;
+            saveBtn.textContent = '💾 ' + t('orch_oc_save');
+        });
+
+    } catch(e) {
+        statusEl.textContent = '❌ ' + t('orch_toast_net_error');
+        statusEl.style.color = '#ef4444';
+    }
+}
+
 // ── Add OpenClaw Agent modal ──
 function orchShowAddOpenClawModal() {
     const overlay = document.createElement('div');
@@ -499,6 +722,8 @@ function orchShowAddOpenClawModal() {
                 orchToast('🦞 ' + t('orch_openclaw_created', {name}));
                 overlay.remove();
                 orchLoadOpenClawSessions();
+                // Auto-open config modal for the newly created agent
+                setTimeout(() => orchShowAgentConfigModal(name), 500);
             } else {
                 if (r.status === 409) {
                     orchToast('⚠️ ' + t('orch_openclaw_exists', {name}));
