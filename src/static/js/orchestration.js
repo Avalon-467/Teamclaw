@@ -287,133 +287,7 @@ function orchShowAddExpertModal() {
 }
 
 // ── OpenClaw Workspace File Editor ──
-function orchShowWorkspaceEditor(agentName, workspace) {
-    const overlay = document.createElement('div');
-    overlay.className = 'orch-modal-overlay';
-    overlay.id = 'orch-ws-editor-overlay';
-    overlay.innerHTML = `
-        <div class="orch-modal" style="min-width:380px;max-width:700px;width:90vw;max-height:85vh;display:flex;flex-direction:column;">
-            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
-                <h3 style="margin:0;">🦞 ${escapeHtml(agentName)} — Core Files</h3>
-                <button id="orch-ws-close" style="background:none;border:none;font-size:18px;cursor:pointer;padding:2px 6px;color:#6b7280;">✕</button>
-            </div>
-            <div style="font-size:10px;color:#9ca3af;margin-bottom:8px;font-family:monospace;word-break:break-all;">${escapeHtml(workspace)}</div>
-            <div id="orch-ws-file-list" style="display:flex;flex-wrap:wrap;gap:4px;margin-bottom:10px;padding-bottom:8px;border-bottom:1px solid #e5e7eb;">
-                <span style="font-size:10px;color:#9ca3af;">⏳ ${t('loading')}</span>
-            </div>
-            <div id="orch-ws-editor-area" style="flex:1;min-height:0;display:flex;flex-direction:column;">
-                <div style="text-align:center;color:#d1d5db;padding:30px;font-size:12px;">${t('orch_oc_select_file')}</div>
-            </div>
-        </div>
-    `;
-    document.body.appendChild(overlay);
-    overlay.querySelector('#orch-ws-close').addEventListener('click', () => overlay.remove());
-    overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.remove(); });
-
-    let currentFile = null;
-    let dirty = false;
-
-    // Load file list
-    fetch('/proxy_openclaw_workspace_files?workspace=' + encodeURIComponent(workspace))
-        .then(r => r.json())
-        .then(res => {
-            const listEl = document.getElementById('orch-ws-file-list');
-            if (!res.ok || !res.files) {
-                listEl.innerHTML = '<span style="color:#ef4444;font-size:10px;">❌ ' + (res.error || 'Error') + '</span>';
-                return;
-            }
-            listEl.innerHTML = '';
-            for (const f of res.files) {
-                const btn = document.createElement('button');
-                btn.className = 'orch-ws-file-tab';
-                btn.dataset.filename = f.name;
-                btn.style.cssText = 'padding:3px 8px;border-radius:4px;border:1px solid #d1d5db;background:white;cursor:pointer;font-size:10px;font-family:monospace;color:#374151;white-space:nowrap;';
-                const sizeStr = f.exists ? (f.size >= 1024 ? (f.size / 1024).toFixed(1) + ' KB' : f.size + ' B') : t('orch_oc_file_missing');
-                btn.textContent = f.name + (f.exists ? '' : ' ⚠️');
-                btn.title = f.name + ' — ' + sizeStr;
-                if (!f.exists) btn.style.color = '#d1d5db';
-                btn.addEventListener('click', () => orchWsOpenFile(agentName, workspace, f.name, overlay));
-                listEl.appendChild(btn);
-            }
-        })
-        .catch(() => {
-            document.getElementById('orch-ws-file-list').innerHTML =
-                '<span style="color:#ef4444;font-size:10px;">❌ ' + t('orch_toast_net_error') + '</span>';
-        });
-}
-
-async function orchWsOpenFile(agentName, workspace, filename, overlay) {
-    const editorArea = overlay.querySelector('#orch-ws-editor-area');
-    // Highlight active tab
-    overlay.querySelectorAll('.orch-ws-file-tab').forEach(b => {
-        b.style.background = b.dataset.filename === filename ? '#dbeafe' : 'white';
-        b.style.borderColor = b.dataset.filename === filename ? '#2563eb' : '#d1d5db';
-    });
-    editorArea.innerHTML = '<div style="text-align:center;color:#9ca3af;padding:20px;font-size:11px;">⏳ ' + t('loading') + '</div>';
-    try {
-        const r = await fetch('/proxy_openclaw_workspace_file?workspace=' + encodeURIComponent(workspace) + '&filename=' + encodeURIComponent(filename));
-        const res = await r.json();
-        const content = res.content || '';
-        editorArea.innerHTML = `
-            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;">
-                <span style="font-size:11px;font-weight:600;color:#374151;font-family:monospace;">${escapeHtml(filename)}</span>
-                <div style="display:flex;gap:4px;align-items:center;">
-                    <span id="orch-ws-status" style="font-size:10px;color:#9ca3af;"></span>
-                    <button id="orch-ws-save" style="padding:3px 10px;border-radius:4px;border:none;background:#2563eb;color:white;cursor:pointer;font-size:11px;">${t('orch_oc_save')}</button>
-                </div>
-            </div>
-            <textarea id="orch-ws-textarea" spellcheck="false"
-                style="flex:1;width:100%;min-height:250px;max-height:55vh;border:1px solid #d1d5db;border-radius:6px;padding:8px;font-size:11px;font-family:monospace;line-height:1.5;resize:vertical;color:#1f2937;background:#fafafa;"
-            >${escapeHtml(content)}</textarea>
-        `;
-        const textarea = editorArea.querySelector('#orch-ws-textarea');
-        const statusEl = editorArea.querySelector('#orch-ws-status');
-        const saveBtn = editorArea.querySelector('#orch-ws-save');
-
-        if (!res.exists) statusEl.textContent = '🆕 ' + t('orch_oc_new_file');
-
-        textarea.addEventListener('input', () => { statusEl.textContent = '● ' + t('orch_oc_unsaved'); statusEl.style.color = '#f59e0b'; });
-
-        // Ctrl+S / Cmd+S to save
-        textarea.addEventListener('keydown', (e) => {
-            if ((e.ctrlKey || e.metaKey) && e.key === 's') {
-                e.preventDefault();
-                saveBtn.click();
-            }
-        });
-
-        saveBtn.addEventListener('click', async () => {
-            saveBtn.disabled = true;
-            saveBtn.textContent = '⏳';
-            try {
-                const sr = await fetch('/proxy_openclaw_workspace_file', {
-                    method: 'POST',
-                    headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({ workspace, filename, content: textarea.value }),
-                });
-                const sres = await sr.json();
-                if (sr.ok && sres.ok) {
-                    statusEl.textContent = '✅ ' + t('orch_oc_saved');
-                    statusEl.style.color = '#10b981';
-                    orchToast('✅ ' + filename + ' ' + t('orch_oc_saved'));
-                    // Update tab to remove missing indicator
-                    const tab = overlay.querySelector(`.orch-ws-file-tab[data-filename="${filename}"]`);
-                    if (tab) { tab.style.color = '#374151'; tab.textContent = filename; }
-                } else {
-                    statusEl.textContent = '❌ ' + (sres.error || 'Error');
-                    statusEl.style.color = '#ef4444';
-                }
-            } catch(e) {
-                statusEl.textContent = '❌ ' + t('orch_toast_net_error');
-                statusEl.style.color = '#ef4444';
-            }
-            saveBtn.disabled = false;
-            saveBtn.textContent = t('orch_oc_save');
-        });
-    } catch(e) {
-        editorArea.innerHTML = '<div style="color:#ef4444;padding:20px;text-align:center;font-size:11px;">❌ ' + t('orch_toast_net_error') + '</div>';
-    }
-}
+// Now integrated into the unified config modal — see orchShowAgentConfigModal
 
 // ── OpenClaw Quick Config (entry from chat header) ──
 async function orchOpenClawQuickConfig() {
@@ -490,30 +364,167 @@ async function orchOpenClawQuickConfig() {
     }
 }
 
-// ── OpenClaw Agent Config Modal (Skills + Tools) ──
-async function orchShowAgentConfigModal(agentName) {
+// ── Unified OpenClaw Agent Config Modal (Tabs: Core Files | Skills & Tools | Channels) ──
+async function orchShowAgentConfigModal(agentName, initialTab) {
     const overlay = document.createElement('div');
     overlay.className = 'orch-modal-overlay';
     overlay.id = 'orch-agent-config-overlay';
     overlay.innerHTML = `
-        <div class="orch-modal" style="min-width:400px;max-width:700px;width:90vw;max-height:85vh;display:flex;flex-direction:column;">
-            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
-                <h3 style="margin:0;">⚙️ ${escapeHtml(agentName)} — ${t('orch_oc_config')}</h3>
-                <button id="orch-cfg-close" style="background:none;border:none;font-size:18px;cursor:pointer;padding:2px 6px;color:#6b7280;">✕</button>
+        <div class="orch-modal" style="min-width:420px;max-width:750px;width:92vw;max-height:88vh;display:flex;flex-direction:column;">
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;">
+                <h3 style="margin:0;font-size:14px;">🦞 ${escapeHtml(agentName)}</h3>
+                <button id="orch-ucfg-close" style="background:none;border:none;font-size:18px;cursor:pointer;padding:2px 6px;color:#6b7280;">✕</button>
             </div>
-            <div id="orch-cfg-status" style="font-size:10px;color:#9ca3af;margin-bottom:8px;">⏳ ${t('loading')}</div>
-            <div id="orch-cfg-body" style="flex:1;overflow-y:auto;min-height:0;display:flex;flex-direction:column;gap:12px;">
+            <div id="orch-ucfg-tabs" style="display:flex;gap:0;margin-bottom:10px;border-bottom:2px solid #e5e7eb;">
+                <button class="orch-ucfg-tab" data-tab="files" style="padding:6px 14px;font-size:11px;font-weight:600;border:none;cursor:pointer;background:none;border-bottom:2px solid transparent;margin-bottom:-2px;color:#6b7280;transition:all .15s;">📝 ${t('orch_oc_tab_files')}</button>
+                <button class="orch-ucfg-tab" data-tab="config" style="padding:6px 14px;font-size:11px;font-weight:600;border:none;cursor:pointer;background:none;border-bottom:2px solid transparent;margin-bottom:-2px;color:#6b7280;transition:all .15s;">⚙️ ${t('orch_oc_tab_config')}</button>
+                <button class="orch-ucfg-tab" data-tab="channels" style="padding:6px 14px;font-size:11px;font-weight:600;border:none;cursor:pointer;background:none;border-bottom:2px solid transparent;margin-bottom:-2px;color:#6b7280;transition:all .15s;">📡 ${t('orch_oc_tab_channels')}</button>
+            </div>
+            <div id="orch-ucfg-content" style="flex:1;overflow-y:auto;min-height:0;display:flex;flex-direction:column;">
+                <div style="text-align:center;color:#9ca3af;padding:20px;font-size:11px;">⏳ ${t('loading')}</div>
             </div>
         </div>
     `;
     document.body.appendChild(overlay);
-    overlay.querySelector('#orch-cfg-close').addEventListener('click', () => overlay.remove());
+    overlay.querySelector('#orch-ucfg-close').addEventListener('click', () => overlay.remove());
     overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.remove(); });
 
-    const statusEl = overlay.querySelector('#orch-cfg-status');
-    const bodyEl = overlay.querySelector('#orch-cfg-body');
+    // Tab switching
+    let activeTab = initialTab || 'config';
+    const tabs = overlay.querySelectorAll('.orch-ucfg-tab');
+    const contentEl = overlay.querySelector('#orch-ucfg-content');
 
-    // Fetch agent detail + available skills + tool groups in parallel
+    function activateTab(tab) {
+        activeTab = tab;
+        tabs.forEach(t => {
+            const isActive = t.dataset.tab === tab;
+            t.style.borderBottomColor = isActive ? '#2563eb' : 'transparent';
+            t.style.color = isActive ? '#2563eb' : '#6b7280';
+        });
+        contentEl.innerHTML = '<div style="text-align:center;color:#9ca3af;padding:20px;font-size:11px;">⏳ ' + t('loading') + '</div>';
+        if (tab === 'files') loadFilesTab(agentName, contentEl, overlay);
+        else if (tab === 'config') loadConfigTab(agentName, contentEl, overlay);
+        else if (tab === 'channels') loadChannelsTab(agentName, contentEl, overlay);
+    }
+
+    tabs.forEach(tb => tb.addEventListener('click', () => activateTab(tb.dataset.tab)));
+    activateTab(activeTab);
+}
+
+// Helper: orchShowWorkspaceEditor now opens unified modal on files tab
+function orchShowWorkspaceEditor(agentName, workspace) {
+    orchShowAgentConfigModal(agentName, 'files');
+}
+
+// ── Tab: Core Files ──
+async function loadFilesTab(agentName, contentEl, overlay) {
+    // First get workspace path from agent detail
+    let workspace = '';
+    try {
+        const dr = await fetch('/proxy_openclaw_agent_detail?name=' + encodeURIComponent(agentName));
+        const dd = await dr.json();
+        if (dd.ok && dd.agent) workspace = dd.agent.workspace || '';
+    } catch(e) {}
+
+    if (!workspace) {
+        contentEl.innerHTML = '<div style="color:#ef4444;padding:20px;text-align:center;font-size:11px;">❌ No workspace found</div>';
+        return;
+    }
+
+    contentEl.innerHTML = `
+        <div style="font-size:10px;color:#9ca3af;margin-bottom:8px;font-family:monospace;word-break:break-all;">${escapeHtml(workspace)}</div>
+        <div id="orch-ws-file-list" style="display:flex;flex-wrap:wrap;gap:4px;margin-bottom:10px;padding-bottom:8px;border-bottom:1px solid #e5e7eb;">
+            <span style="font-size:10px;color:#9ca3af;">⏳ ${t('loading')}</span>
+        </div>
+        <div id="orch-ws-editor-area" style="flex:1;min-height:0;display:flex;flex-direction:column;">
+            <div style="text-align:center;color:#d1d5db;padding:30px;font-size:12px;">${t('orch_oc_select_file')}</div>
+        </div>
+    `;
+
+    try {
+        const r = await fetch('/proxy_openclaw_workspace_files?workspace=' + encodeURIComponent(workspace));
+        const res = await r.json();
+        const listEl = contentEl.querySelector('#orch-ws-file-list');
+        if (!res.ok || !res.files) {
+            listEl.innerHTML = '<span style="color:#ef4444;font-size:10px;">❌ ' + (res.error || 'Error') + '</span>';
+            return;
+        }
+        listEl.innerHTML = '';
+        for (const f of res.files) {
+            const btn = document.createElement('button');
+            btn.className = 'orch-ws-file-tab';
+            btn.dataset.filename = f.name;
+            btn.style.cssText = 'padding:3px 8px;border-radius:4px;border:1px solid #d1d5db;background:white;cursor:pointer;font-size:10px;font-family:monospace;color:#374151;white-space:nowrap;';
+            const sizeStr = f.exists ? (f.size >= 1024 ? (f.size / 1024).toFixed(1) + ' KB' : f.size + ' B') : t('orch_oc_file_missing');
+            btn.textContent = f.name + (f.exists ? '' : ' ⚠️');
+            btn.title = f.name + ' — ' + sizeStr;
+            if (!f.exists) btn.style.color = '#d1d5db';
+            btn.addEventListener('click', () => orchWsOpenFile(agentName, workspace, f.name, contentEl));
+            listEl.appendChild(btn);
+        }
+    } catch(e) {
+        contentEl.querySelector('#orch-ws-file-list').innerHTML =
+            '<span style="color:#ef4444;font-size:10px;">❌ ' + t('orch_toast_net_error') + '</span>';
+    }
+}
+
+async function orchWsOpenFile(agentName, workspace, filename, containerEl) {
+    const editorArea = containerEl.querySelector('#orch-ws-editor-area');
+    containerEl.querySelectorAll('.orch-ws-file-tab').forEach(b => {
+        b.style.background = b.dataset.filename === filename ? '#dbeafe' : 'white';
+        b.style.borderColor = b.dataset.filename === filename ? '#2563eb' : '#d1d5db';
+    });
+    editorArea.innerHTML = '<div style="text-align:center;color:#9ca3af;padding:20px;font-size:11px;">⏳ ' + t('loading') + '</div>';
+    try {
+        const r = await fetch('/proxy_openclaw_workspace_file?workspace=' + encodeURIComponent(workspace) + '&filename=' + encodeURIComponent(filename));
+        const res = await r.json();
+        const content = res.content || '';
+        editorArea.innerHTML = `
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;">
+                <span style="font-size:11px;font-weight:600;color:#374151;font-family:monospace;">${escapeHtml(filename)}</span>
+                <div style="display:flex;gap:4px;align-items:center;">
+                    <span id="orch-ws-status" style="font-size:10px;color:#9ca3af;"></span>
+                    <button id="orch-ws-save" style="padding:3px 10px;border-radius:4px;border:none;background:#2563eb;color:white;cursor:pointer;font-size:11px;">${t('orch_oc_save')}</button>
+                </div>
+            </div>
+            <textarea id="orch-ws-textarea" spellcheck="false"
+                style="flex:1;width:100%;min-height:250px;max-height:55vh;border:1px solid #d1d5db;border-radius:6px;padding:8px;font-size:11px;font-family:monospace;line-height:1.5;resize:vertical;color:#1f2937;background:#fafafa;"
+            >${escapeHtml(content)}</textarea>
+        `;
+        const textarea = editorArea.querySelector('#orch-ws-textarea');
+        const statusEl = editorArea.querySelector('#orch-ws-status');
+        const saveBtn = editorArea.querySelector('#orch-ws-save');
+
+        if (!res.exists) statusEl.textContent = '🆕 ' + t('orch_oc_new_file');
+        textarea.addEventListener('input', () => { statusEl.textContent = '● ' + t('orch_oc_unsaved'); statusEl.style.color = '#f59e0b'; });
+        textarea.addEventListener('keydown', (e) => {
+            if ((e.ctrlKey || e.metaKey) && e.key === 's') { e.preventDefault(); saveBtn.click(); }
+        });
+        saveBtn.addEventListener('click', async () => {
+            saveBtn.disabled = true; saveBtn.textContent = '⏳';
+            try {
+                const sr = await fetch('/proxy_openclaw_workspace_file', {
+                    method: 'POST', headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ workspace, filename, content: textarea.value }),
+                });
+                const sres = await sr.json();
+                if (sr.ok && sres.ok) {
+                    statusEl.textContent = '✅ ' + t('orch_oc_saved'); statusEl.style.color = '#10b981';
+                    orchToast('✅ ' + filename + ' ' + t('orch_oc_saved'));
+                    const tab = containerEl.querySelector(`.orch-ws-file-tab[data-filename="${filename}"]`);
+                    if (tab) { tab.style.color = '#374151'; tab.textContent = filename; }
+                } else { statusEl.textContent = '❌ ' + (sres.error || 'Error'); statusEl.style.color = '#ef4444'; }
+            } catch(e) { statusEl.textContent = '❌ ' + t('orch_toast_net_error'); statusEl.style.color = '#ef4444'; }
+            saveBtn.disabled = false; saveBtn.textContent = t('orch_oc_save');
+        });
+    } catch(e) {
+        editorArea.innerHTML = '<div style="color:#ef4444;padding:20px;text-align:center;font-size:11px;">❌ ' + t('orch_toast_net_error') + '</div>';
+    }
+}
+
+// ── Tab: Skills & Tools Config ──
+async function loadConfigTab(agentName, contentEl, overlay) {
+    contentEl.innerHTML = '<div style="text-align:center;color:#9ca3af;padding:20px;font-size:11px;">⏳ ' + t('loading') + '</div>';
     try {
         const [detailRes, skillsRes, toolsRes] = await Promise.all([
             fetch('/proxy_openclaw_agent_detail?name=' + encodeURIComponent(agentName)).then(r => r.json()),
@@ -522,8 +533,7 @@ async function orchShowAgentConfigModal(agentName) {
         ]);
 
         if (!detailRes.ok) {
-            statusEl.textContent = '❌ ' + (detailRes.error || 'Error');
-            statusEl.style.color = '#ef4444';
+            contentEl.innerHTML = '<div style="color:#ef4444;padding:20px;text-align:center;font-size:11px;">❌ ' + (detailRes.error || 'Error') + '</div>';
             return;
         }
 
@@ -534,10 +544,6 @@ async function orchShowAgentConfigModal(agentName) {
         const agentSkills = new Set(agent.skills || []);
         const skillsAll = agent.skills_all;
 
-        statusEl.textContent = '✅ ' + t('orch_oc_cfg_loaded');
-        statusEl.style.color = '#10b981';
-
-        // ── Tools Section ──
         const toolProfile = (agent.tools && agent.tools.profile) || '';
         const alsoAllow = (agent.tools && agent.tools.alsoAllow) || [];
         const deny = (agent.tools && agent.tools.deny) || [];
@@ -552,18 +558,13 @@ async function orchShowAgentConfigModal(agentName) {
             toolsHtml += `<option value="${pname}" ${pname === toolProfile ? 'selected' : ''}>${pname} — ${pinfo.description}</option>`;
         }
         toolsHtml += `</select></div>`;
-
-        // Individual tool toggles by group
         toolsHtml += `<div style="font-size:10px;color:#6b7280;margin-bottom:6px;">${t('orch_oc_cfg_tool_toggles')}</div>`;
         toolsHtml += `<div style="display:flex;flex-wrap:wrap;gap:4px;" id="orch-cfg-tool-toggles">`;
-        const allToolNames = new Set();
         for (const [gname, tools] of Object.entries(toolGroups)) {
-            for (const tn of tools) allToolNames.add(tn);
             toolsHtml += `<div style="width:100%;font-size:10px;font-weight:600;color:#374151;margin-top:4px;">${gname}</div>`;
             for (const tn of tools) {
                 const isDenied = deny.includes(tn) || deny.includes(gname);
                 const isAllowed = alsoAllow.includes(tn) || alsoAllow.includes(gname);
-                // 3-state: default (from profile) / allow / deny
                 let state = 'default';
                 if (isDenied) state = 'deny';
                 else if (isAllowed) state = 'allow';
@@ -575,7 +576,6 @@ async function orchShowAgentConfigModal(agentName) {
         }
         toolsHtml += `</div></div>`;
 
-        // ── Skills Section ──
         let skillsHtml = `<div style="border:1px solid #e5e7eb;border-radius:8px;padding:10px;">
             <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
                 <div style="font-size:12px;font-weight:600;color:#374151;">🧩 ${t('orch_oc_cfg_skills')}</div>
@@ -595,104 +595,161 @@ async function orchShowAgentConfigModal(agentName) {
         }
         skillsHtml += `</div></div>`;
 
-        // ── Save Button ──
         const saveHtml = `<div style="display:flex;justify-content:flex-end;gap:8px;padding-top:8px;border-top:1px solid #e5e7eb;">
             <button id="orch-cfg-save" style="padding:6px 16px;border-radius:6px;border:none;background:#2563eb;color:white;cursor:pointer;font-size:12px;">💾 ${t('orch_oc_save')}</button>
         </div>`;
 
-        bodyEl.innerHTML = toolsHtml + skillsHtml + saveHtml;
+        contentEl.innerHTML = toolsHtml + skillsHtml + saveHtml;
 
-        // ── Skills "all" toggle ──
-        overlay.querySelector('#orch-cfg-skills-all').addEventListener('change', (e) => {
-            const listEl = overlay.querySelector('#orch-cfg-skills-list');
-            if (e.target.checked) {
-                listEl.style.opacity = '0.4';
-                listEl.style.pointerEvents = 'none';
-            } else {
-                listEl.style.opacity = '1';
-                listEl.style.pointerEvents = '';
-            }
+        // Skills "all" toggle
+        contentEl.querySelector('#orch-cfg-skills-all').addEventListener('change', (e) => {
+            const listEl = contentEl.querySelector('#orch-cfg-skills-list');
+            listEl.style.opacity = e.target.checked ? '0.4' : '1';
+            listEl.style.pointerEvents = e.target.checked ? 'none' : '';
         });
 
-        // ── Skill checkbox visual ──
-        overlay.querySelectorAll('.orch-cfg-skill-cb').forEach(cb => {
-            cb.addEventListener('change', () => {
-                cb.parentElement.style.background = cb.checked ? '#dbeafe' : '#fff';
-            });
+        contentEl.querySelectorAll('.orch-cfg-skill-cb').forEach(cb => {
+            cb.addEventListener('change', () => { cb.parentElement.style.background = cb.checked ? '#dbeafe' : '#fff'; });
         });
 
-        // ── Tool toggle click (3-state: default → allow → deny → default) ──
-        overlay.querySelectorAll('[data-tool]').forEach(label => {
+        // Tool toggle (3-state)
+        contentEl.querySelectorAll('[data-tool]').forEach(label => {
             label.addEventListener('click', (e) => {
                 if (e.target.tagName === 'INPUT') return;
                 e.preventDefault();
                 const current = label.dataset.state;
-                let next = 'default';
-                if (current === 'default') next = 'allow';
-                else if (current === 'allow') next = 'deny';
-                else next = 'default';
+                let next = current === 'default' ? 'allow' : current === 'allow' ? 'deny' : 'default';
                 label.dataset.state = next;
-                const icon = label.querySelector('.orch-cfg-tool-icon');
-                icon.textContent = next === 'deny' ? '🚫' : next === 'allow' ? '✅' : '⚪';
+                label.querySelector('.orch-cfg-tool-icon').textContent = next === 'deny' ? '🚫' : next === 'allow' ? '✅' : '⚪';
                 label.style.background = next === 'deny' ? '#fef2f2' : next === 'allow' ? '#f0fdf4' : '#fff';
             });
         });
 
-        // ── Save handler ──
-        overlay.querySelector('#orch-cfg-save').addEventListener('click', async () => {
-            const saveBtn = overlay.querySelector('#orch-cfg-save');
-            saveBtn.disabled = true;
-            saveBtn.textContent = '⏳';
-
-            // Collect skills
-            const isSkillsAll = overlay.querySelector('#orch-cfg-skills-all').checked;
-            let skillsValue = null; // null = unrestricted
+        // Save
+        contentEl.querySelector('#orch-cfg-save').addEventListener('click', async () => {
+            const saveBtn = contentEl.querySelector('#orch-cfg-save');
+            saveBtn.disabled = true; saveBtn.textContent = '⏳';
+            const isSkillsAll = contentEl.querySelector('#orch-cfg-skills-all').checked;
+            let skillsValue = null;
             if (!isSkillsAll) {
                 skillsValue = [];
-                overlay.querySelectorAll('.orch-cfg-skill-cb:checked').forEach(cb => {
-                    skillsValue.push(cb.value);
-                });
+                contentEl.querySelectorAll('.orch-cfg-skill-cb:checked').forEach(cb => skillsValue.push(cb.value));
             }
-
-            // Collect tools
-            const profile = overlay.querySelector('#orch-cfg-profile').value;
-            const newAlsoAllow = [];
-            const newDeny = [];
-            overlay.querySelectorAll('[data-tool]').forEach(label => {
-                const tn = label.dataset.tool;
+            const profile = contentEl.querySelector('#orch-cfg-profile').value;
+            const newAlsoAllow = [], newDeny = [];
+            contentEl.querySelectorAll('[data-tool]').forEach(label => {
                 const st = label.dataset.state;
-                if (st === 'allow') newAlsoAllow.push(tn);
-                else if (st === 'deny') newDeny.push(tn);
+                if (st === 'allow') newAlsoAllow.push(label.dataset.tool);
+                else if (st === 'deny') newDeny.push(label.dataset.tool);
             });
-
             try {
                 const r = await fetch('/proxy_openclaw_update_config', {
-                    method: 'POST',
-                    headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({
-                        agent_name: agentName,
-                        skills: skillsValue,
-                        tools: { profile, alsoAllow: newAlsoAllow, deny: newDeny },
-                    }),
+                    method: 'POST', headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ agent_name: agentName, skills: skillsValue, tools: { profile, alsoAllow: newAlsoAllow, deny: newDeny } }),
                 });
                 const res = await r.json();
                 if (r.ok && res.ok) {
                     orchToast('✅ ' + t('orch_oc_cfg_saved', {name: agentName}));
-                    overlay.remove();
                     orchLoadOpenClawSessions();
-                } else {
-                    orchToast('❌ ' + (res.error || res.errors?.join(', ') || 'Error'));
-                }
-            } catch(e) {
-                orchToast('❌ ' + t('orch_toast_net_error'));
-            }
-            saveBtn.disabled = false;
-            saveBtn.textContent = '💾 ' + t('orch_oc_save');
+                } else { orchToast('❌ ' + (res.error || res.errors?.join(', ') || 'Error')); }
+            } catch(e) { orchToast('❌ ' + t('orch_toast_net_error')); }
+            saveBtn.disabled = false; saveBtn.textContent = '💾 ' + t('orch_oc_save');
         });
-
     } catch(e) {
-        statusEl.textContent = '❌ ' + t('orch_toast_net_error');
-        statusEl.style.color = '#ef4444';
+        contentEl.innerHTML = '<div style="color:#ef4444;padding:20px;text-align:center;font-size:11px;">❌ ' + t('orch_toast_net_error') + '</div>';
+    }
+}
+
+// ── Tab: Channels Binding ──
+async function loadChannelsTab(agentName, contentEl, overlay) {
+    contentEl.innerHTML = '<div style="text-align:center;color:#9ca3af;padding:20px;font-size:11px;">⏳ ' + t('loading') + '</div>';
+    try {
+        const [chRes, bindRes] = await Promise.all([
+            fetch('/proxy_openclaw_channels').then(r => r.json()),
+            fetch('/proxy_openclaw_agent_bindings?agent=' + encodeURIComponent(agentName)).then(r => r.json()),
+        ]);
+
+        if (!chRes.ok) {
+            contentEl.innerHTML = '<div style="color:#ef4444;padding:20px;text-align:center;font-size:11px;">❌ ' + (chRes.error || 'Error') + '</div>';
+            return;
+        }
+
+        const channels = chRes.channels || [];
+        const currentBindings = new Set(bindRes.ok ? (bindRes.bindings || []) : []);
+
+        if (channels.length === 0) {
+            contentEl.innerHTML = `<div style="padding:20px;text-align:center;font-size:12px;color:#9ca3af;">
+                📡 ${t('orch_oc_ch_empty')}<br>
+                <span style="font-size:10px;color:#d1d5db;font-family:monospace;">openclaw channels list --json</span>
+            </div>`;
+            return;
+        }
+
+        // Group channels by channel name
+        const grouped = {};
+        for (const ch of channels) {
+            if (!grouped[ch.channel]) grouped[ch.channel] = [];
+            grouped[ch.channel].push(ch);
+        }
+
+        let html = `<div style="font-size:11px;color:#6b7280;margin-bottom:8px;">${t('orch_oc_ch_desc')}</div>`;
+        html += `<div style="display:flex;flex-direction:column;gap:8px;">`;
+
+        for (const [chName, accounts] of Object.entries(grouped)) {
+            html += `<div style="border:1px solid #e5e7eb;border-radius:8px;padding:10px;">
+                <div style="font-size:12px;font-weight:600;color:#374151;margin-bottom:6px;">📡 ${escapeHtml(chName)}</div>
+                <div style="display:flex;flex-wrap:wrap;gap:4px;">`;
+            for (const acc of accounts) {
+                const bindKey = acc.bind_key || (chName + ':' + acc.account);
+                const isBound = currentBindings.has(bindKey) || currentBindings.has(chName + ':' + acc.account);
+                html += `<button class="orch-ch-bind-btn" data-channel="${escapeHtml(bindKey)}" data-bound="${isBound}"
+                    style="display:inline-flex;align-items:center;gap:4px;padding:4px 10px;border-radius:6px;border:1px solid ${isBound ? '#86efac' : '#e5e7eb'};background:${isBound ? '#f0fdf4' : '#fff'};cursor:pointer;font-size:11px;transition:all .15s;color:${isBound ? '#16a34a' : '#6b7280'};"
+                    onmouseenter="this.style.boxShadow='0 1px 4px rgba(0,0,0,0.1)'" onmouseleave="this.style.boxShadow='none'">
+                    <span class="orch-ch-icon">${isBound ? '🔗' : '⚪'}</span>
+                    <span>${escapeHtml(acc.account)}</span>
+                </button>`;
+            }
+            html += `</div></div>`;
+        }
+        html += `</div>`;
+
+        contentEl.innerHTML = html;
+
+        // Bind/unbind click handlers
+        contentEl.querySelectorAll('.orch-ch-bind-btn').forEach(btn => {
+            btn.addEventListener('click', async () => {
+                const channel = btn.dataset.channel;
+                const wasBound = btn.dataset.bound === 'true';
+                const action = wasBound ? 'unbind' : 'bind';
+                btn.disabled = true;
+                btn.querySelector('.orch-ch-icon').textContent = '⏳';
+                try {
+                    const r = await fetch('/proxy_openclaw_agent_bind', {
+                        method: 'POST', headers: {'Content-Type': 'application/json'},
+                        body: JSON.stringify({ agent: agentName, channel, action }),
+                    });
+                    const res = await r.json();
+                    if (r.ok && res.ok) {
+                        const nowBound = !wasBound;
+                        btn.dataset.bound = String(nowBound);
+                        btn.querySelector('.orch-ch-icon').textContent = nowBound ? '🔗' : '⚪';
+                        btn.style.borderColor = nowBound ? '#86efac' : '#e5e7eb';
+                        btn.style.background = nowBound ? '#f0fdf4' : '#fff';
+                        btn.style.color = nowBound ? '#16a34a' : '#6b7280';
+                        orchToast(`${nowBound ? '🔗' : '⛓️‍💥'} ${agentName} ${action} ${channel}`);
+                    } else {
+                        orchToast('❌ ' + (res.error || 'Error'));
+                        btn.querySelector('.orch-ch-icon').textContent = wasBound ? '🔗' : '⚪';
+                    }
+                } catch(e) {
+                    orchToast('❌ ' + t('orch_toast_net_error'));
+                    btn.querySelector('.orch-ch-icon').textContent = wasBound ? '🔗' : '⚪';
+                }
+                btn.disabled = false;
+            });
+        });
+    } catch(e) {
+        contentEl.innerHTML = '<div style="color:#ef4444;padding:20px;text-align:center;font-size:11px;">❌ ' + t('orch_toast_net_error') + '</div>';
     }
 }
 

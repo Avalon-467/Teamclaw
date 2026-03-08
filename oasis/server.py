@@ -1243,6 +1243,122 @@ async def update_openclaw_agent_config(req: Request):
     return {"ok": True, "message": f"Agent '{agent_name}' config updated"}
 
 
+# ------------------------------------------------------------------
+# OpenClaw channels + agent bind
+# ------------------------------------------------------------------
+
+def _fetch_openclaw_channels() -> dict | None:
+    """Call ``openclaw channels list --json`` and return the parsed result."""
+    if not _OPENCLAW_BIN:
+        return None
+    try:
+        result = subprocess.run(
+            [_OPENCLAW_BIN, "channels", "list", "--json"],
+            capture_output=True, text=True, timeout=15,
+        )
+        if result.returncode != 0:
+            print(f"  [OASIS] ⚠️ openclaw channels list failed: {result.stderr.strip()[:200]}")
+            return None
+        raw = result.stdout
+        idx = raw.find('{')
+        if idx < 0:
+            return None
+        return json.loads(raw[idx:])
+    except (json.JSONDecodeError, subprocess.TimeoutExpired, Exception) as e:
+        print(f"  [OASIS] ⚠️ openclaw channels parse error: {e}")
+        return None
+
+
+@app.get("/sessions/openclaw/channels")
+async def list_openclaw_channels():
+    """Return all channels with their accounts, suitable for agent binding."""
+    data = _fetch_openclaw_channels()
+    if data is None:
+        return JSONResponse({"ok": False, "error": "Cannot read openclaw channels"}, status_code=500)
+
+    chat = data.get("chat", {})
+    # Build flat list: [{channel: "telegram:ops", type: "chat"}, ...]
+    channels = []
+    for channel_name, accounts in chat.items():
+        if isinstance(accounts, list):
+            for acc in accounts:
+                channels.append({"channel": channel_name, "account": acc, "bind_key": f"{channel_name}:{acc}" if acc != "default" else channel_name})
+        elif isinstance(accounts, str):
+            channels.append({"channel": channel_name, "account": accounts, "bind_key": f"{channel_name}:{accounts}" if accounts != "default" else channel_name})
+
+    return {"ok": True, "channels": channels, "raw": data}
+
+
+@app.get("/sessions/openclaw/agent-bindings")
+async def get_openclaw_agent_bindings(agent: str = Query(...)):
+    """Get current channel bindings for an agent via ``openclaw agents list --json`` or config."""
+    if not _OPENCLAW_BIN:
+        return JSONResponse({"ok": False, "error": "openclaw CLI not available"}, status_code=500)
+    # Try to get bindings from openclaw agents list --json
+    try:
+        result = subprocess.run(
+            [_OPENCLAW_BIN, "agents", "list", "--json"],
+            capture_output=True, text=True, timeout=15,
+        )
+        if result.returncode == 0:
+            raw = result.stdout
+            idx = raw.find('{')
+            if idx < 0:
+                idx = raw.find('[')
+            if idx >= 0:
+                data = json.loads(raw[idx:])
+                agents_list = data if isinstance(data, list) else data.get("agents", data.get("list", []))
+                for a in agents_list:
+                    aid = a.get("id", a.get("name", ""))
+                    if aid == agent:
+                        bindings = a.get("bindings", a.get("channels", []))
+                        if isinstance(bindings, list):
+                            return {"ok": True, "bindings": bindings}
+                        elif isinstance(bindings, dict):
+                            flat = []
+                            for ch, accs in bindings.items():
+                                if isinstance(accs, list):
+                                    for acc in accs:
+                                        flat.append(f"{ch}:{acc}" if acc != "default" else ch)
+                                else:
+                                    flat.append(f"{ch}:{accs}" if accs != "default" else ch)
+                            return {"ok": True, "bindings": flat}
+    except Exception as e:
+        print(f"  [OASIS] ⚠️ agent bindings parse error: {e}")
+    return {"ok": True, "bindings": []}
+
+
+@app.post("/sessions/openclaw/agent-bind")
+async def openclaw_agent_bind(req: Request):
+    """Bind or unbind a channel to an agent.
+
+    Body: { agent: str, channel: str, action: "bind" | "unbind" }
+    """
+    if not _OPENCLAW_BIN:
+        return JSONResponse({"ok": False, "error": "openclaw CLI not available"}, status_code=500)
+
+    body = await req.json()
+    agent_name = (body.get("agent") or "").strip()
+    channel = (body.get("channel") or "").strip()
+    action = (body.get("action") or "bind").strip()
+
+    if not agent_name or not channel:
+        return JSONResponse({"ok": False, "error": "agent and channel are required"}, status_code=400)
+
+    cmd_action = "bind" if action == "bind" else "unbind"
+    try:
+        result = subprocess.run(
+            [_OPENCLAW_BIN, "agents", cmd_action, "--agent", agent_name, "--bind", channel],
+            capture_output=True, text=True, timeout=15,
+        )
+        if result.returncode != 0:
+            err = result.stderr.strip() or result.stdout.strip()
+            return JSONResponse({"ok": False, "error": err[:500]}, status_code=500)
+        return {"ok": True, "message": f"Agent '{agent_name}' {cmd_action} '{channel}' success"}
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
+
 # --- System Info ---
 
 _TUNNEL_PIDFILE = os.path.join(_project_root, ".tunnel.pid")

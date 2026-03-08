@@ -532,6 +532,44 @@ def proxy_openclaw_update_config():
         return jsonify({"ok": False, "error": str(e)}), 500
 
 
+@app.route("/proxy_openclaw_channels", methods=["GET"])
+def proxy_openclaw_channels():
+    """Proxy to list all available channels."""
+    try:
+        r = requests.get(f"{OASIS_BASE_URL}/sessions/openclaw/channels", timeout=15)
+        return jsonify(r.json()), r.status_code
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
+@app.route("/proxy_openclaw_agent_bindings", methods=["GET"])
+def proxy_openclaw_agent_bindings():
+    """Proxy to get an agent's current channel bindings."""
+    try:
+        r = requests.get(
+            f"{OASIS_BASE_URL}/sessions/openclaw/agent-bindings",
+            params={"agent": request.args.get("agent", "")},
+            timeout=15,
+        )
+        return jsonify(r.json()), r.status_code
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
+@app.route("/proxy_openclaw_agent_bind", methods=["POST"])
+def proxy_openclaw_agent_bind():
+    """Proxy to bind/unbind a channel to an agent."""
+    try:
+        r = requests.post(
+            f"{OASIS_BASE_URL}/sessions/openclaw/agent-bind",
+            json=request.get_json(force=True),
+            timeout=15,
+        )
+        return jsonify(r.json()), r.status_code
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
 @app.route("/proxy_session_history", methods=["POST"])
 def proxy_session_history():
     """代理获取指定会话的历史消息"""
