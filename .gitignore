@@ -66,3 +66,5 @@ logs/
 
 # 重启信号文件
 .restart_flag
+
+.tunnel.pid
