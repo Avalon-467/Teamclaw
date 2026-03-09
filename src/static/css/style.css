@@ -400,13 +400,31 @@ header {
 .orch-btn.focus-active { background: #2563eb; color: white; border-color: #2563eb; }
 .orch-sidebar-header { padding: 10px 12px; border-bottom: 1px solid #e5e7eb; background: #f3f4f6; flex-shrink: 0; }
 .orch-sidebar-grid {
-    display: grid; grid-template-columns: 6fr 4fr; grid-template-rows: 1fr 1fr; gap: 4px; padding: 4px;
+    display: flex; flex-direction: column; gap: 0; padding: 4px;
     flex: 1; overflow: hidden; min-height: 0;
+}
+.orch-grid-row {
+    display: flex; flex: 1; min-height: 0; overflow: hidden;
 }
 .orch-sidebar-grid-cell {
     display: flex; flex-direction: column; border: 1px solid #e5e7eb;
     border-radius: 8px; background: #fff; overflow: hidden; min-height: 0;
+    flex: 1; min-width: 0;
 }
+/* 四宫格内列分割线 */
+.orch-grid-col-divider {
+    width: 4px; flex-shrink: 0; cursor: col-resize; background: #e5e7eb;
+    transition: background 0.15s; margin: 0 1px;
+}
+.orch-grid-col-divider:hover { background: #3b82f6; }
+.orch-grid-col-divider.dragging { background: #2563eb; }
+/* 四宫格内行分割线 */
+.orch-grid-row-divider {
+    height: 4px; flex-shrink: 0; cursor: row-resize; background: #e5e7eb;
+    transition: background 0.15s; margin: 1px 0;
+}
+.orch-grid-row-divider:hover { background: #3b82f6; }
+.orch-grid-row-divider.dragging { background: #2563eb; }
 .orch-sidebar-grid-cell-header {
     padding: 4px 6px; font-size: 10px; font-weight: 600; color: #6b7280;
     letter-spacing: 0.3px; background: #f9fafb; border-bottom: 1px solid #f0f0f0;
@@ -808,7 +826,7 @@ header {
         padding-bottom: var(--safe-bottom);
     }
     /* OASIS: overlay mode on mobile */
-    .oasis-divider, .session-divider, .orch-divider { display: none !important; }
+    .oasis-divider, .session-divider, .orch-divider, .orch-grid-col-divider, .orch-grid-row-divider { display: none !important; }
     .oasis-panel {
         position: fixed !important; top: 0; left: 0; right: 0; bottom: 0;
         width: 100% !important; min-width: 100% !important;

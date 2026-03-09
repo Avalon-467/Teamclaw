@@ -300,39 +300,51 @@
                         </div>
                     </div>
                     <div class="orch-sidebar-grid">
-                        <!-- Top-left: All experts by categories -->
-                        <div class="orch-sidebar-grid-cell">
-                            <div class="orch-sidebar-grid-cell-header">
-                                <span data-i18n="orch_preset_experts">📚 预设专家</span>
+                        <!-- 上行 -->
+                        <div class="orch-grid-row" id="orch-grid-row-top">
+                            <!-- Top-left: All experts by categories -->
+                            <div class="orch-sidebar-grid-cell" id="orch-cell-tl">
+                                <div class="orch-sidebar-grid-cell-header">
+                                    <span data-i18n="orch_preset_experts">📚 预设专家</span>
+                                </div>
+                                <div id="orch-agency-categories" class="orch-agency-categories"></div>
                             </div>
-                            <div id="orch-agency-categories" class="orch-agency-categories"></div>
+                            <!-- 列 Divider -->
+                            <div class="orch-grid-col-divider" id="orch-grid-col-divider-top"></div>
+                            <!-- Top-right: Custom experts -->
+                            <div class="orch-sidebar-grid-cell" id="orch-cell-tr">
+                                <div class="orch-sidebar-grid-cell-header">
+                                    <span data-i18n="orch_custom_experts">🛠️ 自定义专家</span>
+                                    <button onclick="orchShowAddExpertModal()" data-i18n-title="orch_add_expert_btn" title="添加自定义专家">➕</button>
+                                </div>
+                                <div class="orch-expert-list" id="orch-expert-list-custom"></div>
+                            </div>
                         </div>
-                        <!-- Top-right: Custom experts -->
-                        <div class="orch-sidebar-grid-cell">
-                            <div class="orch-sidebar-grid-cell-header">
-                                <span data-i18n="orch_custom_experts">🛠️ 自定义专家</span>
-                <button onclick="orchShowAddExpertModal()" data-i18n-title="orch_add_expert_btn" title="添加自定义专家">➕</button>
+                        <!-- 行 Divider -->
+                        <div class="orch-grid-row-divider" id="orch-grid-row-divider"></div>
+                        <!-- 下行 -->
+                        <div class="orch-grid-row" id="orch-grid-row-bottom">
+                            <!-- Bottom-left: Session agents -->
+                            <div class="orch-sidebar-grid-cell" id="orch-cell-bl">
+                                <div class="orch-sidebar-grid-cell-header">
+                                    <span data-i18n="orch_session_agents">💬 Session Agent</span>
+                                    <button onclick="orchLoadSessionAgents()" data-i18n-title="refresh" title="刷新">🔄</button>
+                                </div>
+                                <div class="orch-expert-list" id="orch-expert-list-sessions"></div>
                             </div>
-                            <div class="orch-expert-list" id="orch-expert-list-custom"></div>
-                        </div>
-                        <!-- Bottom-left: Session agents -->
-                        <div class="orch-sidebar-grid-cell">
-                            <div class="orch-sidebar-grid-cell-header">
-                                <span data-i18n="orch_session_agents">💬 Session Agent</span>
-                                <button onclick="orchLoadSessionAgents()" data-i18n-title="refresh" title="刷新">🔄</button>
+                            <!-- 列 Divider -->
+                            <div class="orch-grid-col-divider" id="orch-grid-col-divider-bottom"></div>
+                            <!-- Bottom-right: OpenClaw sessions -->
+                            <div class="orch-sidebar-grid-cell" id="orch-cell-br">
+                                <div class="orch-sidebar-grid-cell-header">
+                                    <span data-i18n="orch_openclaw_sessions">🦞 OpenClaw</span>
+                                    <span style="display:flex;gap:2px;">
+                                        <button onclick="orchShowAddOpenClawModal()" data-i18n-title="orch_add_openclaw_title" title="新建Agent" style="color:#10b981;">➕</button>
+                                        <button onclick="orchLoadOpenClawSessions()" data-i18n-title="refresh" title="刷新">🔄</button>
+                                    </span>
+                                </div>
+                                <div class="orch-expert-list" id="orch-expert-list-openclaw"></div>
                             </div>
-                            <div class="orch-expert-list" id="orch-expert-list-sessions"></div>
-                        </div>
-                        <!-- Bottom-right: OpenClaw sessions -->
-                        <div class="orch-sidebar-grid-cell">
-                            <div class="orch-sidebar-grid-cell-header">
-<span data-i18n="orch_openclaw_sessions">🦞 OpenClaw</span>
-                                <span style="display:flex;gap:2px;">
-                                    <button onclick="orchShowAddOpenClawModal()" data-i18n-title="orch_add_openclaw_title" title="新建Agent" style="color:#10b981;">➕</button>
-                                    <button onclick="orchLoadOpenClawSessions()" data-i18n-title="refresh" title="刷新">🔄</button>
-                                </span>
-                            </div>
-                            <div class="orch-expert-list" id="orch-expert-list-openclaw"></div>
                         </div>
                     </div>
                     <div style="padding:4px 10px;font-size:10px;color:#9ca3af;border-top:1px solid #e5e7eb;flex-shrink:0;">

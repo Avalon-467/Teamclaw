@@ -264,4 +264,113 @@ if (inputEl && isTouchDevice) {
             document.removeEventListener('touchend', onUp);
         }
     });
+
+    // ============================================
+    // 四宫格内部行/列 divider 拖动逻辑
+    // ============================================
+
+    // 列 divider：调整同行内左右两个 cell 的宽度比
+    function initColDivider(dividerId) {
+        const divEl = document.getElementById(dividerId);
+        if (!divEl) return;
+        let startX = 0, leftCell = null, rightCell = null, startLeftW = 0, startRightW = 0;
+
+        divEl.addEventListener('mousedown', onDown);
+        divEl.addEventListener('touchstart', onDown, { passive: false });
+
+        function onDown(e) {
+            if (window.innerWidth <= 768) return;
+            e.preventDefault();
+            leftCell = divEl.previousElementSibling;
+            rightCell = divEl.nextElementSibling;
+            if (!leftCell || !rightCell) return;
+            startX = e.type === 'touchstart' ? e.touches[0].clientX : e.clientX;
+            startLeftW = leftCell.getBoundingClientRect().width;
+            startRightW = rightCell.getBoundingClientRect().width;
+            leftCell.style.transition = 'none';
+            rightCell.style.transition = 'none';
+            divEl.classList.add('dragging');
+            document.body.style.cursor = 'col-resize';
+            document.body.style.userSelect = 'none';
+            document.addEventListener('mousemove', onMove);
+            document.addEventListener('mouseup', onUp);
+            document.addEventListener('touchmove', onMove, { passive: false });
+            document.addEventListener('touchend', onUp);
+        }
+        function onMove(e) {
+            const clientX = e.type === 'touchmove' ? e.touches[0].clientX : e.clientX;
+            const dx = clientX - startX;
+            const totalW = startLeftW + startRightW;
+            let newLeft = Math.max(80, Math.min(totalW - 80, startLeftW + dx));
+            let newRight = totalW - newLeft;
+            leftCell.style.flex = '0 0 ' + newLeft + 'px';
+            rightCell.style.flex = '0 0 ' + newRight + 'px';
+        }
+        function onUp() {
+            divEl.classList.remove('dragging');
+            document.body.style.cursor = '';
+            document.body.style.userSelect = '';
+            if (leftCell) leftCell.style.transition = '';
+            if (rightCell) rightCell.style.transition = '';
+            document.removeEventListener('mousemove', onMove);
+            document.removeEventListener('mouseup', onUp);
+            document.removeEventListener('touchmove', onMove);
+            document.removeEventListener('touchend', onUp);
+        }
+    }
+
+    // 行 divider：调整上下两行的高度比
+    function initRowDivider(dividerId) {
+        const divEl = document.getElementById(dividerId);
+        if (!divEl) return;
+        let startY = 0, topRow = null, bottomRow = null, startTopH = 0, startBottomH = 0;
+
+        divEl.addEventListener('mousedown', onDown);
+        divEl.addEventListener('touchstart', onDown, { passive: false });
+
+        function onDown(e) {
+            if (window.innerWidth <= 768) return;
+            e.preventDefault();
+            topRow = divEl.previousElementSibling;
+            bottomRow = divEl.nextElementSibling;
+            if (!topRow || !bottomRow) return;
+            startY = e.type === 'touchstart' ? e.touches[0].clientY : e.clientY;
+            startTopH = topRow.getBoundingClientRect().height;
+            startBottomH = bottomRow.getBoundingClientRect().height;
+            topRow.style.transition = 'none';
+            bottomRow.style.transition = 'none';
+            divEl.classList.add('dragging');
+            document.body.style.cursor = 'row-resize';
+            document.body.style.userSelect = 'none';
+            document.addEventListener('mousemove', onMove);
+            document.addEventListener('mouseup', onUp);
+            document.addEventListener('touchmove', onMove, { passive: false });
+            document.addEventListener('touchend', onUp);
+        }
+        function onMove(e) {
+            const clientY = e.type === 'touchmove' ? e.touches[0].clientY : e.clientY;
+            const dy = clientY - startY;
+            const totalH = startTopH + startBottomH;
+            let newTop = Math.max(60, Math.min(totalH - 60, startTopH + dy));
+            let newBottom = totalH - newTop;
+            topRow.style.flex = '0 0 ' + newTop + 'px';
+            bottomRow.style.flex = '0 0 ' + newBottom + 'px';
+        }
+        function onUp() {
+            divEl.classList.remove('dragging');
+            document.body.style.cursor = '';
+            document.body.style.userSelect = '';
+            if (topRow) topRow.style.transition = '';
+            if (bottomRow) bottomRow.style.transition = '';
+            document.removeEventListener('mousemove', onMove);
+            document.removeEventListener('mouseup', onUp);
+            document.removeEventListener('touchmove', onMove);
+            document.removeEventListener('touchend', onUp);
+        }
+    }
+
+    // 初始化四宫格内部 divider
+    initColDivider('orch-grid-col-divider-top');
+    initColDivider('orch-grid-col-divider-bottom');
+    initRowDivider('orch-grid-row-divider');
 })();
