@@ -287,6 +287,9 @@ def layout_to_yaml(data: dict) -> str:
     def _make_expert_step(node):
         """Build a plan step dict for an expert/external node."""
         step = {"expert": _node_yaml_name(node, use_bot_session)}
+        # Include instruction if node has content
+        if node.get("content"):
+            step["instruction"] = node["content"]
         if node.get("type") == "external":
             for _ek in ("api_url", "api_key", "model"):
                 if node.get(_ek):
@@ -312,10 +315,8 @@ def layout_to_yaml(data: dict) -> str:
                 if nid not in node_map:
                     continue
                 mn = node_map[nid]
-                if mn.get("type") == "external":
-                    par_items.append(_make_expert_step(mn))
-                else:
-                    par_items.append(_node_yaml_name(mn, use_bot_session))
+                # Always use dict format to carry instruction
+                par_items.append(_make_expert_step(mn))
             if par_items:
                 plan.append({"parallel": par_items})
         elif group_type == "manual":
@@ -406,10 +407,8 @@ def layout_to_yaml(data: dict) -> str:
                     # Circular arrangement → parallel (brainstorm)
                     par_items = []
                     for cn in cluster:
-                        if cn.get("type") == "external":
-                            par_items.append(_make_expert_step(cn))
-                        else:
-                            par_items.append(_node_yaml_name(cn, use_bot_session))
+                        # Always use dict format to carry instruction
+                        par_items.append(_make_expert_step(cn))
                     plan.append({"parallel": par_items})
                 else:
                     # Linear/scattered cluster → sort by x-coordinate for left-to-right order

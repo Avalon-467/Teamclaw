@@ -512,7 +512,7 @@ class DiscussionEngine:
             if agents:
                 instr = step.instructions.get(step.expert_names[0], "")
                 print(f"  [OASIS] 🎤 {agents[0].name} speaks" + (f" (instruction: {instr[:40]}...)" if instr else ""))
-                self.forum.log_event("agent_call", agent=agents[0].name)
+                self.forum.log_event("agent_call", agent=agents[0].name, detail=instr[:80] if instr else "")
                 await agents[0].participate(self.forum, instruction=instr, discussion=disc, **vis)
                 self.forum.log_event("agent_done", agent=agents[0].name)
 
@@ -521,15 +521,16 @@ class DiscussionEngine:
             if agents:
                 names = ", ".join(a.name for a in agents)
                 print(f"  [OASIS] 🎤 Parallel: {names}")
-                for agent in agents:
-                    self.forum.log_event("agent_call", agent=agent.name)
+                for agent, yaml_name in zip(agents, step.expert_names):
+                    par_instr = step.instructions.get(yaml_name, "")
+                    self.forum.log_event("agent_call", agent=agent.name, detail=par_instr[:80] if par_instr else "")
 
                 async def _run_with_instr(agent, yaml_name):
                     instr = step.instructions.get(yaml_name, "")
                     try:
                         await agent.participate(self.forum, instruction=instr, discussion=disc, **vis)
                     finally:
-                        self.forum.log_event("agent_done", agent=agent.name)
+                        self.forum.log_event("agent_done", agent=agent.name, detail=instr[:80] if instr else "")
 
                 await asyncio.gather(
                     *[_run_with_instr(a, n) for a, n in zip(agents, step.expert_names)],

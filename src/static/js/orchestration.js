@@ -1045,9 +1045,10 @@ function orchRenderNode(node) {
     } else {
         tagLine = `<div class="orch-node-tag">${escapeHtml(node.tag)}</div>`;
     }
+    const instrPreview = (node.type !== 'manual' && node.content) ? `<div class="orch-node-instr" title="${escapeHtml(node.content)}" style="font-size:9px;color:#6b7280;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:120px;margin-top:1px;">📋 ${escapeHtml(node.content.length > 20 ? node.content.slice(0,20)+'…' : node.content)}</div>` : '';
     el.innerHTML = `
         <span class="orch-node-emoji">${node.emoji}</span>
-        <div style="min-width:0;flex:1;"><div class="orch-node-name" style="display:flex;align-items:center;">${escapeHtml(node.name)}${instBadge}</div>${tagLine}</div>
+        <div style="min-width:0;flex:1;"><div class="orch-node-name" style="display:flex;align-items:center;">${escapeHtml(node.name)}${instBadge}</div>${tagLine}${instrPreview}</div>
         <div class="orch-node-del" title="${t('orch_node_remove')}">×</div>
         <div class="orch-port port-in" data-node="${node.id}" data-dir="in"></div>
         <div class="orch-port port-out" data-node="${node.id}" data-dir="out"></div>
@@ -1092,7 +1093,7 @@ function orchRenderNode(node) {
         if (!orch.selectedNodes.has(node.id)) { orchClearSelection(); orchSelectNode(node.id); }
         orchShowContextMenu(e.clientX, e.clientY, node);
     });
-    el.addEventListener('dblclick', () => { if (node.type === 'manual') orchShowManualModal(node); else if (node.type === 'external') orchShowExternalModal(node); });
+    el.addEventListener('dblclick', () => { if (node.type === 'manual') orchShowManualModal(node); else if (node.type === 'external') orchShowExternalModal(node); else orchShowInstructionModal(node); });
     area.appendChild(el);
 }
 
@@ -1578,6 +1579,38 @@ function orchSaveManual(nodeId) {
         node.content = document.getElementById('orch-man-content').value;
     }
     document.getElementById('orch-manual-modal')?.remove();
+    orchUpdateYaml();
+}
+
+// ── Instruction Edit Modal (for expert/session nodes) ──
+function orchShowInstructionModal(node) {
+    const overlay = document.createElement('div');
+    overlay.className = 'orch-modal-overlay';
+    overlay.id = 'orch-instruction-modal';
+    overlay.innerHTML = `<div class="orch-modal">
+        <h3>📋 ${escapeHtml(node.name)} — Instruction</h3>
+        <p style="font-size:11px;color:#6b7280;margin-bottom:8px;">Set a specific instruction for this expert in this step. The expert will focus on this instruction when participating.</p>
+        <textarea id="orch-instr-content" placeholder="e.g. Please focus on analyzing technical risks..." style="min-height:80px;">${escapeHtml(node.content||'')}</textarea>
+        <div class="orch-modal-btns">
+            <button onclick="document.getElementById('orch-instruction-modal').remove()">${t('orch_modal_cancel')}</button>
+            <button class="primary" onclick="orchSaveInstruction('${node.id}')">${t('orch_modal_save')}</button>
+        </div>
+    </div>`;
+    document.body.appendChild(overlay);
+    overlay.addEventListener('click', e => { if (e.target === overlay) overlay.remove(); });
+    setTimeout(() => { const ta = document.getElementById('orch-instr-content'); if (ta) ta.focus(); }, 100);
+}
+function orchSaveInstruction(nodeId) {
+    const node = orch.nodes.find(n=>n.id===nodeId);
+    if (node) {
+        node.content = document.getElementById('orch-instr-content').value;
+        // Re-render node to update instruction preview
+        const el = document.getElementById('onode-' + nodeId);
+        if (el) el.remove();
+        orchRenderNode(node);
+        orchRenderEdges();
+    }
+    document.getElementById('orch-instruction-modal')?.remove();
     orchUpdateYaml();
 }
 

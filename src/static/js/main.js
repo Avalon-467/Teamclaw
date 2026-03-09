@@ -3010,7 +3010,7 @@ function renderPosts(posts, timeline, isDiscussion) {
     box.innerHTML = items.map(item => {
         if (item.type === 'event') {
             const ev = item.data;
-            const evIcons = {start:'🚀', round:'📢', agent_call:'⏳', conclude:'🏁', manual_post:'📝'};
+            const evIcons = {start:'🚀', round:'📢', agent_call:'⏳', agent_done:'✅', conclude:'🏁', manual_post:'📝', if_branch:'🔀'};
             const icon = evIcons[ev.event] || '⏱';
             const label = ev.agent ? ev.agent + (ev.detail ? ' · ' + ev.detail : '') : (ev.detail || ev.event);
             return `
