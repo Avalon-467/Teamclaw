@@ -907,6 +907,23 @@ header {
 .workflow-tag .wf-remove { cursor: pointer; margin-left: 2px; font-size: 10px; color: #a78bfa; }
 .workflow-tag .wf-remove:hover { color: #dc2626; }
 #workflow-preview-area { display: none; flex-wrap: wrap; gap: 4px; padding: 4px 0; }
+/* Persona add button */
+.persona-add-btn { cursor: pointer; color: #0e7490; transition: all 0.2s; flex-shrink: 0; display: flex; align-items: center; justify-content: center; gap: 4px; padding: 0 12px; height: 42px; border-radius: 10px; border: 1px solid #a5f3fc; background: linear-gradient(135deg, #ecfeff, #cffafe); font-weight: 700; }
+.persona-add-btn .persona-icon { font-size: 18px; line-height: 1; }
+.persona-add-btn .persona-label { font-size: 13px; font-weight: 700; color: #0e7490; line-height: 1; }
+.persona-add-btn:hover { color: #0891b2; border-color: #67e8f9; background: linear-gradient(135deg, #cffafe, #a5f3fc); box-shadow: 0 2px 8px rgba(14,116,144,0.2); }
+.persona-add-btn.active { border-color: #06b6d4; background: linear-gradient(135deg, #a5f3fc, #67e8f9); box-shadow: 0 0 0 2px rgba(6,182,212,0.3); }
+@media (max-width: 768px) { .persona-add-btn { height: 36px; padding: 0 8px; } .persona-add-btn .persona-icon { font-size: 16px; } .persona-add-btn .persona-label { font-size: 11px; } }
+/* Persona preview tag */
+.persona-tag { display: inline-flex; align-items: center; gap: 4px; padding: 3px 10px; border-radius: 8px; background: #ecfeff; border: 1px solid #a5f3fc; font-size: 12px; color: #0e7490; font-weight: 600; }
+.persona-tag .persona-remove { cursor: pointer; margin-left: 2px; font-size: 10px; color: #67e8f9; }
+.persona-tag .persona-remove:hover { color: #dc2626; }
+#persona-preview-area { display: none; flex-wrap: wrap; gap: 4px; padding: 4px 0; }
+/* Persona popup expert item */
+.persona-expert-item { padding: 10px 12px; border-radius: 8px; cursor: pointer; border: 2px solid transparent; margin-bottom: 4px; transition: all 0.15s; }
+.persona-expert-item:hover { background: #f0f9ff; }
+.persona-expert-item.selected { background: #ecfeff; border-color: #67e8f9; }
+.persona-expert-group { font-size: 11px; font-weight: 700; color: #6b7280; padding: 6px 12px; text-transform: uppercase; letter-spacing: 0.5px; }
 .audio-record-btn { cursor: pointer; color: #6b7280; transition: all 0.2s; flex-shrink: 0; display: flex; align-items: center; justify-content: center; width: 42px; height: 42px; border-radius: 10px; border: 1px solid #e5e7eb; background: #f9fafb; font-size: 18px; }
 .audio-record-btn:hover { color: #dc2626; border-color: #fecaca; background: #fef2f2; }
 .audio-record-btn.recording { color: #fff; background: #dc2626; border-color: #dc2626; animation: pulse-red 1.2s infinite; }

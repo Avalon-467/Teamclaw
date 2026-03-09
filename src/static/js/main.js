@@ -349,6 +349,18 @@ orch_openclaw_sessions: '🦞 OpenClaw',
         wf_confirm: '添加',
         wf_context_prefix: '[工作流: {name}] ',
 
+        // Persona
+        persona_btn_title: '引入专家人设',
+        persona_btn_label: '+ 人设',
+        persona_popup_title: '🎭 选择专家人设',
+        persona_no_experts: '暂无可用专家',
+        persona_cancel: '取消',
+        persona_confirm: '使用',
+        persona_active: '当前人设',
+        persona_public: '📋 公共专家',
+        persona_agency: '🌐 Agency 专家',
+        persona_custom: '🔧 自定义专家',
+
         // 其他
         splash_subtitle: 'TeamBot AI Agent',
         secure_footer: 'Secured by Nginx Reverse Proxy & SSH Tunnel',
@@ -750,6 +762,18 @@ orch_openclaw_sessions: '🦞 OpenClaw',
         wf_cancel: 'Cancel',
         wf_confirm: 'Add',
         wf_context_prefix: '[Workflow: {name}] ',
+
+        // Persona
+        persona_btn_title: 'Use Expert Persona',
+        persona_btn_label: '+ Persona',
+        persona_popup_title: '🎭 Select Expert Persona',
+        persona_no_experts: 'No experts available',
+        persona_cancel: 'Cancel',
+        persona_confirm: 'Use',
+        persona_active: 'Active Persona',
+        persona_public: '📋 Public Experts',
+        persona_agency: '🌐 Agency Experts',
+        persona_custom: '🔧 Custom Experts',
 
         // Others
         splash_subtitle: 'TeamBot AI Agent',
@@ -1526,6 +1550,7 @@ async function switchToSession(sessionId, force = false) {
     setSystemBusyUI(false);
     currentSessionId = sessionId;
     cancelTargetSessionId = null;  // 重置终止目标
+    personaInjectedSession = null;  // Reset persona injection flag for new session
     sessionStorage.setItem('sessionId', sessionId);
     updateSessionDisplay();
     closeSessionSidebar();
@@ -2447,9 +2472,16 @@ async function handleSend() {
         }
 
         // --- 构造 OpenAI /v1/chat/completions 请求 ---
+        const messages = [];
+        // Inject expert persona as system message only on the first message in this session
+        if (selectedPersona && selectedPersona.persona && personaInjectedSession !== currentSessionId) {
+            messages.push({ role: 'system', content: `[Expert Persona: ${selectedPersona.name}]\n${selectedPersona.persona}` });
+            personaInjectedSession = currentSessionId;
+        }
+        messages.push({ role: 'user', content: msgContent });
         const openaiPayload = {
             model: 'mini-timebot',
-            messages: [{ role: 'user', content: msgContent }],
+            messages: messages,
             stream: true,
             session_id: currentSessionId,
             enabled_tools: getEnabledTools(),
@@ -2726,6 +2758,158 @@ async function addWorkflowToContext(name) {
     pendingWorkflows.push({ name, yaml: yamlText });
     renderWorkflowPreviews();
     inputField.focus();
+}
+
+// ================================================================
+// ===== Persona (Expert Persona) 功能 =====
+// ================================================================
+let selectedPersona = null;  // { name, tag, persona, source }
+let personaInjectedSession = null;  // session ID where persona was already injected (avoid repeated prompt)
+
+function renderPersonaPreview() {
+    const area = document.getElementById('persona-preview-area');
+    const btn = document.getElementById('persona-add-btn');
+    if (!selectedPersona) {
+        area.style.display = 'none';
+        if (btn) btn.classList.remove('active');
+        return;
+    }
+    area.style.display = 'flex';
+    if (btn) btn.classList.add('active');
+    const preview = selectedPersona.persona.length > 60 ? selectedPersona.persona.slice(0, 60) + '…' : selectedPersona.persona;
+    area.innerHTML = `<span class="persona-tag" title="${escapeHtml(selectedPersona.persona)}">🎭 ${escapeHtml(selectedPersona.name)}: ${escapeHtml(preview)}<span class="persona-remove" onclick="clearPersona()">&times;</span></span>`;
+}
+
+function clearPersona() {
+    selectedPersona = null;
+    personaInjectedSession = null;
+    renderPersonaPreview();
+}
+
+async function showPersonaPopup() {
+    try {
+        const r = await fetch('/proxy_oasis/experts', {
+            headers: { 'Authorization': 'Bearer ' + getAuthToken() }
+        });
+        const data = await r.json();
+        const experts = data.experts || [];
+        if (!experts.length) { alert(t('persona_no_experts')); return; }
+
+        const publicExperts = experts.filter(e => e.source === 'public');
+        const agencyExperts = experts.filter(e => e.source === 'agency');
+        const customExperts = experts.filter(e => e.source === 'custom');
+
+        const overlay = document.createElement('div');
+        overlay.className = 'orch-modal-overlay';
+        overlay.id = 'persona-popup-overlay';
+        overlay.innerHTML = `
+            <div class="orch-modal" style="min-width:360px;max-width:480px;">
+                <h3>${t('persona_popup_title')}</h3>
+                <div id="persona-search-box" style="margin-bottom:8px;">
+                    <input type="text" id="persona-search-input" placeholder="🔍 Search..." style="width:100%;padding:6px 10px;border:1px solid #d1d5db;border-radius:8px;font-size:12px;outline:none;" />
+                </div>
+                <div id="persona-select-list" style="max-height:360px;overflow-y:auto;"></div>
+                <div class="orch-modal-btns">
+                    <button id="persona-cancel-btn" style="padding:6px 14px;border-radius:6px;border:1px solid #d1d5db;background:white;color:#374151;cursor:pointer;font-size:12px;">${t('persona_cancel')}</button>
+                    <button id="persona-confirm-btn" disabled style="padding:6px 14px;border-radius:6px;border:none;background:#0891b2;color:white;cursor:pointer;font-size:12px;opacity:0.5;">${t('persona_confirm')}</button>
+                </div>
+            </div>
+        `;
+        document.body.appendChild(overlay);
+
+        let chosen = null;
+        overlay.querySelector('#persona-cancel-btn').addEventListener('click', () => overlay.remove());
+        overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.remove(); });
+
+        const listEl = overlay.querySelector('#persona-select-list');
+
+        function renderExpertList(filteredExperts) {
+            listEl.innerHTML = '';
+            const groups = [];
+            const pub = filteredExperts.filter(e => e.source === 'public');
+            const agn = filteredExperts.filter(e => e.source === 'agency');
+            const cus = filteredExperts.filter(e => e.source === 'custom');
+            if (pub.length) groups.push({ label: t('persona_public'), items: pub });
+            if (agn.length) groups.push({ label: t('persona_agency'), items: agn });
+            if (cus.length) groups.push({ label: t('persona_custom'), items: cus });
+
+            for (const group of groups) {
+                const header = document.createElement('div');
+                header.className = 'persona-expert-group';
+                header.textContent = `${group.label} (${group.items.length})`;
+                listEl.appendChild(header);
+
+                for (const expert of group.items) {
+                    const item = document.createElement('div');
+                    item.className = 'persona-expert-item';
+                    if (chosen && chosen.tag === expert.tag) {
+                        item.classList.add('selected');
+                    }
+                    const personaPreview = expert.persona.length > 80 ? expert.persona.slice(0, 80) + '…' : expert.persona;
+                    const desc = expert.description ? `<div style="font-size:10px;color:#9ca3af;margin-top:1px;">${escapeHtml(expert.description)}</div>` : '';
+                    item.innerHTML = `
+                        <div style="display:flex;align-items:center;gap:8px;">
+                            <span style="font-size:16px;">🎭</span>
+                            <div style="flex:1;min-width:0;">
+                                <div style="font-size:13px;color:#374151;font-weight:600;">${escapeHtml(expert.name)} <span style="font-size:10px;color:#9ca3af;font-weight:400;">${escapeHtml(expert.tag)}</span></div>
+                                <div style="font-size:11px;color:#6b7280;margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escapeHtml(personaPreview)}</div>
+                                ${desc}
+                            </div>
+                        </div>
+                    `;
+                    item.addEventListener('click', () => {
+                        listEl.querySelectorAll('.persona-expert-item').forEach(el => el.classList.remove('selected'));
+                        item.classList.add('selected');
+                        chosen = expert;
+                        const btn = overlay.querySelector('#persona-confirm-btn');
+                        btn.disabled = false;
+                        btn.style.opacity = '1';
+                    });
+                    item.addEventListener('dblclick', () => {
+                        chosen = expert;
+                        selectedPersona = { name: chosen.name, tag: chosen.tag, persona: chosen.persona, source: chosen.source };
+                        personaInjectedSession = null;  // Reset so persona is injected in next send
+                        renderPersonaPreview();
+                        overlay.remove();
+                    });
+                    listEl.appendChild(item);
+                }
+            }
+
+            if (!filteredExperts.length) {
+                listEl.innerHTML = '<div style="text-align:center;color:#9ca3af;padding:20px;font-size:12px;">No matching experts</div>';
+            }
+        }
+
+        renderExpertList(experts);
+
+        // Search filter
+        const searchInput = overlay.querySelector('#persona-search-input');
+        searchInput.addEventListener('input', () => {
+            const q = searchInput.value.trim().toLowerCase();
+            if (!q) { renderExpertList(experts); return; }
+            const filtered = experts.filter(e =>
+                e.name.toLowerCase().includes(q) ||
+                e.tag.toLowerCase().includes(q) ||
+                (e.persona || '').toLowerCase().includes(q) ||
+                (e.description || '').toLowerCase().includes(q) ||
+                (e.category || '').toLowerCase().includes(q)
+            );
+            renderExpertList(filtered);
+        });
+        setTimeout(() => searchInput.focus(), 100);
+
+        overlay.querySelector('#persona-confirm-btn').addEventListener('click', () => {
+            if (chosen) {
+                selectedPersona = { name: chosen.name, tag: chosen.tag, persona: chosen.persona, source: chosen.source };
+                personaInjectedSession = null;  // Reset so persona is injected in next send
+                renderPersonaPreview();
+                overlay.remove();
+            }
+        });
+    } catch(e) {
+        console.error('Failed to load experts:', e);
+    }
 }
 
 // ================================================================

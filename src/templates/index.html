@@ -183,6 +183,7 @@
                 <div id="file-preview-area" class="image-preview-area" style="display:none;"></div>
                 <div id="audio-preview-area" class="image-preview-area" style="display:none;"></div>
                 <div id="workflow-preview-area"></div>
+                <div id="persona-preview-area"></div>
                 <div class="flex items-end space-x-2 sm:space-x-3">
                     <label class="image-upload-btn" title="上传图片/文件/音频">
                         📎
@@ -190,6 +191,7 @@
                     </label>
                     <button id="record-btn" class="audio-record-btn" data-i18n-title="recording_title" title="录音" onclick="toggleRecording()">🎤</button>
                     <button id="workflow-add-btn" class="workflow-add-btn" data-i18n-title="wf_btn_title" title="添加工作流" onclick="showWorkflowPopup()"><span class="wf-icon">📋</span><span class="wf-label" data-i18n="wf_btn_label">+ 工作流</span></button>
+                    <button id="persona-add-btn" class="persona-add-btn" data-i18n-title="persona_btn_title" title="引入专家人设" onclick="showPersonaPopup()"><span class="persona-icon">🎭</span><span class="persona-label" data-i18n="persona_btn_label">+ 人设</span></button>
                     <div class="flex-grow">
                         <textarea id="user-input" rows="1" 
                             class="w-full p-2 sm:p-3 border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none transition-all text-sm sm:text-base"
