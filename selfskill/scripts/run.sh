@@ -39,9 +39,26 @@ case "${1:-help}" in
             exit 1
         fi
 
-        if [ -f "$PIDFILE" ] && kill -0 "$(cat "$PIDFILE")" 2>/dev/null; then
-            echo "⚠️  Mini TimeBot 已在运行 (PID: $(cat "$PIDFILE"))"
-            exit 0
+        # 先停止旧实例（复用 stop 逻辑）
+        if [ -f "$PIDFILE" ]; then
+            OLD_PID=$(cat "$PIDFILE")
+            if kill -0 "$OLD_PID" 2>/dev/null; then
+                echo "🧹 发现旧实例 (PID: $OLD_PID)，先停止..."
+                kill "$OLD_PID"
+                for i in $(seq 1 30); do
+                    if ! kill -0 "$OLD_PID" 2>/dev/null; then
+                        break
+                    fi
+                    sleep 0.5
+                done
+                if kill -0 "$OLD_PID" 2>/dev/null; then
+                    echo "⚠️  强制终止..."
+                    kill -9 "$OLD_PID" 2>/dev/null || true
+                    sleep 1
+                fi
+                echo "✅ 旧实例已停止"
+            fi
+            rm -f "$PIDFILE"
         fi
 
         echo "🚀 启动 Mini TimeBot (headless)..."
