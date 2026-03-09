@@ -212,7 +212,7 @@ def parse_schedule(yaml_content: str) -> Schedule:
             ext_configs = {}
             if "instruction" in item:
                 instr_map[expert_name] = str(item["instruction"])
-            if "api_url" in item or "headers" in item:
+            if "api_url" in item or "headers" in item or "model" in item:
                 ext_configs[expert_name] = _extract_external_config(item)
             steps.append(ScheduleStep(
                 step_type=StepType.EXPERT,
@@ -233,7 +233,7 @@ def parse_schedule(yaml_content: str) -> Schedule:
                     names.append(ename)
                     if "instruction" in sub:
                         instr_map[ename] = str(sub["instruction"])
-                    if "api_url" in sub or "headers" in sub:
+                    if "api_url" in sub or "headers" in sub or "model" in sub:
                         ext_configs[ename] = _extract_external_config(sub)
                 elif isinstance(sub, str):
                     names.append(sub)
