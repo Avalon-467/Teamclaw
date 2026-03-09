@@ -334,14 +334,43 @@ def _format_posts(posts) -> str:
 
 
 def _parse_expert_response(raw: str):
-    """Strip markdown fences and parse JSON. Returns dict or None."""
+    """Strip markdown fences / oasis reply tags and parse JSON.
+
+    Tries multiple strategies to extract valid JSON:
+      1. Strip markdown code fences (```...```)
+      2. Strip [oasis reply start/end] tags
+      3. Direct json.loads
+      4. Regex extraction of first {...} object from the text
+    Raises json.JSONDecodeError if all strategies fail.
+    """
     raw = raw.strip()
+    # Strip markdown code fences
     if raw.startswith("```"):
         raw = raw.split("\n", 1)[-1]
     if raw.endswith("```"):
         raw = raw.rsplit("```", 1)[0]
     raw = raw.strip()
-    return json.loads(raw)
+
+    # Strip [oasis reply start/end] tags (flexible matching)
+    raw = re.sub(r"\[/?oasis\s+reply\s+/?start\]", "", raw, flags=re.IGNORECASE).strip()
+    raw = re.sub(r"\[/?oasis\s+reply\s+/?end\]", "", raw, flags=re.IGNORECASE).strip()
+
+    # Attempt 1: direct parse
+    try:
+        return json.loads(raw)
+    except json.JSONDecodeError:
+        pass
+
+    # Attempt 2: extract first JSON object {...} from the text
+    m = re.search(r"\{[\s\S]*\}", raw)
+    if m:
+        try:
+            return json.loads(m.group(0))
+        except json.JSONDecodeError:
+            pass
+
+    # All strategies failed — raise for caller to handle
+    raise json.JSONDecodeError("No valid JSON found in response", raw, 0)
 
 
 async def _apply_response(
