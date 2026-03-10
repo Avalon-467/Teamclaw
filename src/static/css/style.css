@@ -476,6 +476,8 @@ header {
 .orch-start-card:hover { background: #d1fae5 !important; }
 .orch-end-card { background: #fef2f2 !important; border-color: #ef4444 !important; }
 .orch-end-card:hover { background: #fee2e2 !important; }
+.orch-cond-card { background: #fffbeb !important; border-color: #f59e0b !important; }
+.orch-cond-card:hover { background: #fef3c7 !important; }
 
 .orch-canvas-wrapper { flex: 1; display: flex; flex-direction: column; min-width: 0; }
 .orch-toolbar {

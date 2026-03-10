@@ -83,6 +83,55 @@ function orchBindCardEvents(card, data) {
     });
 }
 
+/** Conditional card: special drag behavior — drop on blank = new selector node, drop on existing node = toggle selector */
+function orchBindCondCardEvents(card, data) {
+    if (orchIsMobile()) {
+        card.draggable = false;
+    } else {
+        card.addEventListener('dragstart', e => {
+            e.dataTransfer.setData('application/json', JSON.stringify({...data, _condDrop: true}));
+            e.dataTransfer.effectAllowed = 'copy';
+        });
+    }
+    // Double-click: add as standalone selector node at center
+    card.addEventListener('dblclick', () => orchAddNodeCenter(data));
+    card.addEventListener('click', e => {
+        if (!orchIsMobile()) return;
+        orchMobileTapAdd(data);
+    });
+}
+
+/** Check if a canvas coordinate hits an existing node element, return node or null */
+function orchFindNodeAtPoint(clientX, clientY) {
+    const els = document.querySelectorAll('.orch-node');
+    for (const el of els) {
+        const rect = el.getBoundingClientRect();
+        if (clientX >= rect.left && clientX <= rect.right && clientY >= rect.top && clientY <= rect.bottom) {
+            const nodeId = el.id.replace('onode-', '');
+            return orch.nodes.find(n => n.id === nodeId) || null;
+        }
+    }
+    return null;
+}
+
+/** Toggle a node's selector status on (with visual feedback) */
+function orchSetNodeSelector(node) {
+    node.isSelector = true;
+    const el = document.getElementById('onode-' + node.id);
+    if (el) {
+        el.classList.add('selector-type');
+        if (!el.querySelector('.orch-selector-badge')) {
+            const badge = document.createElement('div');
+            badge.className = 'orch-selector-badge';
+            badge.textContent = '🎯 SELECTOR';
+            el.appendChild(badge);
+        }
+    }
+    orchRenderEdges();
+    orchUpdateYaml();
+    orchToast('🎯 ' + node.name + ' → SELECTOR');
+}
+
 function orchInit() {
     orchLoadExperts();
     orchLoadSessionAgents();
@@ -90,7 +139,7 @@ function orchInit() {
     orchSetupCanvas();
     orchSetupSettings();
     orchSetupFileDrop();
-    // Bind manual / start / end injection card events
+    // Bind manual / start / end / conditional injection card events
     const mc = document.getElementById('orch-manual-card');
     if (mc) {
         const manualData = {type:'manual', name:t('orch_manual_inject'), tag:'manual', emoji:'📝', temperature:0};
@@ -98,13 +147,18 @@ function orchInit() {
     }
     const sc = document.getElementById('orch-start-card');
     if (sc) {
-        const startData = {type:'manual', name:t('orch_start_node'), tag:'manual', emoji:'🚀', temperature:0, author:t('orch_default_author'), content:t('orch_start_default_content')};
+        const startData = {type:'manual', name:t('orch_start_node'), tag:'manual', emoji:'🚀', temperature:0, author:t('orch_start_author'), content:t('orch_start_default_content')};
         orchBindCardEvents(sc, startData);
     }
     const ec = document.getElementById('orch-end-card');
     if (ec) {
-        const endData = {type:'manual', name:t('orch_end_node'), tag:'manual', emoji:'🏁', temperature:0, author:t('orch_default_author'), content:t('orch_end_default_content')};
+        const endData = {type:'manual', name:t('orch_end_node'), tag:'manual', emoji:'🏁', temperature:0, author:t('orch_end_author'), content:t('orch_end_default_content')};
         orchBindCardEvents(ec, endData);
+    }
+    const cc = document.getElementById('orch-cond-card');
+    if (cc) {
+        const condData = {type:'conditional', name:t('orch_cond_node'), tag:'conditional', emoji:'🎯', temperature:0, isSelector:true};
+        orchBindCondCardEvents(cc, condData);
     }
 }
 
@@ -1254,7 +1308,7 @@ function orchShowAddOpenClawModal() {
 
 function orchRenderSidebar() {
     orchRenderExpertSidebar();
-    // Manual / Start / End cards (re-bind with unified events)
+    // Manual / Start / End / Conditional cards (re-bind with unified events)
     const mc = document.getElementById('orch-manual-card');
     if (mc) {
         const manualData = {type:'manual', name:t('orch_manual_inject'), tag:'manual', emoji:'📝', temperature:0};
@@ -1262,13 +1316,18 @@ function orchRenderSidebar() {
     }
     const sc = document.getElementById('orch-start-card');
     if (sc) {
-        const startData = {type:'manual', name:t('orch_start_node'), tag:'manual', emoji:'🚀', temperature:0, author:t('orch_default_author'), content:t('orch_start_default_content')};
+        const startData = {type:'manual', name:t('orch_start_node'), tag:'manual', emoji:'🚀', temperature:0, author:t('orch_start_author'), content:t('orch_start_default_content')};
         orchBindCardEvents(sc, startData);
     }
     const ec = document.getElementById('orch-end-card');
     if (ec) {
-        const endData = {type:'manual', name:t('orch_end_node'), tag:'manual', emoji:'🏁', temperature:0, author:t('orch_default_author'), content:t('orch_end_default_content')};
+        const endData = {type:'manual', name:t('orch_end_node'), tag:'manual', emoji:'🏁', temperature:0, author:t('orch_end_author'), content:t('orch_end_default_content')};
         orchBindCardEvents(ec, endData);
+    }
+    const cc = document.getElementById('orch-cond-card');
+    if (cc) {
+        const condData = {type:'conditional', name:t('orch_cond_node'), tag:'conditional', emoji:'🎯', temperature:0, isSelector:true};
+        orchBindCondCardEvents(cc, condData);
     }
 }
 
@@ -1814,6 +1873,29 @@ function orchSetupCanvas() {
         e.preventDefault();
         try {
             const data = JSON.parse(e.dataTransfer.getData('application/json'));
+            // Conditional card drop: if dropped on an existing agent node, make it a selector
+            if (data._condDrop) {
+                const hitNode = orchFindNodeAtPoint(e.clientX, e.clientY);
+                if (hitNode && hitNode.type !== 'manual') {
+                    // Toggle existing node to selector
+                    if (!hitNode.isSelector) {
+                        orchSetNodeSelector(hitNode);
+                    } else {
+                        orchToast('ℹ️ ' + hitNode.name + ' ' + t('orch_cond_already_selector'));
+                    }
+                } else {
+                    // Drop on blank area: create a standalone selector expert node
+                    const cp = orchClientToCanvas(e.clientX, e.clientY);
+                    const cleanData = {...data};
+                    delete cleanData._condDrop;
+                    // Create as expert type with selector flag
+                    cleanData.type = 'expert';
+                    cleanData.tag = 'selector';
+                    const node = orchAddNode(cleanData, cp.x - 55, cp.y - 20);
+                    orchSetNodeSelector(node);
+                }
+                return;
+            }
             const cp = orchClientToCanvas(e.clientX, e.clientY);
             orchAddNode(data, cp.x - 55, cp.y - 20);
         } catch(err) {}
