@@ -139,6 +139,21 @@ const I18N = {
         group_manual: '📝 手动',
         tip_remove: '删除',
         tip_dissolve: '解散分组',
+
+        // Conditional edge
+        ctx_set_conditional: '⚡ 设为条件边',
+        ctx_edit_conditional: '✏️ 编辑条件边',
+        ctx_remove_conditional: '🔗 恢复为普通边',
+        modal_cond_edge: '⚡ 编辑条件边',
+        cond_label_condition: '条件表达式',
+        cond_label_then: 'Then 目标（条件为真）',
+        cond_label_else: 'Else 目标（条件为假/循环回边）',
+        cond_hint: '例如: last_post_contains:LGTM, post_count_gte:3, always',
+        cond_select_none: '（无）',
+        cond_keep_current: '当前目标',
+        badge_start: 'START',
+        badge_end: 'END',
+        btn_remove_cond: '恢复普通边',
     },
     en: {
         btn_auto_arrange: '🔄 Auto Arrange',
@@ -262,6 +277,21 @@ const I18N = {
         group_manual: '📝 Manual',
         tip_remove: 'Remove',
         tip_dissolve: 'Dissolve group',
+
+        // Conditional edge
+        ctx_set_conditional: '⚡ Set as Conditional Edge',
+        ctx_edit_conditional: '✏️ Edit Conditional Edge',
+        ctx_remove_conditional: '🔗 Revert to Fixed Edge',
+        modal_cond_edge: '⚡ Edit Conditional Edge',
+        cond_label_condition: 'Condition Expression',
+        cond_label_then: 'Then Target (condition true)',
+        cond_label_else: 'Else Target (condition false / loop back)',
+        cond_hint: 'e.g. last_post_contains:LGTM, post_count_gte:3, always',
+        cond_select_none: '(none)',
+        cond_keep_current: 'Current target',
+        badge_start: 'START',
+        badge_end: 'END',
+        btn_remove_cond: 'Revert to Fixed',
     },
 };
 
@@ -314,7 +344,8 @@ function toggleLang() {
 const state = {
     experts: [],          // Available expert pool
     nodes: [],            // Canvas nodes: { id, name, tag, emoji, x, y, type, temperature, author, content }
-    edges: [],            // Directed edges: { id, source, target }
+    edges: [],            // Directed edges: { id, source, target, edgeType:'fixed'|'conditional', condition, thenTarget, elseTarget }
+    conditionalEdges: [], // Conditional edges derived from edge configs: { source, condition, then, else }
     groups: [],           // Group zones: { id, name, type, x, y, w, h, nodeIds }
     selectedNodes: new Set(),
     nextNodeId: 1,
@@ -550,6 +581,7 @@ function removeNode(nodeId) {
     if (el) el.remove();
 
     renderAllEdges();
+    updateNodeBadges();
     updateYamlOutput();
     updateStatusBar();
 }
@@ -569,18 +601,20 @@ function clearSelection() {
 }
 
 // ── Edge Management ──
-function addEdge(sourceId, targetId) {
+function addEdge(sourceId, targetId, edgeType = 'fixed') {
     // Prevent duplicate
     if (state.edges.some(e => e.source === sourceId && e.target === targetId)) return;
     const id = 'e' + state.nextEdgeId++;
-    state.edges.push({ id, source: sourceId, target: targetId });
+    state.edges.push({ id, source: sourceId, target: targetId, edgeType, condition: '', thenTarget: '', elseTarget: '' });
     renderAllEdges();
+    updateNodeBadges();
     updateYamlOutput();
 }
 
 function removeEdge(edgeId) {
     state.edges = state.edges.filter(e => e.id !== edgeId);
     renderAllEdges();
+    updateNodeBadges();
     updateYamlOutput();
 }
 
@@ -595,6 +629,12 @@ function renderAllEdges() {
         newDefs.innerHTML = `
             <marker id="arrowhead" markerWidth="10" markerHeight="7" refX="10" refY="3.5" orient="auto">
                 <polygon points="0 0, 10 3.5, 0 7" fill="#667eea" />
+            </marker>
+            <marker id="arrowhead-green" markerWidth="10" markerHeight="7" refX="10" refY="3.5" orient="auto">
+                <polygon points="0 0, 10 3.5, 0 7" fill="#44bb88" />
+            </marker>
+            <marker id="arrowhead-orange" markerWidth="10" markerHeight="7" refX="10" refY="3.5" orient="auto">
+                <polygon points="0 0, 10 3.5, 0 7" fill="#ff8844" />
             </marker>
         `;
         svg.appendChild(newDefs);
@@ -614,29 +654,309 @@ function renderAllEdges() {
         const x2 = tgtNode.x;
         const y2 = tgtNode.y + tgtEl.offsetHeight / 2;
 
-        // Bezier curve
-        const cpx = (x1 + x2) / 2;
+        const isConditional = edge.edgeType === 'conditional';
+        // Detect back-edge: target is to the left of source (loop)
+        const isBackEdge = tgtNode.x + (tgtEl.offsetWidth / 2) < srcNode.x + (srcEl.offsetWidth / 2);
+
+        let pathD;
+        if (isBackEdge) {
+            // Draw arc below/above the nodes for back-edges
+            const arcY = Math.max(srcNode.y + srcEl.offsetHeight, tgtNode.y + tgtEl.offsetHeight) + 60;
+            const bx1 = srcNode.x + srcEl.offsetWidth / 2;
+            const by1 = srcNode.y + srcEl.offsetHeight;
+            const bx2 = tgtNode.x + tgtEl.offsetWidth / 2;
+            const by2 = tgtNode.y + tgtEl.offsetHeight;
+            pathD = `M${bx1},${by1} C${bx1},${arcY} ${bx2},${arcY} ${bx2},${by2}`;
+        } else {
+            // Normal bezier curve
+            const cpx = (x1 + x2) / 2;
+            pathD = `M${x1},${y1} C${cpx},${y1} ${cpx},${y2} ${x2},${y2}`;
+        }
+
+        // Determine style based on edge type
+        let strokeColor, markerEnd, dashArray;
+        if (isConditional && isBackEdge) {
+            // else / loop-back edge: orange dashed
+            strokeColor = '#ff8844';
+            markerEnd = 'url(#arrowhead-orange)';
+            dashArray = '6,4';
+        } else if (isConditional) {
+            // then edge: green solid
+            strokeColor = '#44bb88';
+            markerEnd = 'url(#arrowhead-green)';
+            dashArray = null;
+        } else {
+            // fixed edge: blue solid
+            strokeColor = '#667eea';
+            markerEnd = 'url(#arrowhead)';
+            dashArray = null;
+        }
+
         const line = document.createElementNS('http://www.w3.org/2000/svg', 'path');
-        line.setAttribute('d', `M${x1},${y1} C${cpx},${y1} ${cpx},${y2} ${x2},${y2}`);
-        line.setAttribute('stroke', '#667eea');
+        line.setAttribute('d', pathD);
+        line.setAttribute('stroke', strokeColor);
         line.setAttribute('stroke-width', '2');
         line.setAttribute('fill', 'none');
-        line.setAttribute('marker-end', 'url(#arrowhead)');
+        line.setAttribute('marker-end', markerEnd);
+        if (dashArray) line.setAttribute('stroke-dasharray', dashArray);
         line.setAttribute('data-edge-id', edge.id);
         line.style.cursor = 'pointer';
         line.style.pointerEvents = 'all';
 
-        // Click to delete edge
+        // Store original color for hover restore
+        const origColor = strokeColor;
+
+        // Left-click to delete edge, right-click to edit conditional
         line.addEventListener('click', (e) => {
             e.stopPropagation();
             removeEdge(edge.id);
         });
 
+        // Right-click for conditional edge editing
+        line.addEventListener('contextmenu', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            showEdgeContextMenu(e.clientX, e.clientY, edge);
+        });
+
         // Hover effect
         line.addEventListener('mouseenter', () => { line.setAttribute('stroke', '#ff6b6b'); line.setAttribute('stroke-width', '3'); });
-        line.addEventListener('mouseleave', () => { line.setAttribute('stroke', '#667eea'); line.setAttribute('stroke-width', '2'); });
+        line.addEventListener('mouseleave', () => { line.setAttribute('stroke', origColor); line.setAttribute('stroke-width', '2'); });
 
         svg.appendChild(line);
+
+        // Draw label for conditional edges
+        if (isConditional && edge.condition) {
+            const labelText = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+            // Position label at midpoint of the path
+            let labelX, labelY;
+            if (isBackEdge) {
+                const bx1 = srcNode.x + srcEl.offsetWidth / 2;
+                const bx2 = tgtNode.x + tgtEl.offsetWidth / 2;
+                const arcY = Math.max(srcNode.y + srcEl.offsetHeight, tgtNode.y + tgtEl.offsetHeight) + 60;
+                labelX = (bx1 + bx2) / 2;
+                labelY = arcY + 14;
+            } else {
+                labelX = (x1 + x2) / 2;
+                labelY = (y1 + y2) / 2 - 8;
+            }
+            labelText.setAttribute('x', labelX);
+            labelText.setAttribute('y', labelY);
+            labelText.setAttribute('text-anchor', 'middle');
+            labelText.classList.add('edge-label');
+            labelText.classList.add(isBackEdge ? 'else-label' : 'then-label');
+            const displayCond = edge.condition.length > 25 ? edge.condition.slice(0, 22) + '...' : edge.condition;
+            labelText.textContent = (isBackEdge ? '❌ ' : '✅ ') + displayCond;
+            svg.appendChild(labelText);
+        }
+    });
+}
+
+/** Show context menu on right-clicking an edge */
+function showEdgeContextMenu(x, y, edge) {
+    hideContextMenu();
+    const menu = document.createElement('div');
+    menu.className = 'context-menu';
+    menu.style.left = x + 'px';
+    menu.style.top = y + 'px';
+
+    const items = [];
+    if (edge.edgeType === 'conditional') {
+        items.push({ icon: '✏️', label: i18n('ctx_edit_conditional'), action: () => showCondEdgeModal(edge) });
+        items.push({ icon: '🔗', label: i18n('ctx_remove_conditional'), action: () => {
+            edge.edgeType = 'fixed';
+            edge.condition = '';
+            edge.thenTarget = '';
+            // Remove the else edge if exists
+            if (edge.elseTarget) {
+                state.edges = state.edges.filter(e => !(e.source === edge.source && e.target === edge.elseTarget && e._isElseSibling === edge.id));
+                edge.elseTarget = '';
+            }
+            renderAllEdges();
+            updateNodeBadges();
+            updateYamlOutput();
+        }});
+    } else {
+        items.push({ icon: '⚡', label: i18n('ctx_set_conditional'), action: () => showCondEdgeModal(edge) });
+    }
+    items.push({ divider: true });
+    items.push({ icon: '🗑️', label: i18n('ctx_delete'), action: () => removeEdge(edge.id) });
+
+    items.forEach(item => {
+        if (item.divider) {
+            const d = document.createElement('div');
+            d.className = 'divider';
+            menu.appendChild(d);
+        } else {
+            const mi = document.createElement('div');
+            mi.className = 'menu-item';
+            mi.innerHTML = `<span>${item.icon}</span> ${item.label}`;
+            mi.addEventListener('click', () => { hideContextMenu(); item.action(); });
+            menu.appendChild(mi);
+        }
+    });
+
+    document.body.appendChild(menu);
+    state.contextMenu = menu;
+    setTimeout(() => {
+        document.addEventListener('click', hideContextMenu, { once: true });
+    }, 10);
+}
+
+/** Show modal to edit conditional edge properties */
+function showCondEdgeModal(edge) {
+    const overlay = document.createElement('div');
+    overlay.className = 'modal-overlay';
+
+    // Build node options for then/else targets
+    const otherNodes = state.nodes.filter(n => n.id !== edge.source);
+    const nodeOptions = otherNodes.map(n => `<option value="${n.id}">${n.emoji} ${n.name} (${n.id})</option>`).join('');
+    const noneOption = `<option value="">${i18n('cond_select_none')}</option>`;
+
+    // Current then target = edge.target (the edge's current target)
+    const currentThenId = edge.target;
+    const currentElseId = edge.elseTarget || '';
+
+    overlay.innerHTML = `
+        <div class="cond-edge-modal">
+            <h3>${i18n('modal_cond_edge')}</h3>
+            <div class="field-group">
+                <label>${i18n('cond_label_condition')}</label>
+                <input type="text" id="cond-expr" value="${edge.condition || ''}" placeholder="last_post_contains:LGTM">
+                <div class="hint">${i18n('cond_hint')}</div>
+            </div>
+            <div class="field-group">
+                <label>${i18n('cond_label_then')}</label>
+                <select id="cond-then">
+                    ${nodeOptions}
+                </select>
+            </div>
+            <div class="field-group">
+                <label>${i18n('cond_label_else')}</label>
+                <select id="cond-else">
+                    ${noneOption}
+                    ${nodeOptions}
+                </select>
+            </div>
+            <div class="modal-buttons">
+                <button id="cond-cancel">${i18n('modal_cancel')}</button>
+                ${edge.edgeType === 'conditional' ? `<button id="cond-remove" class="danger">${i18n('btn_remove_cond')}</button>` : ''}
+                <button id="cond-save" class="primary">${i18n('modal_save')}</button>
+            </div>
+        </div>
+    `;
+    document.body.appendChild(overlay);
+
+    // Set current values
+    const thenSelect = overlay.querySelector('#cond-then');
+    const elseSelect = overlay.querySelector('#cond-else');
+    thenSelect.value = currentThenId;
+    elseSelect.value = currentElseId;
+
+    overlay.querySelector('#cond-cancel').addEventListener('click', () => overlay.remove());
+    overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.remove(); });
+
+    const removeBtn = overlay.querySelector('#cond-remove');
+    if (removeBtn) {
+        removeBtn.addEventListener('click', () => {
+            edge.edgeType = 'fixed';
+            edge.condition = '';
+            edge.thenTarget = '';
+            // Remove else sibling edge
+            if (edge.elseTarget) {
+                state.edges = state.edges.filter(e => !(e.source === edge.source && e.target === edge.elseTarget && e._isElseSibling === edge.id));
+                edge.elseTarget = '';
+            }
+            overlay.remove();
+            renderAllEdges();
+            updateNodeBadges();
+            updateYamlOutput();
+        });
+    }
+
+    overlay.querySelector('#cond-save').addEventListener('click', () => {
+        const condition = document.getElementById('cond-expr').value.trim();
+        const thenTarget = thenSelect.value;
+        const elseTarget = elseSelect.value;
+
+        if (!condition) {
+            showToast('Condition is required');
+            return;
+        }
+
+        // Update main edge to be conditional
+        edge.edgeType = 'conditional';
+        edge.condition = condition;
+        edge.target = thenTarget;
+        edge.thenTarget = thenTarget;
+
+        // Handle else target: remove old else-sibling edge if any
+        state.edges = state.edges.filter(e => !e._isElseSibling || e._isElseSibling !== edge.id);
+
+        if (elseTarget) {
+            edge.elseTarget = elseTarget;
+            // Create a sibling edge for the else branch (visual only, rendered as back-edge style)
+            const elseEdgeId = 'e' + state.nextEdgeId++;
+            state.edges.push({
+                id: elseEdgeId,
+                source: edge.source,
+                target: elseTarget,
+                edgeType: 'conditional',
+                condition: edge.condition,
+                thenTarget: '',
+                elseTarget: '',
+                _isElseSibling: edge.id,  // Mark as generated from parent conditional
+            });
+        } else {
+            edge.elseTarget = '';
+        }
+
+        overlay.remove();
+        renderAllEdges();
+        updateNodeBadges();
+        updateYamlOutput();
+    });
+}
+
+/** Update START/END badges on nodes based on edge topology */
+function updateNodeBadges() {
+    // Remove all existing badges
+    document.querySelectorAll('.node-badge').forEach(b => b.remove());
+
+    if (state.nodes.length === 0) return;
+
+    // Compute in-degree and out-degree (only count non-else-sibling edges)
+    const realEdges = state.edges.filter(e => !e._isElseSibling);
+    const inDeg = {};
+    const outDeg = {};
+    state.nodes.forEach(n => { inDeg[n.id] = 0; outDeg[n.id] = 0; });
+    realEdges.forEach(e => {
+        if (inDeg.hasOwnProperty(e.target)) inDeg[e.target]++;
+        if (outDeg.hasOwnProperty(e.source)) outDeg[e.source]++;
+    });
+
+    // Only show badges if there are edges (otherwise it's just floating nodes)
+    if (realEdges.length === 0) return;
+
+    state.nodes.forEach(n => {
+        const el = document.getElementById('node-' + n.id);
+        if (!el) return;
+
+        // START badge: no incoming edges
+        if (inDeg[n.id] === 0) {
+            const badge = document.createElement('div');
+            badge.className = 'node-badge start-badge';
+            badge.textContent = '▶ ' + i18n('badge_start');
+            el.appendChild(badge);
+        }
+
+        // END badge: no outgoing edges
+        if (outDeg[n.id] === 0) {
+            const badge = document.createElement('div');
+            badge.className = 'node-badge end-badge';
+            badge.textContent = '■ ' + i18n('badge_end');
+            el.appendChild(badge);
+        }
     });
 }
 

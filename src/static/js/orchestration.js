@@ -1313,7 +1313,7 @@ function orchRenderNode(node) {
     const el = document.createElement('div');
     const isSession = node.type === 'session_agent';
     const isExternal = node.type === 'external';
-    el.className = 'orch-node' + (node.type === 'manual' ? ' manual-type' : '') + (isSession ? ' session-type' : '') + (isExternal ? ' external-type' : '');
+    el.className = 'orch-node' + (node.type === 'manual' ? ' manual-type' : '') + (isSession ? ' session-type' : '') + (isExternal ? ' external-type' : '') + (node.isSelector ? ' selector-type' : '');
     el.id = 'onode-' + node.id;
     el.style.left = node.x + 'px';
     el.style.top = node.y + 'px';
@@ -1343,15 +1343,16 @@ function orchRenderNode(node) {
     }
     const instrPreview = (node.type !== 'manual' && node.content) ? `<div class="orch-node-instr" title="${escapeHtml(node.content)}" style="font-size:9px;color:#6b7280;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:120px;margin-top:1px;">📋 ${escapeHtml(node.content.length > 20 ? node.content.slice(0,20)+'…' : node.content)}</div>` : '';
     const statefulBadge = (node.stateful && node.type !== 'external') ? '<span style="display:inline-block;background:#8b5cf6;color:#fff;font-size:8px;font-weight:600;border-radius:3px;padding:0 3px;margin-left:3px;vertical-align:middle;" title="Stateful">⚡S</span>' : '';
+    const selectorBadgeHtml = node.isSelector ? '<div class="orch-selector-badge">🎯 SELECTOR</div>' : '';
     el.innerHTML = `
         <span class="orch-node-emoji">${node.emoji}</span>
         <div style="min-width:0;flex:1;"><div class="orch-node-name" style="display:flex;align-items:center;">${escapeHtml(node.name)}${instBadge}${statefulBadge}</div>${tagLine}${instrPreview}</div>
         <div class="orch-node-del" title="${t('orch_node_remove')}">×</div>
         <div class="orch-port port-in" data-node="${node.id}" data-dir="in"></div>
         <div class="orch-port port-out" data-node="${node.id}" data-dir="out"></div>
-        <div class="orch-node-status ${status}"></div>
+        <div class="orch-node-status ${status}">
+        ${selectorBadgeHtml}
     `;
-
     el.querySelector('.orch-node-del').addEventListener('click', e => { e.stopPropagation(); orchRemoveNode(node.id); });
 
     el.addEventListener('mousedown', e => {
@@ -1396,12 +1397,17 @@ function orchRenderNode(node) {
 
 function orchRemoveNode(id) {
     orch.nodes = orch.nodes.filter(n => n.id !== id);
+    // Clean up conditional edge elseTarget references before filtering
+    orch.edges.forEach(e => {
+        if (e.elseTarget === id) { e.elseTarget = ''; }
+    });
     orch.edges = orch.edges.filter(e => e.source !== id && e.target !== id);
     orch.selectedNodes.delete(id);
     orch.groups.forEach(g => { g.nodeIds = g.nodeIds.filter(nid => nid !== id); });
     const el = document.getElementById('onode-' + id);
     if (el) el.remove();
     orchRenderEdges();
+    orchUpdateNodeBadges();
     orchUpdateYaml();
     orchUpdateStatus();
     if (orch.nodes.length === 0) document.getElementById('orch-canvas-hint').style.display = '';
@@ -1411,10 +1417,12 @@ function orchSelectNode(id) { orch.selectedNodes.add(id); const el=document.getE
 function orchClearSelection() { orch.selectedNodes.forEach(id => { const el=document.getElementById('onode-'+id); if(el) el.classList.remove('selected'); }); orch.selectedNodes.clear(); }
 
 // ── Edge Management ──
-function orchAddEdge(src, tgt) {
+function orchAddEdge(src, tgt, edgeType) {
+    edgeType = edgeType || 'fixed';
     if (orch.edges.some(e => e.source === src && e.target === tgt)) return;
-    orch.edges.push({ id: 'oe' + orch.eid++, source: src, target: tgt });
+    orch.edges.push({ id: 'oe' + orch.eid++, source: src, target: tgt, edgeType: edgeType, condition: '', thenTarget: '', elseTarget: '' });
     orchRenderEdges();
+    orchUpdateNodeBadges();
     orchUpdateYaml();
 }
 
@@ -1422,7 +1430,23 @@ function orchRenderEdges() {
     const svg = document.getElementById('orch-edge-svg');
     const defs = svg.querySelector('defs');
     svg.innerHTML = '';
-    svg.appendChild(defs);
+    if (defs) svg.appendChild(defs);
+    else {
+        const nd = document.createElementNS('http://www.w3.org/2000/svg','defs');
+        nd.innerHTML = `<marker id="orch-arrowhead" markerWidth="10" markerHeight="7" refX="10" refY="3.5" orient="auto"><polygon points="0 0, 10 3.5, 0 7" fill="#2563eb" /></marker>
+            <marker id="orch-arrowhead-green" markerWidth="10" markerHeight="7" refX="10" refY="3.5" orient="auto"><polygon points="0 0, 10 3.5, 0 7" fill="#16a34a" /></marker>
+            <marker id="orch-arrowhead-orange" markerWidth="10" markerHeight="7" refX="10" refY="3.5" orient="auto"><polygon points="0 0, 10 3.5, 0 7" fill="#ea580c" /></marker>
+            <marker id="orch-arrowhead-purple" markerWidth="10" markerHeight="7" refX="10" refY="3.5" orient="auto"><polygon points="0 0, 10 3.5, 0 7" fill="#8b5cf6" /></marker>`;
+        svg.appendChild(nd);
+    }
+    // Build selector edge choice number map: edge.id → choice number
+    const selectorChoiceMap = {};
+    orch.nodes.forEach(n => {
+        if (!n.isSelector) return;
+        const outEdges = orch.edges.filter(e => e.source === n.id && !e._isElseSibling);
+        outEdges.forEach((e, idx) => { selectorChoiceMap[e.id] = idx + 1; });
+    });
+
     orch.edges.forEach(edge => {
         const sn = orch.nodes.find(n => n.id === edge.source);
         const tn = orch.nodes.find(n => n.id === edge.target);
@@ -1432,20 +1456,219 @@ function orchRenderEdges() {
         if (!se || !te) return;
         const x1 = sn.x + se.offsetWidth, y1 = sn.y + se.offsetHeight/2;
         const x2 = tn.x, y2 = tn.y + te.offsetHeight/2;
-        const cpx = (x1+x2)/2;
+        const isCond = edge.edgeType === 'conditional';
+        // Fix: determine else-branch by data flag, not spatial position
+        const isElseBranch = !!edge._isElseSibling;
+        // Back-edge detection is only for rendering arc path (spatial)
+        const isBackEdge = (tn.x + te.offsetWidth/2) < (sn.x + se.offsetWidth/2);
+        // Selector edge detection
+        const isSelectorEdge = sn.isSelector && !isCond;
+        const choiceNum = selectorChoiceMap[edge.id];
+
+        let pathD;
+        if (isBackEdge) {
+            const arcY = Math.max(sn.y + se.offsetHeight, tn.y + te.offsetHeight) + 60;
+            const bx1 = sn.x + se.offsetWidth/2, by1 = sn.y + se.offsetHeight;
+            const bx2 = tn.x + te.offsetWidth/2, by2 = tn.y + te.offsetHeight;
+            pathD = `M${bx1},${by1} C${bx1},${arcY} ${bx2},${arcY} ${bx2},${by2}`;
+        } else {
+            const cpx = (x1+x2)/2;
+            pathD = `M${x1},${y1} C${cpx},${y1} ${cpx},${y2} ${x2},${y2}`;
+        }
+
+        let strokeColor, markerEnd, dashArr;
+        if (isSelectorEdge) {
+            // Selector edge: purple
+            strokeColor='#8b5cf6'; markerEnd='url(#orch-arrowhead-purple)'; dashArr=null;
+        } else if (isCond && isElseBranch) {
+            // Else branch: always orange dashed (regardless of position)
+            strokeColor='#ea580c'; markerEnd='url(#orch-arrowhead-orange)'; dashArr='6,4';
+        } else if (isCond) {
+            // Then branch: always green solid
+            strokeColor='#16a34a'; markerEnd='url(#orch-arrowhead-green)'; dashArr=null;
+        } else {
+            strokeColor='#2563eb'; markerEnd='url(#orch-arrowhead)'; dashArr=null;
+        }
+
         const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
-        path.setAttribute('d', `M${x1},${y1} C${cpx},${y1} ${cpx},${y2} ${x2},${y2}`);
-        path.setAttribute('stroke', '#2563eb');
+        path.setAttribute('d', pathD);
+        path.setAttribute('stroke', strokeColor);
         path.setAttribute('stroke-width', '2');
         path.setAttribute('fill', 'none');
-        path.setAttribute('marker-end', 'url(#orch-arrowhead)');
+        path.setAttribute('marker-end', markerEnd);
+        if (dashArr) path.setAttribute('stroke-dasharray', dashArr);
         path.style.cursor = 'pointer';
         path.style.pointerEvents = 'all';
-        path.addEventListener('click', e => { e.stopPropagation(); orch.edges = orch.edges.filter(ee=>ee.id!==edge.id); orchRenderEdges(); orchUpdateYaml(); });
+        const origColor = strokeColor;
+        path.addEventListener('click', e => { e.stopPropagation(); orchDeleteEdge(edge); });
+        path.addEventListener('contextmenu', e => { e.preventDefault(); e.stopPropagation(); orchShowEdgeContextMenu(e.clientX, e.clientY, edge); });
         path.addEventListener('mouseenter', () => { path.setAttribute('stroke','#ef4444'); path.setAttribute('stroke-width','3'); });
-        path.addEventListener('mouseleave', () => { path.setAttribute('stroke','#2563eb'); path.setAttribute('stroke-width','2'); });
+        path.addEventListener('mouseleave', () => { path.setAttribute('stroke', origColor); path.setAttribute('stroke-width','2'); });
         svg.appendChild(path);
+
+        // Label for conditional edges (use data flag, not position)
+        if (isCond && edge.condition) {
+            const lbl = document.createElementNS('http://www.w3.org/2000/svg','text');
+            let lx, ly;
+            if (isBackEdge) {
+                const bx1=sn.x+se.offsetWidth/2, bx2=tn.x+te.offsetWidth/2;
+                const arcY=Math.max(sn.y+se.offsetHeight,tn.y+te.offsetHeight)+60;
+                lx=(bx1+bx2)/2; ly=arcY+14;
+            } else { lx=(x1+x2)/2; ly=(y1+y2)/2-8; }
+            lbl.setAttribute('x',lx); lbl.setAttribute('y',ly);
+            lbl.setAttribute('text-anchor','middle');
+            lbl.classList.add('orch-edge-label');
+            lbl.classList.add(isElseBranch?'orch-else-label':'orch-then-label');
+            const dc = edge.condition.length>25 ? edge.condition.slice(0,22)+'...' : edge.condition;
+            lbl.textContent = (isElseBranch?'❌ ':'✅ ') + dc;
+            svg.appendChild(lbl);
+        }
+
+        // Label for selector edges: show choice number
+        if (isSelectorEdge && choiceNum) {
+            const lbl = document.createElementNS('http://www.w3.org/2000/svg','text');
+            let lx, ly;
+            if (isBackEdge) {
+                const bx1=sn.x+se.offsetWidth/2, bx2=tn.x+te.offsetWidth/2;
+                const arcY=Math.max(sn.y+se.offsetHeight,tn.y+te.offsetHeight)+60;
+                lx=(bx1+bx2)/2; ly=arcY+14;
+            } else { lx=(x1+x2)/2; ly=(y1+y2)/2-8; }
+            lbl.setAttribute('x',lx); lbl.setAttribute('y',ly);
+            lbl.setAttribute('text-anchor','middle');
+            lbl.classList.add('orch-edge-label');
+            lbl.classList.add('orch-selector-label');
+            lbl.textContent = '🎯 [' + choiceNum + '] → ' + tn.name;
+            svg.appendChild(lbl);
+        }
     });
+}
+
+/** Edge right-click context menu */
+function orchShowEdgeContextMenu(x, y, edge) {
+    orchHideContextMenu();
+    const menu = document.createElement('div');
+    menu.className = 'orch-context-menu';
+    menu.id = 'orch-ctx-menu';
+    menu.style.left = x + 'px';
+    menu.style.top = y + 'px';
+    const items = [];
+    if (edge.edgeType === 'conditional') {
+        items.push({label: t('orch_ctx_edit_cond'), action: () => orchShowCondEdgeModal(edge)});
+        items.push({label: t('orch_ctx_remove_cond'), action: () => {
+            edge.edgeType='fixed'; edge.condition=''; edge.thenTarget='';
+            if(edge.elseTarget){ orch.edges=orch.edges.filter(e=>!(e._isElseSibling===edge.id)); edge.elseTarget=''; }
+            orchRenderEdges(); orchUpdateNodeBadges(); orchUpdateYaml();
+        }});
+    } else {
+        items.push({label: t('orch_ctx_set_cond'), action: () => orchShowCondEdgeModal(edge)});
+    }
+    items.push({divider:true});
+    items.push({label: t('orch_ctx_delete'), action: () => { orchDeleteEdge(edge); }});
+    items.forEach(item => {
+        if(item.divider){const d=document.createElement('div');d.className='orch-menu-divider';menu.appendChild(d);return;}
+        const d=document.createElement('div');d.className='orch-menu-item';d.textContent=item.label;
+        d.addEventListener('click',()=>{item.action();orchHideContextMenu();});
+        menu.appendChild(d);
+    });
+    document.body.appendChild(menu);
+    document.addEventListener('click', orchHideContextMenu, {once:true});
+}
+
+/** Conditional edge edit modal */
+function orchShowCondEdgeModal(edge) {
+    const overlay = document.createElement('div');
+    overlay.className = 'orch-modal-overlay';
+    overlay.id = 'orch-cond-edge-modal';
+    const otherNodes = orch.nodes.filter(n=>n.id!==edge.source);
+    const nodeOpts = otherNodes.map(n=>`<option value="${n.id}">${n.emoji||'🤖'} ${n.name} (${n.id})</option>`).join('');
+    const noneOpt = `<option value="">${t('orch_cond_none')}</option>`;
+    overlay.innerHTML = `
+        <div class="orch-modal" style="min-width:400px;max-width:500px;">
+            <h3>${t('orch_modal_cond_edge')}</h3>
+            <div style="margin-bottom:10px;">
+                <label style="display:block;font-size:12px;color:#6b7280;margin-bottom:3px;">${t('orch_cond_label_expr')}</label>
+                <input type="text" id="orch-cond-expr" value="${edge.condition||''}" placeholder="last_post_contains:LGTM" style="width:100%;padding:6px 10px;border:1px solid #d1d5db;border-radius:6px;font-size:12px;">
+                <div style="font-size:10px;color:#9ca3af;margin-top:2px;">${t('orch_cond_hint')}</div>
+            </div>
+            <div style="margin-bottom:10px;">
+                <label style="display:block;font-size:12px;color:#6b7280;margin-bottom:3px;">${t('orch_cond_label_then')}</label>
+                <select id="orch-cond-then" style="width:100%;padding:6px 10px;border:1px solid #d1d5db;border-radius:6px;font-size:12px;">${nodeOpts}</select>
+            </div>
+            <div style="margin-bottom:10px;">
+                <label style="display:block;font-size:12px;color:#6b7280;margin-bottom:3px;">${t('orch_cond_label_else')}</label>
+                <select id="orch-cond-else" style="width:100%;padding:6px 10px;border:1px solid #d1d5db;border-radius:6px;font-size:12px;">${noneOpt}${nodeOpts}</select>
+            </div>
+            <div class="orch-modal-btns">
+                <button id="orch-cond-cancel" style="padding:6px 14px;border-radius:6px;border:1px solid #d1d5db;background:white;color:#374151;cursor:pointer;font-size:12px;">${t('orch_modal_cancel')}</button>
+                ${edge.edgeType==='conditional'?`<button id="orch-cond-revert" style="padding:6px 14px;border-radius:6px;border:1px solid #fca5a5;background:#fef2f2;color:#dc2626;cursor:pointer;font-size:12px;">${t('orch_ctx_remove_cond')}</button>`:''}
+                <button id="orch-cond-save" style="padding:6px 14px;border-radius:6px;border:none;background:#2563eb;color:white;cursor:pointer;font-size:12px;">${t('orch_modal_save')}</button>
+            </div>
+        </div>
+    `;
+    document.body.appendChild(overlay);
+    const thenSel=overlay.querySelector('#orch-cond-then');
+    const elseSel=overlay.querySelector('#orch-cond-else');
+    thenSel.value=edge.target; elseSel.value=edge.elseTarget||'';
+    overlay.querySelector('#orch-cond-cancel').addEventListener('click',()=>overlay.remove());
+    overlay.addEventListener('click',e=>{if(e.target===overlay)overlay.remove();});
+    const revertBtn=overlay.querySelector('#orch-cond-revert');
+    if(revertBtn) revertBtn.addEventListener('click',()=>{
+        edge.edgeType='fixed'; edge.condition=''; edge.thenTarget='';
+        orch.edges=orch.edges.filter(e=>!(e._isElseSibling===edge.id)); edge.elseTarget='';
+        overlay.remove(); orchRenderEdges(); orchUpdateNodeBadges(); orchUpdateYaml();
+    });
+    overlay.querySelector('#orch-cond-save').addEventListener('click',()=>{
+        const cond=document.getElementById('orch-cond-expr').value.trim();
+        const thenTgt=thenSel.value, elseTgt=elseSel.value;
+        if(!cond){orchToast(t('orch_cond_required'));return;}
+        edge.edgeType='conditional'; edge.condition=cond; edge.target=thenTgt; edge.thenTarget=thenTgt;
+        // Remove old else-sibling
+        orch.edges=orch.edges.filter(e=>!e._isElseSibling||e._isElseSibling!==edge.id);
+        if(elseTgt){
+            edge.elseTarget=elseTgt;
+            const eid='oe'+orch.eid++;
+            orch.edges.push({id:eid,source:edge.source,target:elseTgt,edgeType:'conditional',condition:edge.condition,thenTarget:'',elseTarget:'',_isElseSibling:edge.id});
+        } else { edge.elseTarget=''; }
+        overlay.remove(); orchRenderEdges(); orchUpdateNodeBadges(); orchUpdateYaml();
+    });
+}
+
+/** Update START/END badges on nodes */
+function orchUpdateNodeBadges() {
+    document.querySelectorAll('.orch-node-badge').forEach(b=>b.remove());
+    if(orch.nodes.length===0) return;
+    const realEdges=orch.edges.filter(e=>!e._isElseSibling);
+    if(realEdges.length===0) return;
+    const inDeg={}, outDeg={};
+    orch.nodes.forEach(n=>{inDeg[n.id]=0;outDeg[n.id]=0;});
+    realEdges.forEach(e=>{
+        if(inDeg.hasOwnProperty(e.target)) inDeg[e.target]++;
+        if(outDeg.hasOwnProperty(e.source)) outDeg[e.source]++;
+    });
+    orch.nodes.forEach(n=>{
+        const el=document.getElementById('onode-'+n.id);
+        if(!el) return;
+        if(inDeg[n.id]===0){
+            const b=document.createElement('div');b.className='orch-node-badge orch-start-badge';b.textContent='▶ START';el.appendChild(b);
+        }
+        if(outDeg[n.id]===0){
+            const b=document.createElement('div');b.className='orch-node-badge orch-end-badge';b.textContent='■ END';el.appendChild(b);
+        }
+    });
+}
+
+/** Delete an edge and its else-sibling if applicable */
+function orchDeleteEdge(edge) {
+    if (edge._isElseSibling) {
+        // Deleting an else-sibling: also clear the parent's elseTarget
+        const parent = orch.edges.find(e => e.id === edge._isElseSibling);
+        if (parent) parent.elseTarget = '';
+        orch.edges = orch.edges.filter(e => e.id !== edge.id);
+    } else {
+        // Deleting a main edge: also remove its else-sibling
+        orch.edges = orch.edges.filter(e => e.id !== edge.id && e._isElseSibling !== edge.id);
+    }
+    orchRenderEdges(); orchUpdateNodeBadges(); orchUpdateYaml();
 }
 
 function orchRemoveTempLine() { const svg=document.getElementById('orch-edge-svg'); const t=svg.querySelector('.temp-line'); if(t)t.remove(); }
@@ -1816,7 +2039,7 @@ function orchShowContextMenu(x, y, targetNode) {
     const hasSelection = orch.selectedNodes.size > 0;
     const items = [];
 
-    // ── Node-specific: duplicate / set instance ──
+    // ── Node-specific: duplicate / set instance / selector ──
     if (targetNode) {
         items.push({label: t('orch_ctx_duplicate'), action: () => {
             orchAddNode({...targetNode, instance: targetNode.instance}, targetNode.x + 40, targetNode.y + 40);
@@ -1824,6 +2047,32 @@ function orchShowContextMenu(x, y, targetNode) {
         items.push({label: t('orch_ctx_new_instance'), action: () => {
             orchAddNode({...targetNode, instance: undefined}, targetNode.x + 40, targetNode.y + 40);
         }});
+        // Selector node toggle
+        if (targetNode.type !== 'manual') {
+            if (targetNode.isSelector) {
+                items.push({label: t('orch_ctx_unset_selector'), action: () => {
+                    targetNode.isSelector = false;
+                    const el = document.getElementById('onode-' + targetNode.id);
+                    if (el) { el.classList.remove('selector-type'); el.querySelector('.orch-selector-badge')?.remove(); }
+                    orchRenderEdges(); orchUpdateYaml();
+                }});
+            } else {
+                items.push({label: t('orch_ctx_set_selector'), action: () => {
+                    targetNode.isSelector = true;
+                    const el = document.getElementById('onode-' + targetNode.id);
+                    if (el) {
+                        el.classList.add('selector-type');
+                        if (!el.querySelector('.orch-selector-badge')) {
+                            const badge = document.createElement('div');
+                            badge.className = 'orch-selector-badge';
+                            badge.textContent = '🎯 SELECTOR';
+                            el.appendChild(badge);
+                        }
+                    }
+                    orchRenderEdges(); orchUpdateYaml();
+                }});
+            }
+        }
         items.push({divider: true});
     }
 
@@ -1964,12 +2213,36 @@ function orchSaveExternal(nodeId) {
 
 // ── Layout Data ──
 function orchGetLayoutData() {
+    const fixedEdges = [];
+    const conditionalEdges = [];
+    const selectorEdges = [];
+    orch.edges.forEach(e => {
+        if (e._isElseSibling) return;
+        if (e.edgeType === 'conditional' && e.condition) {
+            conditionalEdges.push({ source: e.source, condition: e.condition, then: e.target, else: e.elseTarget || '' });
+        } else {
+            fixedEdges.push({ id: e.id, source: e.source, target: e.target });
+        }
+    });
+    // Build selector edges from selector nodes
+    orch.nodes.forEach(n => {
+        if (!n.isSelector) return;
+        const outEdges = orch.edges.filter(e => e.source === n.id && !e._isElseSibling && e.edgeType !== 'conditional');
+        if (outEdges.length === 0) return;
+        const choices = {};
+        outEdges.forEach((e, idx) => { choices[idx + 1] = e.target; });
+        selectorEdges.push({ source: n.id, choices: choices });
+    });
     return {
         nodes: orch.nodes.map(n => ({...n})),
-        edges: orch.edges.map(e => ({...e})),
+        edges: fixedEdges,
+        conditionalEdges: conditionalEdges,
+        selectorEdges: selectorEdges,
         groups: orch.groups.map(g => ({...g})),
         settings: orchGetSettings(),
         view: { zoom: orch.zoom, panX: orch.panX, panY: orch.panY },
+        hasConditional: conditionalEdges.length > 0,
+        hasSelector: selectorEdges.length > 0,
     };
 }
 
@@ -2219,6 +2492,7 @@ function orchAutoArrange() {
     });
     orchRenderEdges();
     orch.groups.forEach(g => orchUpdateGroupBounds(g));
+    orchUpdateNodeBadges();
     orchUpdateYaml();
     orchToast(t('orch_toast_arranged'));
 }
@@ -2328,11 +2602,25 @@ async function orchDoLoadLayout(name) {
             idMap[origId] = newNode.id;
         });
 
-        // Restore edges using mapped ids
+        // Restore fixed edges using mapped ids
         (data.edges||[]).forEach(e => {
             const src = idMap[e.source];
             const tgt = idMap[e.target];
             if (src && tgt) orchAddEdge(src, tgt);
+        });
+
+        // Restore conditional edges
+        (data.conditionalEdges||[]).forEach(ce => {
+            const src = idMap[ce.source] || ce.source;
+            const thenTgt = idMap[ce.then] || ce.then;
+            const elseTgt = ce.else ? (idMap[ce.else] || ce.else) : '';
+            const mainId = 'oe' + orch.eid++;
+            const mainEdge = { id: mainId, source: src, target: thenTgt, edgeType: 'conditional', condition: ce.condition||'', thenTarget: thenTgt, elseTarget: elseTgt };
+            orch.edges.push(mainEdge);
+            if (elseTgt) {
+                const elseId = 'oe' + orch.eid++;
+                orch.edges.push({ id: elseId, source: src, target: elseTgt, edgeType: 'conditional', condition: ce.condition||'', thenTarget: '', elseTarget: '', _isElseSibling: mainId });
+            }
         });
 
         // Restore groups with mapped node ids
@@ -2345,6 +2633,7 @@ async function orchDoLoadLayout(name) {
         });
 
         orchRenderEdges();
+        orchUpdateNodeBadges();
         orchUpdateYaml();
         orchToast(t('orch_toast_loaded', {name}));
     } catch(e) { orchToast(t('orch_toast_load_fail') + ': ' + e.message); }
@@ -2424,11 +2713,24 @@ async function orchImportYamlFile(file) {
                 const src = idMap[e.source], tgt = idMap[e.target];
                 if (src && tgt) orchAddEdge(src, tgt);
             });
+            // Restore conditional edges from uploaded data
+            (data.conditionalEdges || []).forEach(ce => {
+                const src = idMap[ce.source] || ce.source;
+                const thenTgt = idMap[ce.then] || ce.then;
+                const elseTgt = ce.else ? (idMap[ce.else] || ce.else) : '';
+                const mainId = 'oe' + orch.eid++;
+                orch.edges.push({ id: mainId, source: src, target: thenTgt, edgeType: 'conditional', condition: ce.condition||'', thenTarget: thenTgt, elseTarget: elseTgt });
+                if (elseTgt) {
+                    const elseId = 'oe' + orch.eid++;
+                    orch.edges.push({ id: elseId, source: src, target: elseTgt, edgeType: 'conditional', condition: ce.condition||'', thenTarget: '', elseTarget: '', _isElseSibling: mainId });
+                }
+            });
             (data.groups || []).forEach(g => {
                 const mapped = { ...g, nodeIds: (g.nodeIds || []).map(nid => idMap[nid]).filter(Boolean) };
                 if (mapped.nodeIds.length > 0) { orch.groups.push(mapped); orchRenderGroup(mapped); }
             });
             orchRenderEdges();
+            orchUpdateNodeBadges();
             orchUpdateYaml();
             orchToast(t('orch_toast_yaml_uploaded', { name: fname }));
         } else {

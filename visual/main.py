@@ -277,8 +277,13 @@ def layout_to_yaml(data: dict) -> str:
     """
     nodes = data.get("nodes", [])
     edges = data.get("edges", [])
+    conditional_edges_raw = data.get("conditionalEdges", [])
+    selector_edges_raw = data.get("selectorEdges", [])
     groups = data.get("groups", [])
     settings = data.get("settings", {})
+    has_conditional = bool(conditional_edges_raw) or data.get("hasConditional", False)
+    has_selector = bool(selector_edges_raw) or data.get("hasSelector", False)
+    use_v2 = has_conditional or has_selector
 
     repeat = settings.get("repeat", False)
     node_map = {n["id"]: n for n in nodes}
@@ -425,6 +430,80 @@ def layout_to_yaml(data: dict) -> str:
             }
         })
 
+    # ── Version 2 graph output when conditional or selector edges exist ──
+    if use_v2 and (conditional_edges_raw or selector_edges_raw):
+        # In version 2 mode, all nodes need an id and we use explicit edges
+        v2_plan = []
+        # Build set of selector node ids
+        selector_node_ids = set()
+        for n in nodes:
+            if n.get("isSelector", False):
+                selector_node_ids.add(n["id"])
+        for node in nodes:
+            if node["id"] in grouped_node_ids:
+                continue  # groups are handled separately
+            step = {"id": node["id"]}
+            if node.get("isSelector", False):
+                step["selector"] = True
+            if node.get("type") == "manual":
+                step["manual"] = {
+                    "author": node.get("author", "主持人"),
+                    "content": node.get("content", ""),
+                }
+            else:
+                step["expert"] = _node_yaml_name(node)
+                if node.get("content"):
+                    step["instruction"] = node["content"]
+                if node.get("type") == "external":
+                    for _ek in ("api_url", "api_key", "model"):
+                        if node.get(_ek):
+                            step[_ek] = node[_ek]
+                    if node.get("headers") and isinstance(node["headers"], dict):
+                        step["headers"] = node["headers"]
+            v2_plan.append(step)
+
+        # Build fixed edges list — exclude edges from selector nodes
+        # (selector node outgoing edges become selector_edges choices)
+        v2_edges = []
+        for e in edges:
+            if e["source"] not in selector_node_ids:
+                v2_edges.append([e["source"], e["target"]])
+
+        # Build conditional edges list
+        v2_cond_edges = []
+        for ce in conditional_edges_raw:
+            cond_entry = {
+                "source": ce.get("source", ""),
+                "condition": ce.get("condition", ""),
+                "then": ce.get("then", ""),
+            }
+            if ce.get("else"):
+                cond_entry["else"] = ce["else"]
+            v2_cond_edges.append(cond_entry)
+
+        # Build selector edges list
+        v2_sel_edges = []
+        for se in selector_edges_raw:
+            sel_entry = {
+                "source": se.get("source", ""),
+                "choices": se.get("choices", {}),
+            }
+            v2_sel_edges.append(sel_entry)
+
+        schedule = {
+            "version": 2,
+            "repeat": repeat,
+            "plan": v2_plan if v2_plan else [{"all_experts": True}],
+            "edges": v2_edges,
+        }
+        if v2_cond_edges:
+            schedule["conditional_edges"] = v2_cond_edges
+        if v2_sel_edges:
+            schedule["selector_edges"] = v2_sel_edges
+
+        return yaml.dump(schedule, allow_unicode=True, default_flow_style=False, sort_keys=False)
+
+    # ── Version 1 output (no conditional edges) ──
     # Build final YAML structure
     schedule = {
         "version": 1,

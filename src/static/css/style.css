@@ -1078,3 +1078,34 @@ header {
     .settings-modal { width: 100%; max-width: 100%; max-height: 100vh; border-radius: 0; }
     .settings-field { flex-direction: column; }
 }
+
+/* ── START / END Node Badges ── */
+.orch-node-badge {
+    position: absolute; top: -10px; font-size: 9px; font-weight: 700;
+    padding: 1px 6px; border-radius: 6px; pointer-events: none; z-index: 25;
+    letter-spacing: 0.5px; text-transform: uppercase;
+}
+.orch-start-badge { left: 8px; background: #16a34a; color: #fff; box-shadow: 0 0 6px #16a34a80; }
+.orch-end-badge { right: 8px; background: #dc2626; color: #fff; box-shadow: 0 0 6px #dc262680; }
+
+/* ── Conditional Edge Labels on SVG ── */
+.orch-edge-label {
+    font-size: 10px; font-weight: 600; pointer-events: none;
+    paint-order: stroke; stroke: white; stroke-width: 3px; fill: #374151;
+}
+.orch-then-label { fill: #16a34a; }
+.orch-else-label { fill: #ea580c; }
+.orch-selector-label { fill: #8b5cf6; }
+
+/* ── Selector Node Style ── */
+.orch-node.selector-type {
+    border-color: #8b5cf6 !important;
+    box-shadow: 0 0 8px #8b5cf680, inset 0 0 0 1px #8b5cf640;
+}
+.orch-selector-badge {
+    position: absolute; bottom: -10px; left: 50%; transform: translateX(-50%);
+    font-size: 8px; font-weight: 700; padding: 1px 6px; border-radius: 6px;
+    pointer-events: none; z-index: 25; letter-spacing: 0.5px;
+    background: #8b5cf6; color: #fff; box-shadow: 0 0 6px #8b5cf680;
+    white-space: nowrap;
+}

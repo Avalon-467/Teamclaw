@@ -48,6 +48,7 @@ Execution modes:
 
 import asyncio
 import os
+import re
 import sys
 import uuid
 
@@ -59,7 +60,17 @@ from llm_factory import create_chat_model, extract_text
 
 from oasis.forum import DiscussionForum
 from oasis.experts import ExpertAgent, SessionExpert, ExternalExpert, get_all_experts
-from oasis.scheduler import Schedule, ScheduleStep, StepType, parse_schedule, load_schedule_file, extract_expert_names, collect_external_configs
+from oasis.scheduler import (
+    Schedule, ScheduleStep, StepType, Edge, ConditionalEdge, SelectorEdge,
+    START, END, MAX_SUPER_STEPS,
+    parse_schedule, load_schedule_file, extract_expert_names, collect_external_configs,
+)
+
+# Maximum total node executions across all super-steps (safety limit)
+_MAX_TOTAL_NODE_EXECS = 500
+
+# Regex for parsing selector node output: [oasis reply choose N]
+_OASIS_REPLY_CHOOSE_RE = re.compile(r"\[oasis\s+reply\s+choose\s+(\d+)\]", re.IGNORECASE)
 
 # 加载总结 prompt 模板（模块级别，导入时执行一次）
 _prompts_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data", "prompts")
@@ -250,7 +261,7 @@ class DiscussionEngine:
             yaml_to_expert[full_name] = expert
 
         self.experts = experts_list
-        self._dag_step_map: dict[str, ScheduleStep] = {}  # populated in _run_dag()
+        self._total_node_execs = 0  # safety counter for Pregel super-step execution
 
         # Build lookup map: YAML original names first (highest priority for scheduling),
         # then register by internal name, title, tag, session_id as shortcuts
@@ -309,14 +320,33 @@ class DiscussionEngine:
         external_count = sum(1 for e in self.experts if isinstance(e, ExternalExpert))
         direct_count = len(self.experts) - session_count - external_count
         mode_label = "discussion" if self._discussion else "execute"
+        n_nodes = len(self.schedule.nodes)
+        n_edges = len(self.schedule.edges) + len(self.schedule.conditional_edges)
         print(
             f"[OASIS] 🏛️ Discussion started: {self.forum.topic_id} "
             f"({len(self.experts)} experts [{direct_count} direct, {session_count} session, {external_count} external], "
-            f"max {self.forum.max_rounds} rounds, mode={mode_label})"
+            f"graph: {n_nodes} nodes, {n_edges} edges, mode={mode_label})"
         )
 
         try:
-            await self._run_scheduled()
+            max_repeats = 1
+            if self.schedule.repeat:
+                max_repeats = self.schedule.max_repeat if self.schedule.max_repeat > 0 else self.forum.max_rounds
+
+            can_early_stop = self._early_stop and self._discussion
+
+            for repeat_round in range(max_repeats):
+                self._check_cancelled()
+                if max_repeats > 1:
+                    self.forum.current_round = repeat_round + 1
+                    self.forum.log_event("repeat", detail=f"Repeat {repeat_round + 1}/{max_repeats}")
+                    print(f"[OASIS] 📢 Repeat round {repeat_round + 1}/{max_repeats}")
+
+                await self._run_graph()
+
+                if can_early_stop and repeat_round >= 1 and await self._consensus_reached():
+                    print(f"[OASIS] 🤝 Consensus reached at repeat round {repeat_round + 1}")
+                    break
 
             if self._discussion:
                 self.forum.conclusion = await self._summarize()
@@ -343,144 +373,287 @@ class DiscussionEngine:
             self.forum.status = "error"
             self.forum.conclusion = f"讨论过程中出现错误: {str(e)}"
 
-    async def _run_scheduled(self):
-        """Execute the schedule (linear or DAG)."""
-        if self.schedule.is_dag:
-            await self._run_dag()
-            return
+    async def _run_graph(self):
+        """Execute the graph using Pregel-style super-step iteration.
 
-        steps = self.schedule.steps
-        # In execute mode, early_stop is meaningless (no votes)
-        can_early_stop = self._early_stop and self._discussion
-
-        if self.schedule.repeat:
-            for round_num in range(self.forum.max_rounds):
-                self._check_cancelled()
-                self.forum.current_round = round_num + 1
-                self.forum.log_event("round", detail=f"Round {self.forum.current_round}/{self.forum.max_rounds}")
-                print(f"[OASIS] 📢 Round {self.forum.current_round}/{self.forum.max_rounds}")
-
-                for step in steps:
-                    self._check_cancelled()
-                    await self._execute_step(step)
-
-                if can_early_stop and round_num >= 1 and await self._consensus_reached():
-                    print(f"[OASIS] 🤝 Consensus reached at round {self.forum.current_round}")
-                    break
-        else:
-            for step_idx, step in enumerate(steps):
-                self._check_cancelled()
-                self.forum.current_round = step_idx + 1
-                self.forum.max_rounds = len(steps)
-                self.forum.log_event("round", detail=f"Step {step_idx + 1}/{len(steps)}")
-                print(f"[OASIS] 📢 Step {step_idx + 1}/{len(steps)}")
-
-                await self._execute_step(step)
-
-                if can_early_stop and step_idx >= 1 and await self._consensus_reached():
-                    print(f"[OASIS] 🤝 Consensus reached at step {step_idx + 1}")
-                    break
-
-    async def _run_dag(self):
-        """Execute DAG schedule: run steps as soon as all their dependencies complete.
-
-        Uses asyncio tasks + events so that independent branches run in parallel,
-        and a node starts immediately once all its predecessors finish.
+        Algorithm:
+          1. Initialize: activate all entry nodes (nodes with no incoming edges)
+          2. Super-step loop:
+             a. Execute all activated nodes in parallel
+             b. For each completed node, evaluate outgoing edges:
+                - Fixed edges: always fire → activate target
+                - Conditional edges: evaluate condition → activate chosen target
+             c. Collect newly activated nodes for next super-step
+             d. If no new activations or END reached → stop
+          3. Safety: stop after MAX_SUPER_STEPS to prevent infinite loops
         """
-        steps = self.schedule.steps
-        # Build lookup: step_id → step
-        step_map: dict[str, ScheduleStep] = {}
-        for s in steps:
-            if s.step_id:
-                step_map[s.step_id] = s
+        sched = self.schedule
+        node_map = sched.node_map
 
-        # Store for _build_visibility_filter to use
-        self._dag_step_map = step_map
+        # Track which nodes have been completed in this execution
+        # For cycles: a node can be activated multiple times
+        completed_set: set[str] = set()     # tracks last-completed nodes (for trigger checking)
+        super_step = 0
 
-        # Event per step_id — set when that step completes
-        done_events: dict[str, asyncio.Event] = {}
-        for sid in step_map:
-            done_events[sid] = asyncio.Event()
+        # Start with entry nodes
+        activated: set[str] = set(sched.entry_nodes)
+        reached_end = False
 
-        total = len(step_map)
-        completed_count = 0
+        print(f"  [OASIS] 🚀 Graph engine start: {len(sched.nodes)} nodes, entry={list(activated)}")
+        self.forum.log_event("graph_start", detail=f"nodes={len(sched.nodes)}, entries={list(activated)}")
 
-        async def _run_step(step: ScheduleStep):
-            nonlocal completed_count
-            # Wait for all dependencies
-            for dep_id in step.depends_on:
-                if dep_id in done_events:
-                    await done_events[dep_id].wait()
-
+        while activated and super_step < MAX_SUPER_STEPS:
             self._check_cancelled()
+            super_step += 1
 
-            completed_count += 1
-            self.forum.current_round = completed_count
-            self.forum.max_rounds = total
-            self.forum.log_event("round", detail=f"DAG step '{step.step_id}' ({completed_count}/{total})")
-            print(f"[OASIS] 📢 DAG step '{step.step_id}' ({completed_count}/{total})")
+            # Safety limit on total node executions
+            self._total_node_execs += len(activated)
+            if self._total_node_execs > _MAX_TOTAL_NODE_EXECS:
+                raise RuntimeError(
+                    f"Safety limit reached: {self._total_node_execs} total node executions "
+                    f"(max {_MAX_TOTAL_NODE_EXECS}). Possible infinite loop in graph."
+                )
 
-            await self._execute_step(step)
+            activated_list = sorted(activated)  # deterministic order
+            print(f"  [OASIS] ⚡ Super-step {super_step}: executing {activated_list}")
+            self.forum.log_event("super_step", detail=f"step={super_step}, nodes={activated_list}")
 
-            # Signal completion
-            if step.step_id in done_events:
-                done_events[step.step_id].set()
+            # Update forum progress
+            self.forum.current_round = super_step
+            self.forum.max_rounds = max(super_step, len(sched.nodes))
 
-        # Launch all steps concurrently — each waits for its own deps
-        tasks = [asyncio.create_task(_run_step(s)) for s in steps if s.step_id]
+            # Execute all activated nodes in parallel
+            async def _exec_node(node_id: str):
+                node = node_map[node_id]
+                # Build visibility: in execute mode, only see posts from upstream nodes
+                vis = self._build_visibility_filter_graph(node_id, completed_set)
+                await self._execute_node(node, vis)
 
-        # Also run steps without IDs sequentially at the end (backward compat)
-        no_id_steps = [s for s in steps if not s.step_id]
+            if len(activated_list) == 1:
+                # Single node: execute directly (avoids gather overhead)
+                await _exec_node(activated_list[0])
+            else:
+                # Multiple nodes: execute in parallel
+                results = await asyncio.gather(
+                    *[_exec_node(nid) for nid in activated_list],
+                    return_exceptions=True,
+                )
+                for nid, r in zip(activated_list, results):
+                    if isinstance(r, Exception) and not isinstance(r, asyncio.CancelledError):
+                        print(f"  [OASIS] ❌ Node '{nid}' error: {r}")
+                        # Continue with other nodes; don't propagate error to stop entire graph
 
-        # Wait for all DAG tasks
-        if tasks:
-            results = await asyncio.gather(*tasks, return_exceptions=True)
-            for r in results:
-                if isinstance(r, Exception) and not isinstance(r, asyncio.CancelledError):
-                    print(f"[OASIS] ❌ DAG step error: {r}")
+            # Mark nodes as completed
+            for nid in activated_list:
+                completed_set.add(nid)
 
-        # Run non-DAG steps (if any) sequentially after DAG
-        for step in no_id_steps:
-            self._check_cancelled()
-            await self._execute_step(step)
+            # Evaluate outgoing edges to determine next activated nodes
+            next_activated: set[str] = set()
 
-    def _build_visibility_filter(self, step: ScheduleStep) -> dict:
-        """Build visibility filter kwargs for execute mode.
+            for nid in activated_list:
+                # Fixed edges: always fire
+                for edge in sched.out_edges.get(nid, []):
+                    if edge.target == END:
+                        reached_end = True
+                        continue
+                    # Check if ALL incoming sources of target are completed
+                    target_in = sched.in_sources.get(edge.target, set())
+                    if target_in.issubset(completed_set):
+                        next_activated.add(edge.target)
+                    # For cycles: if this is a back-edge, activate immediately
+                    # (the node was completed before, so re-activate it)
+                    elif edge.target in completed_set:
+                        # Back-edge: re-activate for next iteration
+                        completed_set.discard(edge.target)
+                        next_activated.add(edge.target)
+
+                # Conditional edges: evaluate condition to pick target
+                for ce in sched.out_cond_edges.get(nid, []):
+                    cond_result = await self._eval_condition(ce.condition)
+                    if cond_result:
+                        target = ce.then_target
+                        print(f"  [OASIS] 🔀 Condition '{ce.condition}' → TRUE → {target}")
+                    else:
+                        target = ce.else_target
+                        print(f"  [OASIS] 🔀 Condition '{ce.condition}' → FALSE → {target or 'none'}")
+
+                    if not target:
+                        continue
+                    if target == END:
+                        reached_end = True
+                        continue
+
+                    self.forum.log_event("condition", detail=f"'{ce.condition}' → {target}")
+
+                    # Conditional edge respects the same AND-trigger rule as fixed edges:
+                    # the target is only activated when ALL its fixed-edge in_sources
+                    # are satisfied.  (in_sources no longer contains conditional-edge
+                    # sources, so this check won't be blocked by unresolved back-edges.)
+                    target_in = sched.in_sources.get(target, set())
+                    if target in completed_set:
+                        # Back-edge / loop: re-activate the already-completed node
+                        completed_set.discard(target)
+                        next_activated.add(target)
+                    elif target_in.issubset(completed_set):
+                        next_activated.add(target)
+                    else:
+                        # Fixed-edge predecessors not yet done — defer activation.
+                        # The target will be picked up later when its fixed-edge
+                        # sources complete.
+                        print(f"  [OASIS] ⏳ Conditional target '{target}' deferred: "
+                              f"waiting for fixed-edge sources {target_in - completed_set}")
+
+                # Selector edges: parse LLM output to pick target
+                se = sched.out_selector_edges.get(nid)
+                if se:
+                    # Get the last post from this node's agent to find the choice
+                    all_posts = await self.forum.browse()
+                    node_step = sched.node_map.get(nid)
+                    node_agents = self._resolve_experts(node_step.expert_names) if node_step else []
+                    node_author_names = {a.name for a in node_agents}
+                    # Find the last post from this node's agents
+                    selector_output = ""
+                    for p in reversed(all_posts):
+                        if p.author in node_author_names:
+                            selector_output = p.content
+                            break
+                    # Parse [oasis reply choose N]
+                    match = _OASIS_REPLY_CHOOSE_RE.search(selector_output)
+                    if match:
+                        choice_num = int(match.group(1))
+                        target = se.choices.get(choice_num, "")
+                        print(f"  [OASIS] 🎯 Selector '{nid}' chose [{choice_num}] → {target or 'invalid'}")
+                        self.forum.log_event("selector", detail=f"chose [{choice_num}] → {target}")
+                        if target and target != END:
+                            target_in = sched.in_sources.get(target, set())
+                            if target in completed_set:
+                                completed_set.discard(target)
+                                next_activated.add(target)
+                            elif target_in.issubset(completed_set):
+                                next_activated.add(target)
+                            else:
+                                print(f"  [OASIS] ⏳ Selector target '{target}' deferred")
+                        elif target == END:
+                            reached_end = True
+                    else:
+                        # No valid choice found — default to first choice
+                        if se.choices:
+                            first_key = min(se.choices.keys())
+                            target = se.choices[first_key]
+                            print(f"  [OASIS] ⚠️ Selector '{nid}' no valid [oasis reply choose N] found in output, defaulting to [{first_key}] → {target}")
+                            self.forum.log_event("selector_default", detail=f"default [{first_key}] → {target}")
+                            if target and target != END:
+                                target_in = sched.in_sources.get(target, set())
+                                if target in completed_set:
+                                    completed_set.discard(target)
+                                    next_activated.add(target)
+                                elif target_in.issubset(completed_set):
+                                    next_activated.add(target)
+                            elif target == END:
+                                reached_end = True
+
+            # If END was reached and no other nodes activated, stop
+            if reached_end and not next_activated:
+                print(f"  [OASIS] 🏁 Reached END at super-step {super_step}")
+                break
+
+            # Check: nodes with no outgoing edges that just completed = implicit END
+            if not next_activated:
+                # All activated nodes had no outgoing edges → implicit end
+                all_terminal = all(
+                    not sched.out_edges.get(nid) and not sched.out_cond_edges.get(nid) and not sched.out_selector_edges.get(nid)
+                    for nid in activated_list
+                )
+                if all_terminal:
+                    print(f"  [OASIS] 🏁 All terminal nodes completed at super-step {super_step}")
+                    break
+
+            activated = next_activated
+
+        if super_step >= MAX_SUPER_STEPS:
+            print(f"  [OASIS] ⚠️ Max super-steps ({MAX_SUPER_STEPS}) reached, stopping graph")
+            self.forum.log_event("graph_max_steps", detail=f"stopped at {super_step}")
+
+        self.forum.log_event("graph_end", detail=f"completed in {super_step} super-steps")
+        print(f"  [OASIS] 🏁 Graph completed in {super_step} super-steps, {self._total_node_execs} node executions")
+
+    def _build_visibility_filter_graph(self, node_id: str, completed_set: set[str]) -> dict:
+        """Build visibility filter for a node based on its upstream nodes in the graph.
 
         In execute mode (non-discussion):
-          - DAG mode: agent can only see posts from direct upstream (depends_on) steps.
-          - Non-DAG mode: agent can only see posts from the previous round.
+          Agent can only see posts from direct upstream (incoming edge source) nodes.
         In discussion mode: no filtering (returns empty dict).
         """
         if self._discussion:
             return {}
 
-        if self.schedule.is_dag:
-            # DAG mode: only see posts from direct upstream authors
-            if not step.depends_on:
-                # No dependencies → cannot see any prior posts
-                return {"visible_authors": set()}
-            # Resolve depends_on step_ids → expert names (authors)
-            upstream_authors: set[str] = set()
-            for dep_id in step.depends_on:
-                dep_step = self._dag_step_map.get(dep_id)
-                if dep_step:
-                    dep_agents = self._resolve_experts(dep_step.expert_names)
-                    for a in dep_agents:
-                        upstream_authors.add(a.name)
-            return {"visible_authors": upstream_authors}
-        else:
-            # Non-DAG mode: only see posts from the previous round
-            prev_round = self.forum.current_round - 1
-            if prev_round < 1:
-                # First round → no prior posts visible
-                return {"visible_authors": set()}
-            return {"from_round": prev_round}
+        sched = self.schedule
+        # Find all nodes that have edges pointing TO this node
+        upstream_ids = sched.in_sources.get(node_id, set())
+        # Only include completed upstream nodes
+        active_upstream = upstream_ids & completed_set
 
-    async def _execute_step(self, step: ScheduleStep):
-        """Execute a single schedule step."""
+        if not active_upstream:
+            return {"visible_authors": set()}
+
+        upstream_authors: set[str] = set()
+        for uid in active_upstream:
+            up_node = sched.node_map.get(uid)
+            if up_node:
+                agents = self._resolve_experts(up_node.expert_names)
+                for a in agents:
+                    upstream_authors.add(a.name)
+        return {"visible_authors": upstream_authors}
+
+    async def _eval_condition(self, condition: str) -> bool:
+        """Evaluate a condition expression against current forum state.
+
+        Supported expressions:
+          last_post_contains:<keyword>       — last post content contains keyword
+          last_post_not_contains:<keyword>   — last post does NOT contain keyword
+          post_count_gte:<N>                 — total post count >= N
+          post_count_lt:<N>                  — total post count < N
+          always                             — always true
+          !<expr>                            — negate any expression
+        """
+        expr = condition.strip()
+
+        # Handle negation prefix
+        if expr.startswith("!"):
+            inner = expr[1:].strip()
+            return not await self._eval_condition(inner)
+
+        if expr == "always":
+            return True
+
+        # Get last post for content-based conditions
+        all_posts = await self.forum.browse()
+        last_post_content = all_posts[-1].content if all_posts else ""
+
+        if expr.startswith("last_post_contains:"):
+            keyword = expr.split(":", 1)[1]
+            return keyword in last_post_content
+
+        if expr.startswith("last_post_not_contains:"):
+            keyword = expr.split(":", 1)[1]
+            return keyword not in last_post_content
+
+        if expr.startswith("post_count_gte:"):
+            n = int(expr.split(":", 1)[1])
+            return len(all_posts) >= n
+
+        if expr.startswith("post_count_lt:"):
+            n = int(expr.split(":", 1)[1])
+            return len(all_posts) < n
+
+        print(f"  [OASIS] ⚠️ Unknown condition expression: '{expr}', treating as false")
+        return False
+
+    async def _execute_node(self, step: ScheduleStep, vis: dict | None = None):
+        """Execute a single graph node."""
         disc = self._discussion
-        vis = self._build_visibility_filter(step)
+        if vis is None:
+            vis = {}
 
         if step.step_type == StepType.MANUAL:
             print(f"  [OASIS] 📝 Manual post by {step.manual_author}")
@@ -511,9 +684,28 @@ class DiscussionEngine:
             agents = self._resolve_experts(step.expert_names)
             if agents:
                 instr = step.instructions.get(step.expert_names[0], "")
-                print(f"  [OASIS] 🎤 {agents[0].name} speaks" + (f" (instruction: {instr[:40]}...)" if instr else ""))
-                self.forum.log_event("agent_call", agent=agents[0].name, detail=instr[:80] if instr else "")
-                await agents[0].participate(self.forum, instruction=instr, discussion=disc, **vis)
+                # For selector nodes: inject choice prompt
+                selector_instr = ""
+                if step.is_selector:
+                    se = self.schedule.out_selector_edges.get(step.node_id)
+                    if se and se.choices:
+                        choices_desc = []
+                        for num in sorted(se.choices.keys()):
+                            target_id = se.choices[num]
+                            target_node = self.schedule.node_map.get(target_id)
+                            target_name = target_node.expert_names[0] if target_node and target_node.expert_names else target_id
+                            choices_desc.append(f"  [oasis reply choose {num}] → {target_name} ({target_id})")
+                        selector_instr = (
+                            "\n\n⚠️ SELECTOR INSTRUCTION:\n"
+                            "你需要根据上下文选择下一步操作。可选路径如下：\n"
+                            + "\n".join(choices_desc) +
+                            "\n请在你的回复中包含对应的选择标签，例如 [oasis reply choose 1]。\n"
+                            "只选一个。"
+                        )
+                combined_instr = (instr + selector_instr) if instr else selector_instr
+                print(f"  [OASIS] 🎤 {agents[0].name} speaks" + (f" (instruction: {combined_instr[:60]}...)" if combined_instr else "") + (" [SELECTOR]" if step.is_selector else ""))
+                self.forum.log_event("agent_call", agent=agents[0].name, detail=combined_instr[:80] if combined_instr else "")
+                await agents[0].participate(self.forum, instruction=combined_instr, discussion=disc, **vis)
                 self.forum.log_event("agent_done", agent=agents[0].name)
 
         elif step.step_type == StepType.PARALLEL:

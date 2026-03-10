@@ -459,6 +459,7 @@ function autoArrangeNodes() {
     // Update groups
     state.groups.forEach(g => updateGroupBounds(g));
     renderAllEdges();
+    updateNodeBadges();
     updateYamlOutput();
     showToast(i18n('toast_arranged'));
 }
@@ -641,6 +642,29 @@ async function copyLLMPrompt() {
 }
 
 function getLayoutData() {
+    // Separate conditional edges from fixed edges for export
+    const fixedEdges = [];
+    const conditionalEdges = [];
+    const processedCondIds = new Set();
+
+    state.edges.forEach(e => {
+        // Skip else-sibling edges (they're visual only; the conditional info is on the parent)
+        if (e._isElseSibling) return;
+
+        if (e.edgeType === 'conditional' && e.condition) {
+            conditionalEdges.push({
+                source: e.source,
+                condition: e.condition,
+                then: e.target,
+                else: e.elseTarget || '',
+            });
+        } else {
+            fixedEdges.push({ id: e.id, source: e.source, target: e.target });
+        }
+    });
+
+    const hasConditional = conditionalEdges.length > 0;
+
     return {
         nodes: state.nodes.map(n => ({
             id: n.id, name: n.name, tag: n.tag, emoji: n.emoji,
@@ -648,13 +672,15 @@ function getLayoutData() {
             temperature: n.temperature,
             author: n.author, content: n.content,
         })),
-        edges: state.edges.map(e => ({ id: e.id, source: e.source, target: e.target })),
+        edges: fixedEdges,
+        conditionalEdges: conditionalEdges,
         groups: state.groups.map(g => ({
             id: g.id, name: g.name, type: g.type,
             x: g.x, y: g.y, w: g.w, h: g.h,
             nodeIds: g.nodeIds,
         })),
         settings: { ...state.settings },
+        hasConditional,
     };
 }
 
@@ -678,11 +704,53 @@ function loadLayoutData(data) {
     });
 
     (data.edges || []).forEach(e => {
-        state.edges.push(e);
-        const idNum = parseInt(e.id.replace('e', ''));
+        const edgeData = {
+            id: e.id || ('e' + state.nextEdgeId++),
+            source: e.source,
+            target: e.target,
+            edgeType: e.edgeType || 'fixed',
+            condition: e.condition || '',
+            thenTarget: e.thenTarget || '',
+            elseTarget: e.elseTarget || '',
+        };
+        state.edges.push(edgeData);
+        const idNum = parseInt(edgeData.id.replace('e', ''));
         if (idNum >= state.nextEdgeId) state.nextEdgeId = idNum + 1;
     });
+
+    // Load conditional edges and convert to edge structures
+    (data.conditionalEdges || []).forEach(ce => {
+        // Create the main (then) edge
+        const mainEdgeId = 'e' + state.nextEdgeId++;
+        const mainEdge = {
+            id: mainEdgeId,
+            source: ce.source,
+            target: ce.then || ce.then_target || '',
+            edgeType: 'conditional',
+            condition: ce.condition || '',
+            thenTarget: ce.then || ce.then_target || '',
+            elseTarget: ce.else || ce.else_target || '',
+        };
+        state.edges.push(mainEdge);
+
+        // Create else-sibling edge if else target exists
+        if (mainEdge.elseTarget) {
+            const elseEdgeId = 'e' + state.nextEdgeId++;
+            state.edges.push({
+                id: elseEdgeId,
+                source: ce.source,
+                target: mainEdge.elseTarget,
+                edgeType: 'conditional',
+                condition: mainEdge.condition,
+                thenTarget: '',
+                elseTarget: '',
+                _isElseSibling: mainEdgeId,
+            });
+        }
+    });
+
     renderAllEdges();
+    updateNodeBadges();
 
     (data.groups || []).forEach(g => {
         state.groups.push(g);
