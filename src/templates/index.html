@@ -295,10 +295,20 @@
                     <div class="orch-sidebar-header" style="display:flex;align-items:center;justify-content:space-between;cursor:pointer;user-select:none;" onclick="toggleOrchExpertList()">
                         <span class="text-sm font-bold text-gray-700">🧑‍💼 <span data-i18n="orch_expert_pool_text">专家池</span></span>
                         <span id="orch-expert-toggle-icon" style="font-size:12px;transition:transform 0.2s;margin-right:4px;">▼</span>
-                        <!-- Manual injection -->
-                        <div class="orch-manual-card" draggable="true" id="orch-manual-card" style="margin:0;padding:4px 8px;font-size:11px;">
-                            <span style="font-size:14px;">📝</span>
-                            <div><span class="text-xs font-semibold text-gray-700" data-i18n="orch_manual_inject">手动注入</span></div>
+                        <!-- Start / Manual / End injection cards -->
+                        <div style="display:flex;gap:3px;align-items:center;">
+                            <div class="orch-manual-card orch-start-card" draggable="true" id="orch-start-card" style="margin:0;padding:4px 6px;font-size:11px;">
+                                <span style="font-size:14px;">🚀</span>
+                                <div><span class="text-xs font-semibold text-gray-700" data-i18n="orch_start_node">开始</span></div>
+                            </div>
+                            <div class="orch-manual-card" draggable="true" id="orch-manual-card" style="margin:0;padding:4px 6px;font-size:11px;">
+                                <span style="font-size:14px;">📝</span>
+                                <div><span class="text-xs font-semibold text-gray-700" data-i18n="orch_manual_inject">手动注入</span></div>
+                            </div>
+                            <div class="orch-manual-card orch-end-card" draggable="true" id="orch-end-card" style="margin:0;padding:4px 6px;font-size:11px;">
+                                <span style="font-size:14px;">🏁</span>
+                                <div><span class="text-xs font-semibold text-gray-700" data-i18n="orch_end_node">结束</span></div>
+                            </div>
                         </div>
                     </div>
                     <div class="orch-sidebar-grid">

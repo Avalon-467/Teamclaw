@@ -472,6 +472,10 @@ header {
     border-radius: 8px; background: #faf5ff; border: 1px dashed #a855f7; cursor: grab; font-size: 12px;
 }
 .orch-manual-card:hover { background: #f3e8ff; }
+.orch-start-card { background: #ecfdf5 !important; border-color: #10b981 !important; }
+.orch-start-card:hover { background: #d1fae5 !important; }
+.orch-end-card { background: #fef2f2 !important; border-color: #ef4444 !important; }
+.orch-end-card:hover { background: #fee2e2 !important; }
 
 .orch-canvas-wrapper { flex: 1; display: flex; flex-direction: column; min-width: 0; }
 .orch-toolbar {

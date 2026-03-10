@@ -897,6 +897,7 @@ def _yaml_to_layout_data(yaml_str: str) -> dict:
     Nodes are auto-positioned left-to-right (sequential) / top-to-bottom (parallel).
     Supports DAG mode: steps with ``id`` and ``depends_on`` fields are laid out
     using topological-level positioning (independent branches in parallel columns).
+    Supports Version 2 graph mode: explicit edges, conditional_edges, selector_edges.
     """
     data = _yaml.safe_load(yaml_str)
     if not isinstance(data, dict) or "plan" not in data:
@@ -904,6 +905,11 @@ def _yaml_to_layout_data(yaml_str: str) -> dict:
 
     plan = data.get("plan", [])
     repeat = data.get("repeat", True)
+    version = data.get("version", 1)
+
+    # Version 2: explicit graph with edges / conditional_edges / selector_edges
+    if version >= 2:
+        return _yaml_v2_to_layout(data)
 
     # Detect DAG mode: any step has an 'id' field
     is_dag = any(isinstance(s, dict) and "id" in s for s in plan)
@@ -912,6 +918,226 @@ def _yaml_to_layout_data(yaml_str: str) -> dict:
         return _yaml_dag_to_layout(plan, repeat)
     else:
         return _yaml_linear_to_layout(plan, repeat)
+
+
+def _yaml_v2_to_layout(data: dict) -> dict:
+    """Convert Version 2 graph YAML to canvas layout JSON.
+
+    Handles explicit edges, conditional_edges, selector_edges, and selector nodes.
+    Nodes are positioned using topological-level layout based on the edges list.
+    """
+    plan = data.get("plan", [])
+    repeat = data.get("repeat", False)
+    raw_edges = data.get("edges", [])
+    raw_cond_edges = data.get("conditional_edges", [])
+    raw_sel_edges = data.get("selector_edges", [])
+
+    nodes: list[dict] = []
+    edges: list[dict] = []
+
+    nid = 1
+    eid = 1
+
+    # ── Layout constants ──
+    MARGIN_X = 60
+    MARGIN_Y = 40
+    GAP_X = 260
+    GAP_Y = 90
+
+    # Build set of selector node step_ids
+    selector_step_ids = set()
+    for se in raw_sel_edges:
+        src = se.get("source", "")
+        if src:
+            selector_step_ids.add(src)
+
+    # First pass: create nodes, build step_id → node_id mapping
+    step_id_to_node_id: dict[str, str] = {}
+    step_ids_ordered: list[str] = []
+
+    for step in plan:
+        if not isinstance(step, dict):
+            continue
+        step_id = str(step.get("id", ""))
+        node_id = f"on{nid}"; nid += 1
+
+        if "expert" in step:
+            raw = step["expert"]
+            info = _parse_expert_name(raw)
+            node = {
+                "id": node_id,
+                "x": 0, "y": 0,
+                **info,
+                "author": "主持人",
+                "content": step.get("instruction", ""),
+                "source": "",
+            }
+            if info.get("type") == "external":
+                for _ek in ("api_url", "api_key", "model"):
+                    if _ek in step:
+                        node[_ek] = step[_ek]
+                if "headers" in step and isinstance(step["headers"], dict):
+                    node["headers"] = step["headers"]
+            # Mark selector nodes
+            if step.get("selector") or step_id in selector_step_ids:
+                node["isSelector"] = True
+        elif "manual" in step:
+            manual = step["manual"]
+            node = {
+                "id": node_id,
+                "x": 0, "y": 0,
+                "type": "manual", "tag": "manual",
+                "name": "手动注入", "emoji": "📝",
+                "temperature": 0, "instance": 1, "session_id": "",
+                "author": manual.get("author", "主持人") if isinstance(manual, dict) else "主持人",
+                "content": manual.get("content", "") if isinstance(manual, dict) else "",
+                "source": "",
+            }
+        elif "all_experts" in step:
+            node = {
+                "id": node_id,
+                "x": 0, "y": 0,
+                "type": "expert", "tag": "all",
+                "name": "全员讨论", "emoji": "👥",
+                "temperature": 0.5, "instance": 1, "session_id": "",
+                "author": "主持人", "content": "", "source": "",
+            }
+        else:
+            continue
+
+        nodes.append(node)
+        if step_id:
+            step_id_to_node_id[step_id] = node_id
+            step_ids_ordered.append(step_id)
+
+    # Build edges from explicit edges list
+    for e in raw_edges:
+        if isinstance(e, list) and len(e) >= 2:
+            src_nid = step_id_to_node_id.get(str(e[0]))
+            tgt_nid = step_id_to_node_id.get(str(e[1]))
+        elif isinstance(e, dict):
+            src_nid = step_id_to_node_id.get(str(e.get("source", "")))
+            tgt_nid = step_id_to_node_id.get(str(e.get("target", "")))
+        else:
+            continue
+        if src_nid and tgt_nid:
+            edges.append({"id": f"oe{eid}", "source": src_nid, "target": tgt_nid})
+            eid += 1
+
+    # ── Topological layout using edges (longest path) ──
+    # Build predecessor map from edges
+    preds: dict[str, list[str]] = {sid: [] for sid in step_ids_ordered}
+    for e in raw_edges:
+        if isinstance(e, list) and len(e) >= 2:
+            src_sid, tgt_sid = str(e[0]), str(e[1])
+        elif isinstance(e, dict):
+            src_sid = str(e.get("source", ""))
+            tgt_sid = str(e.get("target", ""))
+        else:
+            continue
+        if tgt_sid in preds and src_sid in step_id_to_node_id:
+            preds[tgt_sid].append(src_sid)
+
+    # NOTE: conditional_edges and selector_edges are NOT added to preds
+    # because they may form cycles (e.g. else-branch loops back),
+    # which would cause infinite recursion in the topological sort.
+    # Only fixed edges (which form a DAG) are used for layer computation.
+
+    layer: dict[str, int] = {}
+    _visiting: set[str] = set()  # cycle guard
+    def _get_layer(sid: str) -> int:
+        if sid in layer:
+            return layer[sid]
+        if sid in _visiting:
+            # Cycle detected — break it by treating as root
+            layer[sid] = 0
+            return 0
+        _visiting.add(sid)
+        deps = preds.get(sid, [])
+        if not deps:
+            layer[sid] = 0
+        else:
+            layer[sid] = max(_get_layer(d) for d in deps) + 1
+        _visiting.discard(sid)
+        return layer[sid]
+
+    for sid in step_ids_ordered:
+        _get_layer(sid)
+
+    # Group by layer
+    layers: dict[int, list[tuple[str, dict]]] = {}
+    for sid in step_ids_ordered:
+        lv = layer.get(sid, 0)
+        nd = next((n for n in nodes if n["id"] == step_id_to_node_id.get(sid)), None)
+        if nd:
+            layers.setdefault(lv, []).append((sid, nd))
+
+    # Barycenter ordering
+    node_y: dict[str, float] = {}
+    for lv in sorted(layers.keys()):
+        layer_items = layers[lv]
+        if lv > 0:
+            def _bary(sid: str) -> float:
+                deps = preds.get(sid, [])
+                ys = [node_y[d] for d in deps if d in node_y]
+                return sum(ys) / len(ys) if ys else 0.0
+            layer_items.sort(key=lambda t: _bary(t[0]))
+            layers[lv] = layer_items
+        count = len(layer_items)
+        total_h = (count - 1) * GAP_Y
+        y_start = MARGIN_Y + max(0, (400 - total_h) // 2)
+        for i, (sid, _nd) in enumerate(layer_items):
+            y = y_start + i * GAP_Y
+            node_y[sid] = y
+
+    # Assign final x, y coordinates
+    for lv, layer_items in sorted(layers.items()):
+        x = MARGIN_X + lv * GAP_X
+        for sid, nd in layer_items:
+            nd["x"] = x
+            nd["y"] = int(node_y.get(sid, MARGIN_Y))
+
+    # Build conditional edges output for frontend
+    cond_edges_out = []
+    for ce in raw_cond_edges:
+        src_nid = step_id_to_node_id.get(str(ce.get("source", "")))
+        then_nid = step_id_to_node_id.get(str(ce.get("then", "")))
+        else_nid = step_id_to_node_id.get(str(ce.get("else", ""))) if ce.get("else") else ""
+        if src_nid and then_nid:
+            cond_edges_out.append({
+                "source": src_nid,
+                "condition": ce.get("condition", ""),
+                "then": then_nid,
+                "else": else_nid or "",
+            })
+
+    # Build selector edges output for frontend
+    sel_edges_out = []
+    for se in raw_sel_edges:
+        src_nid = step_id_to_node_id.get(str(se.get("source", "")))
+        choices = se.get("choices", {})
+        if src_nid and choices:
+            mapped_choices = {}
+            for num, tgt_sid in choices.items():
+                tgt_nid = step_id_to_node_id.get(str(tgt_sid))
+                if tgt_nid:
+                    mapped_choices[int(num)] = tgt_nid
+            if mapped_choices:
+                sel_edges_out.append({"source": src_nid, "choices": mapped_choices})
+
+    layout = {
+        "nodes": nodes,
+        "edges": edges,
+        "conditionalEdges": cond_edges_out,
+        "selectorEdges": sel_edges_out,
+        "groups": [],
+        "settings": {
+            "repeat": repeat,
+            "max_rounds": 5,
+            "cluster_threshold": 150,
+        },
+    }
+    return layout
 
 
 def _yaml_dag_to_layout(plan: list, repeat: bool) -> dict:

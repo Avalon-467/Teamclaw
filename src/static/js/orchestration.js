@@ -90,11 +90,21 @@ function orchInit() {
     orchSetupCanvas();
     orchSetupSettings();
     orchSetupFileDrop();
-    // Bind manual injection card events
+    // Bind manual / start / end injection card events
     const mc = document.getElementById('orch-manual-card');
     if (mc) {
         const manualData = {type:'manual', name:t('orch_manual_inject'), tag:'manual', emoji:'📝', temperature:0};
         orchBindCardEvents(mc, manualData);
+    }
+    const sc = document.getElementById('orch-start-card');
+    if (sc) {
+        const startData = {type:'manual', name:t('orch_start_node'), tag:'manual', emoji:'🚀', temperature:0, author:t('orch_default_author'), content:t('orch_start_default_content')};
+        orchBindCardEvents(sc, startData);
+    }
+    const ec = document.getElementById('orch-end-card');
+    if (ec) {
+        const endData = {type:'manual', name:t('orch_end_node'), tag:'manual', emoji:'🏁', temperature:0, author:t('orch_default_author'), content:t('orch_end_default_content')};
+        orchBindCardEvents(ec, endData);
     }
 }
 
@@ -1244,11 +1254,21 @@ function orchShowAddOpenClawModal() {
 
 function orchRenderSidebar() {
     orchRenderExpertSidebar();
-    // Manual card (re-bind with unified events)
+    // Manual / Start / End cards (re-bind with unified events)
     const mc = document.getElementById('orch-manual-card');
     if (mc) {
         const manualData = {type:'manual', name:t('orch_manual_inject'), tag:'manual', emoji:'📝', temperature:0};
         orchBindCardEvents(mc, manualData);
+    }
+    const sc = document.getElementById('orch-start-card');
+    if (sc) {
+        const startData = {type:'manual', name:t('orch_start_node'), tag:'manual', emoji:'🚀', temperature:0, author:t('orch_default_author'), content:t('orch_start_default_content')};
+        orchBindCardEvents(sc, startData);
+    }
+    const ec = document.getElementById('orch-end-card');
+    if (ec) {
+        const endData = {type:'manual', name:t('orch_end_node'), tag:'manual', emoji:'🏁', temperature:0, author:t('orch_default_author'), content:t('orch_end_default_content')};
+        orchBindCardEvents(ec, endData);
     }
 }
 
@@ -1282,6 +1302,8 @@ function orchAddNode(data, x, y) {
     const id = 'on' + orch.nid++;
     const inst = data.instance || orchNextInstance(data);
     const node = { id, name: data.name, tag: data.tag||'custom', emoji: data.emoji||'⭐', x: Math.round(x), y: Math.round(y), type: data.type||'expert', temperature: data.temperature||0.5, author: data.author||t('orch_default_author'), content: data.content||'', session_id: data.session_id||'', source: data.source||'', instance: inst, stateful: data.stateful||false };
+    // Preserve selector node flag
+    if (data.isSelector) node.isSelector = true;
     // Preserve external agent extra fields
     if (data.type === 'external') {
         node.api_url = data.api_url || '';
@@ -1582,13 +1604,39 @@ function orchShowCondEdgeModal(edge) {
     const otherNodes = orch.nodes.filter(n=>n.id!==edge.source);
     const nodeOpts = otherNodes.map(n=>`<option value="${n.id}">${n.emoji||'🤖'} ${n.name} (${n.id})</option>`).join('');
     const noneOpt = `<option value="">${t('orch_cond_none')}</option>`;
+    // Parse existing condition for edit mode
+    let _parsedNeg = false, _parsedType = 'always', _parsedVal = '';
+    if (edge.condition) {
+        let _expr = edge.condition.trim();
+        if (_expr.startsWith('!')) { _parsedNeg = true; _expr = _expr.slice(1).trim(); }
+        if (_expr === 'always') { _parsedType = 'always'; }
+        else if (_expr.startsWith('last_post_contains:')) { _parsedType = 'last_post_contains'; _parsedVal = _expr.split(':',2)[1]||''; }
+        else if (_expr.startsWith('last_post_not_contains:')) { _parsedType = 'last_post_not_contains'; _parsedVal = _expr.split(':',2)[1]||''; }
+        else if (_expr.startsWith('post_count_gte:')) { _parsedType = 'post_count_gte'; _parsedVal = _expr.split(':',2)[1]||''; }
+        else if (_expr.startsWith('post_count_lt:')) { _parsedType = 'post_count_lt'; _parsedVal = _expr.split(':',2)[1]||''; }
+        else { _parsedType = 'always'; _parsedVal = ''; }
+    }
     overlay.innerHTML = `
         <div class="orch-modal" style="min-width:400px;max-width:500px;">
             <h3>${t('orch_modal_cond_edge')}</h3>
             <div style="margin-bottom:10px;">
-                <label style="display:block;font-size:12px;color:#6b7280;margin-bottom:3px;">${t('orch_cond_label_expr')}</label>
-                <input type="text" id="orch-cond-expr" value="${edge.condition||''}" placeholder="last_post_contains:LGTM" style="width:100%;padding:6px 10px;border:1px solid #d1d5db;border-radius:6px;font-size:12px;">
-                <div style="font-size:10px;color:#9ca3af;margin-top:2px;">${t('orch_cond_hint')}</div>
+                <label style="display:block;font-size:12px;color:#6b7280;margin-bottom:3px;">${t('orch_cond_label_type')}</label>
+                <select id="orch-cond-type" style="width:100%;padding:6px 10px;border:1px solid #d1d5db;border-radius:6px;font-size:12px;">
+                    <option value="last_post_contains">${t('orch_cond_opt_contains')}</option>
+                    <option value="last_post_not_contains">${t('orch_cond_opt_not_contains')}</option>
+                    <option value="post_count_gte">${t('orch_cond_opt_count_gte')}</option>
+                    <option value="post_count_lt">${t('orch_cond_opt_count_lt')}</option>
+                    <option value="always">${t('orch_cond_opt_always')}</option>
+                </select>
+            </div>
+            <div id="orch-cond-val-row" style="margin-bottom:10px;">
+                <label id="orch-cond-val-label" style="display:block;font-size:12px;color:#6b7280;margin-bottom:3px;">${t('orch_cond_label_keyword')}</label>
+                <input type="text" id="orch-cond-val" value="" placeholder="" style="width:100%;padding:6px 10px;border:1px solid #d1d5db;border-radius:6px;font-size:12px;">
+            </div>
+            <div style="margin-bottom:10px;">
+                <label style="display:inline-flex;align-items:center;gap:6px;font-size:12px;color:#6b7280;cursor:pointer;">
+                    <input type="checkbox" id="orch-cond-negate"> ${t('orch_cond_label_negate')}
+                </label>
             </div>
             <div style="margin-bottom:10px;">
                 <label style="display:block;font-size:12px;color:#6b7280;margin-bottom:3px;">${t('orch_cond_label_then')}</label>
@@ -1609,6 +1657,27 @@ function orchShowCondEdgeModal(edge) {
     const thenSel=overlay.querySelector('#orch-cond-then');
     const elseSel=overlay.querySelector('#orch-cond-else');
     thenSel.value=edge.target; elseSel.value=edge.elseTarget||'';
+    // Init condition type selector
+    const typeSel=overlay.querySelector('#orch-cond-type');
+    const valRow=overlay.querySelector('#orch-cond-val-row');
+    const valInput=overlay.querySelector('#orch-cond-val');
+    const valLabel=overlay.querySelector('#orch-cond-val-label');
+    const negCheck=overlay.querySelector('#orch-cond-negate');
+    typeSel.value=_parsedType; valInput.value=_parsedVal; negCheck.checked=_parsedNeg;
+    function _updateCondUI(){
+        const tp=typeSel.value;
+        if(tp==='always'){ valRow.style.display='none'; }
+        else { valRow.style.display='block'; }
+        if(tp==='post_count_gte'||tp==='post_count_lt'){
+            valLabel.textContent=t('orch_cond_label_number');
+            valInput.type='number'; valInput.placeholder='3';
+        } else {
+            valLabel.textContent=t('orch_cond_label_keyword');
+            valInput.type='text'; valInput.placeholder='LGTM';
+        }
+    }
+    _updateCondUI();
+    typeSel.addEventListener('change', _updateCondUI);
     overlay.querySelector('#orch-cond-cancel').addEventListener('click',()=>overlay.remove());
     overlay.addEventListener('click',e=>{if(e.target===overlay)overlay.remove();});
     const revertBtn=overlay.querySelector('#orch-cond-revert');
@@ -1618,9 +1687,16 @@ function orchShowCondEdgeModal(edge) {
         overlay.remove(); orchRenderEdges(); orchUpdateNodeBadges(); orchUpdateYaml();
     });
     overlay.querySelector('#orch-cond-save').addEventListener('click',()=>{
-        const cond=document.getElementById('orch-cond-expr').value.trim();
+        // Build condition string from UI controls
+        const tp=typeSel.value;
+        const val=valInput.value.trim();
+        const neg=negCheck.checked;
+        if(tp!=='always' && !val){ orchToast(t('orch_cond_val_required')); return; }
+        let cond='';
+        if(tp==='always'){ cond='always'; }
+        else { cond=tp+':'+val; }
+        if(neg){ cond='!'+cond; }
         const thenTgt=thenSel.value, elseTgt=elseSel.value;
-        if(!cond){orchToast(t('orch_cond_required'));return;}
         edge.edgeType='conditional'; edge.condition=cond; edge.target=thenTgt; edge.thenTarget=thenTgt;
         // Remove old else-sibling
         orch.edges=orch.edges.filter(e=>!e._isElseSibling||e._isElseSibling!==edge.id);
@@ -2623,6 +2699,20 @@ async function orchDoLoadLayout(name) {
             }
         });
 
+        // Restore selector edges: add fixed edges from selector node → each choice target
+        (data.selectorEdges||[]).forEach(se => {
+            const src = idMap[se.source] || se.source;
+            const choices = se.choices || {};
+            Object.keys(choices).sort((a,b) => Number(a)-Number(b)).forEach(num => {
+                const tgt = idMap[choices[num]] || choices[num];
+                if (src && tgt) {
+                    // Only add if not already connected
+                    const exists = orch.edges.some(e => e.source === src && e.target === tgt);
+                    if (!exists) orchAddEdge(src, tgt);
+                }
+            });
+        });
+
         // Restore groups with mapped node ids
         (data.groups||[]).forEach(g => {
             const mappedGroup = {...g, nodeIds: (g.nodeIds||[]).map(nid => idMap[nid]).filter(Boolean)};
@@ -2724,6 +2814,18 @@ async function orchImportYamlFile(file) {
                     const elseId = 'oe' + orch.eid++;
                     orch.edges.push({ id: elseId, source: src, target: elseTgt, edgeType: 'conditional', condition: ce.condition||'', thenTarget: '', elseTarget: '', _isElseSibling: mainId });
                 }
+            });
+            // Restore selector edges
+            (data.selectorEdges || []).forEach(se => {
+                const src = idMap[se.source] || se.source;
+                const choices = se.choices || {};
+                Object.keys(choices).sort((a,b) => Number(a)-Number(b)).forEach(num => {
+                    const tgt = idMap[choices[num]] || choices[num];
+                    if (src && tgt) {
+                        const exists = orch.edges.some(e => e.source === src && e.target === tgt);
+                        if (!exists) orchAddEdge(src, tgt);
+                    }
+                });
             });
             (data.groups || []).forEach(g => {
                 const mapped = { ...g, nodeIds: (g.nodeIds || []).map(nid => idMap[nid]).filter(Boolean) };
