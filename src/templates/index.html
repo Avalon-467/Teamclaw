@@ -327,6 +327,15 @@
                         <!-- 下行 -->
                         <div class="orch-grid-row" id="orch-grid-row-bottom">
                             <!-- Bottom-left: Session agents -->
+                            <div class="orch-sidebar-grid-cell" id="orch-cell-bl">
+                                <div class="orch-sidebar-grid-cell-header">
+                                    <span data-i18n="orch_session_agents">💬 Session Agents</span>
+                                    <button onclick="orchLoadSessionAgents()" data-i18n-title="refresh" title="刷新">🔄</button>
+                                </div>
+                                <div class="orch-expert-list" id="orch-expert-list-sessions"></div>
+                            </div>
+                            <!-- 列 Divider -->
+                            <div class="orch-grid-col-divider" id="orch-grid-col-divider-bottom"></div>
                             <!-- Bottom-right: OpenClaw sessions -->
                             <div class="orch-sidebar-grid-cell" id="orch-cell-br">
                                 <div class="orch-sidebar-grid-cell-header">

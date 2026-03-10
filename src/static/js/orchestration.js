@@ -85,6 +85,7 @@ function orchBindCardEvents(card, data) {
 
 function orchInit() {
     orchLoadExperts();
+    orchLoadSessionAgents();
     orchLoadOpenClawSessions();
     orchSetupCanvas();
     orchSetupSettings();
@@ -203,6 +204,46 @@ function _orchCreateExpertCard(exp, isCustom) {
         });
     }
     return card;
+}
+
+// ── Load Session Agents ──
+async function orchLoadSessionAgents() {
+    const list = document.getElementById('orch-expert-list-sessions');
+    if (!list) return;
+    list.innerHTML = '<div style="padding:6px 10px;font-size:10px;color:#9ca3af;text-align:center;">⏳ ' + t('loading') + '</div>';
+    try {
+        const resp = await fetch('/proxy_sessions');
+        const data = await resp.json();
+        list.innerHTML = '';
+        if (!data.sessions || data.sessions.length === 0) {
+            list.innerHTML = '<div style="padding:6px 10px;font-size:10px;color:#d1d5db;text-align:center;">No sessions yet</div>';
+            return;
+        }
+        // Sort by session_id descending (newest first)
+        data.sessions.sort((a, b) => b.session_id.localeCompare(a.session_id));
+        for (const s of data.sessions) {
+            const card = document.createElement('div');
+            card.className = 'orch-expert-card';
+            card.draggable = true;
+            const title = s.title || 'Untitled';
+            const shortId = s.session_id.slice(-8);
+            const msgCount = s.message_count || 0;
+            card.innerHTML = `<span class="orch-emoji">💬</span><div style="min-width:0;flex:1;"><div class="orch-name" title="${escapeHtml(title)}">${escapeHtml(title)}</div><div class="orch-tag" style="color:#6366f1;font-family:monospace;">#${escapeHtml(shortId)} · ${msgCount} msgs</div></div>`;
+            const nodeData = {
+                type: 'session_agent',
+                name: title,
+                tag: 'session',
+                emoji: '💬',
+                temperature: 0.5,
+                session_id: s.session_id,
+            };
+            orchBindCardEvents(card, nodeData);
+            list.appendChild(card);
+        }
+    } catch(e) {
+        console.error('Load session agents failed:', e);
+        list.innerHTML = '<div style="padding:6px 10px;font-size:10px;color:#dc2626;text-align:center;">❌ ' + t('error') + '</div>';
+    }
 }
 
 // ── Load OpenClaw agents ──
