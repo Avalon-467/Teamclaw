@@ -502,7 +502,12 @@ async function loadFilesTab(agentName, contentEl, overlay) {
             <span style="font-size:10px;color:#9ca3af;">⏳ ${t('loading')}</span>
         </div>
         <div id="orch-ws-editor-area" style="flex:1;min-height:0;display:flex;flex-direction:column;">
-            <div style="text-align:center;color:#d1d5db;padding:30px;font-size:12px;">${t('orch_oc_select_file')}</div>
+            <div style="text-align:center;padding:30px;">
+                <div style="color:#d1d5db;font-size:12px;margin-bottom:16px;">${t('orch_oc_select_file')}</div>
+                <button id="orch-ws-import-expert-global" style="padding:6px 16px;border-radius:6px;border:1px solid #8b5cf6;background:#f5f3ff;color:#7c3aed;cursor:pointer;font-size:12px;font-weight:500;" title="${t('orch_oc_import_expert_tip')}">
+                    📥 ${t('orch_oc_import_expert_to_identity')}
+                </button>
+            </div>
         </div>
     `;
 
@@ -526,6 +531,13 @@ async function loadFilesTab(agentName, contentEl, overlay) {
             if (!f.exists) btn.style.color = '#d1d5db';
             btn.addEventListener('click', () => orchWsOpenFile(agentName, workspace, f.name, contentEl));
             listEl.appendChild(btn);
+        }
+        // Bind global import expert button (shown when no file is selected)
+        const globalImportBtn = contentEl.querySelector('#orch-ws-import-expert-global');
+        if (globalImportBtn) {
+            globalImportBtn.addEventListener('click', () => {
+                orchShowImportExpertModal(null, null, { agentName, workspace, containerEl: contentEl, targetFile: 'IDENTITY.md' });
+            });
         }
     } catch(e) {
         contentEl.querySelector('#orch-ws-file-list').innerHTML =
@@ -596,7 +608,7 @@ async function orchWsOpenFile(agentName, workspace, filename, containerEl) {
 }
 
 // ── Import Expert Persona into IDENTITY/SOUL file ──
-async function orchShowImportExpertModal(textarea, statusEl) {
+async function orchShowImportExpertModal(textarea, statusEl, fileCtx) {
     const overlay = document.createElement('div');
     overlay.className = 'orch-modal-overlay';
     overlay.id = 'orch-import-expert-overlay';
@@ -688,17 +700,34 @@ async function orchShowImportExpertModal(textarea, statusEl) {
                     </div>
                     <span style="font-size:14px;color:#7c3aed;flex-shrink:0;margin-top:2px;">→</span>
                 `;
-                row.addEventListener('click', () => {
+                row.addEventListener('click', async () => {
                     const mode = overlay.querySelector('#orch-ie-mode').value;
                     const persona = ex.persona || '';
                     // Build identity content with expert name and persona
                     const identityContent = '# ' + (ex.name || ex.tag) + '\n\n' + persona;
-                    if (mode === 'replace') {
-                        textarea.value = identityContent;
-                    } else {
-                        textarea.value = textarea.value + (textarea.value ? '\n\n---\n\n' : '') + identityContent;
+
+                    if (textarea) {
+                        // Direct mode: textarea is already open
+                        if (mode === 'replace') {
+                            textarea.value = identityContent;
+                        } else {
+                            textarea.value = textarea.value + (textarea.value ? '\n\n---\n\n' : '') + identityContent;
+                        }
+                        if (statusEl) { statusEl.textContent = '● ' + t('orch_oc_unsaved'); statusEl.style.color = '#f59e0b'; }
+                    } else if (fileCtx) {
+                        // Global mode: no file open yet, open IDENTITY.md then write
+                        await orchWsOpenFile(fileCtx.agentName, fileCtx.workspace, fileCtx.targetFile, fileCtx.containerEl);
+                        const ta = fileCtx.containerEl.querySelector('#orch-ws-textarea');
+                        const st = fileCtx.containerEl.querySelector('#orch-ws-status');
+                        if (ta) {
+                            if (mode === 'replace') {
+                                ta.value = identityContent;
+                            } else {
+                                ta.value = ta.value + (ta.value ? '\n\n---\n\n' : '') + identityContent;
+                            }
+                            if (st) { st.textContent = '● ' + t('orch_oc_unsaved'); st.style.color = '#f59e0b'; }
+                        }
                     }
-                    statusEl.textContent = '● ' + t('orch_oc_unsaved'); statusEl.style.color = '#f59e0b';
                     orchToast('📥 ' + t('orch_oc_import_done', { name: ex.name }));
                     overlay.remove();
                 });
@@ -709,6 +738,103 @@ async function orchShowImportExpertModal(textarea, statusEl) {
 
     renderExpertList('');
     searchInput.addEventListener('input', () => renderExpertList(searchInput.value));
+}
+
+// ── Expert Picker (for creation dialog, returns expert via callback) ──
+async function orchShowImportExpertPicker(onSelect) {
+    const overlay = document.createElement('div');
+    overlay.className = 'orch-modal-overlay';
+    overlay.id = 'orch-expert-picker-overlay';
+    overlay.style.zIndex = '10001'; // above creation modal
+    overlay.innerHTML = `
+        <div class="orch-modal" style="min-width:360px;max-width:520px;width:85vw;max-height:75vh;display:flex;flex-direction:column;">
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
+                <h3 style="margin:0;font-size:14px;">📥 ${t('orch_oc_create_pick_expert')}</h3>
+                <button id="orch-ep-close" style="background:none;border:none;font-size:18px;cursor:pointer;padding:2px 6px;color:#6b7280;">✕</button>
+            </div>
+            <input id="orch-ep-search" type="text" placeholder="${t('orch_oc_import_search_ph')}" style="padding:4px 8px;border:1px solid #d1d5db;border-radius:4px;font-size:11px;margin-bottom:8px;">
+            <div id="orch-ep-list" style="flex:1;overflow-y:auto;min-height:0;display:flex;flex-direction:column;gap:4px;">
+                <div style="text-align:center;color:#9ca3af;padding:20px;font-size:11px;">⏳ ${t('loading')}</div>
+            </div>
+        </div>
+    `;
+    document.body.appendChild(overlay);
+    overlay.querySelector('#orch-ep-close').addEventListener('click', () => overlay.remove());
+    overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.remove(); });
+
+    const listEl = overlay.querySelector('#orch-ep-list');
+    const searchInput = overlay.querySelector('#orch-ep-search');
+    let allExperts = [];
+
+    try {
+        const r = await fetch('/proxy_visual/experts');
+        allExperts = await r.json();
+    } catch(e) {
+        listEl.innerHTML = '<div style="color:#ef4444;padding:20px;text-align:center;font-size:11px;">❌ ' + t('orch_toast_net_error') + '</div>';
+        return;
+    }
+
+    function renderList(filter) {
+        listEl.innerHTML = '';
+        const keyword = (filter || '').toLowerCase();
+        const filtered = keyword ? allExperts.filter(ex =>
+            (ex.name||'').toLowerCase().includes(keyword) ||
+            (ex.tag||'').toLowerCase().includes(keyword) ||
+            (ex.persona||'').toLowerCase().includes(keyword) ||
+            (ex.category||'').toLowerCase().includes(keyword)
+        ) : allExperts;
+
+        if (filtered.length === 0) {
+            listEl.innerHTML = '<div style="text-align:center;color:#9ca3af;padding:20px;font-size:11px;">' + t('orch_oc_import_no_result') + '</div>';
+            return;
+        }
+
+        const groups = { public: [], agency: [], custom: [] };
+        filtered.forEach(ex => {
+            const src = ex.source || 'public';
+            if (groups[src]) groups[src].push(ex); else groups.public.push(ex);
+        });
+        const groupLabels = {
+            public: { icon: '🌟', label: t('orch_oc_import_public') },
+            agency: { icon: '🏢', label: t('orch_oc_import_agency') },
+            custom: { icon: '🛠️', label: t('orch_oc_import_custom') },
+        };
+
+        for (const [src, items] of Object.entries(groups)) {
+            if (items.length === 0) continue;
+            const info = groupLabels[src] || { icon: '📂', label: src };
+            const header = document.createElement('div');
+            header.style.cssText = 'font-size:10px;font-weight:600;color:#6b7280;padding:4px 0;margin-top:4px;';
+            header.textContent = info.icon + ' ' + info.label + ' (' + items.length + ')';
+            listEl.appendChild(header);
+
+            for (const ex of items) {
+                const row = document.createElement('div');
+                row.style.cssText = 'display:flex;align-items:flex-start;gap:8px;padding:8px 10px;border:1px solid #e5e7eb;border-radius:8px;cursor:pointer;transition:all .15s;background:#fff;';
+                row.addEventListener('mouseenter', () => { row.style.background = '#f5f3ff'; row.style.borderColor = '#c4b5fd'; });
+                row.addEventListener('mouseleave', () => { row.style.background = '#fff'; row.style.borderColor = '#e5e7eb'; });
+                const personaPreview = (ex.persona || '').length > 80 ? (ex.persona.slice(0, 80) + '…') : (ex.persona || '-');
+                row.innerHTML = `
+                    <span style="font-size:18px;flex-shrink:0;">${ex.emoji || '⭐'}</span>
+                    <div style="flex:1;min-width:0;">
+                        <div style="font-size:12px;font-weight:600;color:#1f2937;">${escapeHtml(ex.name)}</div>
+                        <div style="font-size:10px;color:#6b7280;margin-top:1px;">${escapeHtml(ex.tag)}${ex.category ? ' · ' + escapeHtml(ex.category) : ''}</div>
+                        <div style="font-size:10px;color:#9ca3af;margin-top:3px;line-height:1.4;white-space:pre-wrap;word-break:break-all;">${escapeHtml(personaPreview)}</div>
+                    </div>
+                    <span style="font-size:14px;color:#7c3aed;flex-shrink:0;margin-top:2px;">→</span>
+                `;
+                row.addEventListener('click', () => {
+                    if (typeof onSelect === 'function') onSelect(ex);
+                    overlay.remove();
+                });
+                listEl.appendChild(row);
+            }
+        }
+    }
+
+    renderList('');
+    searchInput.addEventListener('input', () => renderList(searchInput.value));
+    setTimeout(() => searchInput.focus(), 100);
 }
 
 // ── Tab: Skills & Tools Config ──
@@ -969,6 +1095,13 @@ function orchShowAddOpenClawModal() {
                 <div style="font-size:10px;color:#6b7280;background:#f9fafb;border-radius:6px;padding:8px;">
                     ${t('orch_openclaw_workspace_hint')}
                 </div>
+                <div style="border:1px dashed #c4b5fd;border-radius:8px;padding:10px;background:#faf5ff;">
+                    <div style="display:flex;align-items:center;justify-content:space-between;">
+                        <span style="font-size:11px;font-weight:600;color:#7c3aed;">📥 ${t('orch_oc_create_import_expert')}</span>
+                        <button id="orch-oc-pick-expert" type="button" style="padding:3px 10px;border-radius:4px;border:1px solid #8b5cf6;background:#f5f3ff;color:#7c3aed;cursor:pointer;font-size:10px;font-weight:500;">${t('orch_oc_create_pick_expert')}</button>
+                    </div>
+                    <div id="orch-oc-expert-preview" style="display:none;margin-top:8px;padding:6px 8px;background:white;border-radius:6px;border:1px solid #e5e7eb;font-size:11px;color:#374151;"></div>
+                </div>
             </div>
             <div class="orch-modal-btns">
                 <button id="orch-oc-cancel" style="padding:6px 14px;border-radius:6px;border:1px solid #d1d5db;background:white;color:#374151;cursor:pointer;font-size:12px;">${t('orch_modal_cancel')}</button>
@@ -1023,6 +1156,24 @@ function orchShowAddOpenClawModal() {
 
     setTimeout(() => nameInp.focus(), 100);
 
+    // ── Expert import picker for creation ──
+    let selectedExpertContent = null; // stores identity content to write after creation
+    const expertPreview = overlay.querySelector('#orch-oc-expert-preview');
+    overlay.querySelector('#orch-oc-pick-expert').addEventListener('click', () => {
+        orchShowImportExpertPicker((expert) => {
+            selectedExpertContent = '# ' + (expert.name || expert.tag) + '\n\n' + (expert.persona || '');
+            expertPreview.style.display = 'block';
+            expertPreview.innerHTML = '<div style="display:flex;align-items:center;gap:6px;"><span style="font-size:16px;">' + (expert.emoji || '⭐') + '</span><span style="font-weight:600;">' + escapeHtml(expert.name) + '</span><button id="orch-oc-clear-expert" type="button" style="margin-left:auto;padding:1px 6px;border:1px solid #d1d5db;border-radius:4px;background:#f9fafb;cursor:pointer;font-size:10px;color:#6b7280;">✕</button></div>'
+                + '<div style="font-size:10px;color:#6b7280;margin-top:4px;max-height:60px;overflow:hidden;white-space:pre-wrap;word-break:break-all;">' + escapeHtml((expert.persona || '').slice(0, 120) + ((expert.persona || '').length > 120 ? '…' : '')) + '</div>';
+            expertPreview.querySelector('#orch-oc-clear-expert').addEventListener('click', (ev) => {
+                ev.stopPropagation();
+                selectedExpertContent = null;
+                expertPreview.style.display = 'none';
+                expertPreview.innerHTML = '';
+            });
+        });
+    });
+
     overlay.querySelector('#orch-oc-create').addEventListener('click', async () => {
         const name = nameInp.value.trim();
         const workspace = wsInp.value.trim();
@@ -1040,6 +1191,16 @@ function orchShowAddOpenClawModal() {
             });
             const res = await r.json();
             if (r.ok && res.ok) {
+                // If expert was selected, write IDENTITY.md right after creation
+                if (selectedExpertContent) {
+                    try {
+                        await fetch('/proxy_openclaw_workspace_file', {
+                            method: 'POST', headers: {'Content-Type': 'application/json'},
+                            body: JSON.stringify({ workspace, filename: 'IDENTITY.md', content: selectedExpertContent }),
+                        });
+                        orchToast('📥 ' + t('orch_oc_import_done', { name: name }));
+                    } catch(e) { /* ignore write error, user can edit later */ }
+                }
                 orchToast('🦞 ' + t('orch_openclaw_created', {name}));
                 overlay.remove();
                 orchLoadOpenClawSessions();
