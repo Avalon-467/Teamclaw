@@ -23,29 +23,61 @@ const orch = {
 };
 
 // ── Team mode helpers ──
-function orchTeamToggle() {
-    const cb = document.getElementById('orch-team-enabled');
-    const inp = document.getElementById('orch-team-name');
-    orch.teamEnabled = cb.checked;
-    inp.style.display = cb.checked ? '' : 'none';
-    inp.disabled = !cb.checked;
-    orchShowTeamButtons(cb.checked && inp.value.trim());
-    if (!cb.checked) { orch.teamName = ''; inp.value = ''; }
-    else { orch.teamName = inp.value.trim(); }
-    // Reload agents with new scope
+async function orchLoadTeamList() {
+    const sel = document.getElementById('orch-team-select');
+    if (!sel) return;
+    try {
+        const resp = await fetch('/teams');
+        const data = await resp.json();
+        const teams = data.teams || [];
+        const currentVal = sel.value;
+        sel.innerHTML = '<option value="">(公共)</option>';
+        teams.forEach(team => {
+            const opt = document.createElement('option');
+            opt.value = team;
+            opt.textContent = team;
+            sel.appendChild(opt);
+        });
+        // Add "New..." option
+        const newOpt = document.createElement('option');
+        newOpt.value = '__new__';
+        newOpt.textContent = '➕ New...';
+        sel.appendChild(newOpt);
+        // Restore selection if still valid
+        if (currentVal && (teams.includes(currentVal) || currentVal === '__new__')) {
+            sel.value = currentVal;
+        }
+    } catch (e) {
+        console.error('Failed to load team list:', e);
+    }
+}
+
+function orchTeamSelectChanged() {
+    const sel = document.getElementById('orch-team-select');
+    const val = sel.value;
+    if (val === '__new__') {
+        // Prompt for new team name
+        const newName = prompt(t('orch_prompt_new_team') || 'Enter new team name:');
+        if (newName && newName.trim()) {
+            const trimmedName = newName.trim();
+            // Create the team
+            orchCreateTeamByName(trimmedName);
+        } else {
+            // Reset to previous selection
+            sel.value = orch.teamName || '';
+        }
+        return;
+    }
+    orch.teamName = val || '';
+    orch.teamEnabled = !!orch.teamName;
+    orchShowTeamButtons(!!orch.teamName);
     orchLoadSessionAgents();
     orchLoadOpenClawSessions();
 }
-function orchTeamNameChanged() {
-    const inp = document.getElementById('orch-team-name');
-    orch.teamName = inp.value.trim();
-    orchShowTeamButtons(orch.teamEnabled && orch.teamName);
-    orchLoadSessionAgents();
-    orchLoadOpenClawSessions();
-}
+
 function _orchTeamQuery() {
     // Returns query string part for team, e.g. '?team=myteam' or ''
-    return (orch.teamEnabled && orch.teamName) ? '?team=' + encodeURIComponent(orch.teamName) : '';
+    return orch.teamName ? '?team=' + encodeURIComponent(orch.teamName) : '';
 }
 
 // ── Team management functions ──
@@ -57,12 +89,12 @@ function orchShowTeamButtons(show) {
     });
 }
 
-async function orchCreateTeam() {
-    const teamName = orch.teamName.trim();
-    if (!teamName) {
+async function orchCreateTeamByName(teamName) {
+    if (!teamName || !teamName.trim()) {
         orchToast(t('orch_toast_team_name_required') || 'Please enter team name');
         return;
     }
+    teamName = teamName.trim();
     try {
         const resp = await fetch('/teams', {
             method: 'POST',
@@ -72,6 +104,12 @@ async function orchCreateTeam() {
         const data = await resp.json();
         if (data.success) {
             orchToast(t('orch_toast_team_created') || 'Team created');
+            orch.teamName = teamName;
+            // Refresh team list and select the new team
+            await orchLoadTeamList();
+            const sel = document.getElementById('orch-team-select');
+            sel.value = teamName;
+            orchShowTeamButtons(true);
             orchLoadSessionAgents();
             orchLoadOpenClawSessions();
         } else {
@@ -91,8 +129,10 @@ async function orchDeleteTeam() {
         const data = await resp.json();
         if (data.success) {
             orchToast(t('orch_toast_team_deleted') || `Team deleted (${data.deleted_agents || 0} agents removed)`);
-            document.getElementById('orch-team-name').value = '';
+            const sel = document.getElementById('orch-team-select');
+            sel.value = '';
             orch.teamName = '';
+            orchShowTeamButtons(false);
             orchLoadSessionAgents();
             orchLoadOpenClawSessions();
         } else {

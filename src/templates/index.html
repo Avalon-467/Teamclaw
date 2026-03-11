@@ -98,9 +98,9 @@
         <div class="chat-main h-screen flex flex-col bg-white border-x border-gray-200 shadow-2xl">
             <!-- Page Switch Tab Bar -->
             <div class="page-tab-bar">
-                <div class="page-tab active" id="tab-chat" onclick="switchPage('chat')" data-i18n="tab_chat">💬 对话</div>
-                <div class="page-tab" id="tab-group" onclick="switchPage('group')" data-i18n="tab_group">👥 群聊</div>
-                <div class="page-tab" id="tab-orchestrate" onclick="switchPage('orchestrate')" data-i18n="tab_orchestrate">🤝 Agent Teams</div>
+                <div class="page-tab active" id="tab-chat" onclick="switchPage('chat')" data-i18n="tab_chat">💬 Chat</div>
+                <div class="page-tab" id="tab-group" onclick="switchPage('group')" data-i18n="tab_group">👥 Team</div>
+                <div class="page-tab" id="tab-orchestrate" onclick="switchPage('orchestrate')" data-i18n="tab_orchestrate">🤝 Workflow</div>
             </div>
 
             <!-- === Chat Page === -->
@@ -398,14 +398,10 @@
                         <button onclick="orchClearCanvas()" class="orch-btn orch-btn-danger" data-i18n-title="orch_tip_clear" title="清空画布"><span data-i18n="orch_btn_clear">🗑️ 清空</span></button>
                         <button onclick="toggleOrchFocusMode()" id="orch-focus-btn" class="orch-btn" title="专注模式：隐藏两侧面板"><span data-i18n="orch_btn_focus">🎯 专注</span></button>
                         <span class="orch-toolbar-sep" style="border-left:1px solid #d1d5db;height:20px;margin:0 4px;"></span>
-                        <label style="display:flex;align-items:center;gap:3px;font-size:11px;color:#374151;cursor:pointer;white-space:nowrap;" title="Enable Team mode: scope agents to a team folder">
-                            <input type="checkbox" id="orch-team-enabled" onchange="orchTeamToggle()" style="margin:0;cursor:pointer;">
-                            <span>👥 Team</span>
-                        </label>
-                        <input type="text" id="orch-team-name" placeholder="team name" disabled
-                               style="width:100px;padding:3px 6px;border:1px solid #d1d5db;border-radius:4px;font-size:11px;display:none;"
-                               onchange="orchTeamNameChanged()">
-                        <button onclick="orchCreateTeam()" id="orch-team-create-btn" class="orch-btn" style="display:none;font-size:11px;padding:4px 8px;" title="Create new team"><span data-i18n="orch_btn_create_team">➕ Create</span></button>
+                        <label class="text-xs text-gray-600 whitespace-nowrap">选择team:</label>
+                        <select id="orch-team-select" class="px-2 py-1 text-xs border border-gray-300 rounded" style="width:120px;" onchange="orchTeamSelectChanged()" onfocus="orchLoadTeamList()">
+                            <option value="">(公共)</option>
+                        </select>
                         <button onclick="orchDeleteTeam()" id="orch-team-delete-btn" class="orch-btn orch-btn-danger" style="display:none;font-size:11px;padding:4px 8px;" title="Delete current team"><span data-i18n="orch_btn_delete_team">🗑️ Delete</span></button>
                         <button onclick="orchDownloadSnapshot()" id="orch-team-download-btn" class="orch-btn" style="display:none;font-size:11px;padding:4px 8px;" title="Download team snapshot"><span data-i18n="orch_btn_download_snapshot">⬇️ Snapshot</span></button>
                         <button onclick="orchUploadSnapshotClick()" id="orch-team-upload-btn" class="orch-btn" style="display:none;font-size:11px;padding:4px 8px;" title="Upload team snapshot"><span data-i18n="orch_btn_upload_snapshot">⬆️ Upload</span></button>

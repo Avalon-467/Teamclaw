@@ -130,8 +130,8 @@ const i18n = {
 
         // 页面切换
         tab_chat: '💬 对话',
-        tab_group: '👥 群聊',
-        tab_orchestrate: '🤝 Agent Teams',
+        tab_group: '👥 团队',
+        tab_orchestrate: '🤝 工作流',
 
         // 群聊
         group_title: '👥 群聊列表',
@@ -614,8 +614,8 @@ orch_openclaw_sessions: '🦞 OpenClaw',
 
         // Page switch
         tab_chat: '💬 Chat',
-        tab_group: '👥 Groups',
-        tab_orchestrate: '🤝 Agent Teams',
+        tab_group: '👥 Team',
+        tab_orchestrate: '🤝 Workflow',
 
         // Group chat
         group_title: '👥 Group Chats',
