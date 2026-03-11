@@ -599,7 +599,7 @@ class SessionExpert:
                 messages.append({"role": "user", "content": "\n".join(ctx_parts)})
 
             body: dict = {
-                "model": "mini-timebot",
+                "model": "teambot",
                 "messages": messages,
                 "stream": False,
                 "session_id": self.session_id,
@@ -694,7 +694,7 @@ class SessionExpert:
             messages.append({"role": "user", "content": prompt})
 
         body: dict = {
-            "model": "mini-timebot",
+            "model": "teambot",
             "messages": messages,
             "stream": False,
             "session_id": self.session_id,

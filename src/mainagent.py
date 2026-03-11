@@ -1052,7 +1052,7 @@ def _make_completion_id() -> str:
     return f"chatcmpl-{uuid.uuid4().hex[:24]}"
 
 
-def _make_openai_response(content: str, model: str = "mini-timebot",
+def _make_openai_response(content: str, model: str = "teambot",
                           finish_reason: str = "stop",
                           tool_calls: list[dict] | None = None) -> dict:
     """构造标准 OpenAI chat completion 响应。"""
@@ -1074,7 +1074,7 @@ def _make_openai_response(content: str, model: str = "mini-timebot",
     }
 
 
-def _make_openai_chunk(content: str = "", model: str = "mini-timebot",
+def _make_openai_chunk(content: str = "", model: str = "teambot",
                        finish_reason: str | None = None,
                        completion_id: str = "",
                        meta: dict | None = None) -> str:
@@ -1281,7 +1281,7 @@ async def openai_chat_completions(
         "external_tools": req.tools,
     }
 
-    model_name = req.model or "mini-timebot"
+    model_name = req.model or "teambot"
     thread_lock = await agent.get_thread_lock(thread_id)
 
     # --- 非流式 ---
@@ -1509,10 +1509,10 @@ async def list_models():
     return {
         "object": "list",
         "data": [{
-            "id": "mini-timebot",
+            "id": "teambot",
             "object": "model",
             "created": int(time.time()),
-            "owned_by": "mini-timebot",
+            "owned_by": "teambot",
         }],
     }
 

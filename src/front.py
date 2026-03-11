@@ -1060,7 +1060,7 @@ def proxy_visual_agent_generate_yaml():
             "Authorization": f"Bearer {user_id}:{password}",
         }
         payload = {
-            "model": "mini-timebot",
+            "model": "teambot",
             "messages": [
                 {"role": "system", "content": (
                     "You are a YAML schedule generator for the OASIS expert orchestration engine. "

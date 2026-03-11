@@ -2518,7 +2518,7 @@ async function handleSend() {
         }
         messages.push({ role: 'user', content: msgContent });
         const openaiPayload = {
-            model: 'mini-timebot',
+            model: 'teambot',
             messages: messages,
             stream: true,
             session_id: currentSessionId,

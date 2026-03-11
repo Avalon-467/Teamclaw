@@ -752,7 +752,7 @@ def agent_generate_yaml():
         headers["Authorization"] = f"Bearer {username}:{password}"
 
         payload = {
-            "model": "mini-timebot",
+            "model": "teambot",
             "messages": [
                 {
                     "role": "system",

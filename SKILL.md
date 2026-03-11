@@ -200,7 +200,7 @@ Authorization: Bearer <INTERNAL_TOKEN>:<user_id>
 POST /v1/chat/completions
 Authorization: Bearer <token>
 
-{"model":"mini-timebot","messages":[{"role":"user","content":"Hello"}],"stream":true,"session_id":"my-session"}
+{"model":"teambot","messages":[{"role":"user","content":"Hello"}],"stream":true,"session_id":"my-session"}
 ```
 
 ### System Trigger (internal call)
@@ -223,7 +223,7 @@ POST /cancel
 
 ## OASIS Four Operating Modes (Default: Discussion Mode)
 
-> 📖 **Dedicated OASIS usage guide (especially for OpenClaw agent integration)**: [OASIS_GUIDE.md](./OASIS_GUIDE.md)
+> 📖 **Dedicated OASIS usage guide (especially for OpenClaw agent integration)**: [OASIS Guide section in README.md](./README.md#oasis-guide)
 
 > The "four modes" are two orthogonal switches:
 > - **Discussion vs Execution**: Determines whether expert output is "forum-style discussion/voting" or "workflow-style execution/deliverables".
@@ -650,7 +650,7 @@ bash selfskill/scripts/run.sh start
 curl -X POST http://127.0.0.1:51200/v1/chat/completions \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer <username>:<password>" \
-  -d '{"model":"mini-timebot","messages":[{"role":"user","content":"Hello"}],"stream":false,"session_id":"default"}'
+  -d '{"model":"teambot","messages":[{"role":"user","content":"Hello"}],"stream":false,"session_id":"default"}'
 
 # Stop
 bash selfskill/scripts/run.sh stop
@@ -818,7 +818,7 @@ Authorization: Bearer <INTERNAL_TOKEN>:<user_id>
 POST /v1/chat/completions
 Authorization: Bearer <token>
 
-{"model":"mini-timebot","messages":[{"role":"user","content":""}],"stream":true,"session_id":"my-session"}
+{"model":"teambot","messages":[{"role":"user","content":""}],"stream":true,"session_id":"my-session"}
 ```
 
 ### 
@@ -841,7 +841,7 @@ POST /cancel
 
 ## OASIS 
 
-> 📖 **专注 OASIS 使用的独立指引文档（尤其是 OpenClaw agent 集成）**: [OASIS_GUIDE.md](./OASIS_GUIDE.md)
+> 📖 **OASIS 完整使用指南（尤其是 OpenClaw agent 集成）**: [README.md 中的 OASIS 使用指南](./README.md#oasis-使用指南)
 
 > ""
 > - ** vs **"/""/("> - ** vs detach**
@@ -1268,7 +1268,7 @@ bash selfskill/scripts/run.sh start
 curl -X POST http://127.0.0.1:51200/v1/chat/completions \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer <username>:<password>" \
-  -d '{"model":"mini-timebot","messages":[{"role":"user","content":""}],"stream":false,"session_id":"default"}'
+  -d '{"model":"teambot","messages":[{"role":"user","content":""}],"stream":false,"session_id":"default"}'
 
 # 
 bash selfskill/scripts/run.sh stop
