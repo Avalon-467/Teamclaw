@@ -1361,16 +1361,32 @@ async function submitAgentMeta() {
     if (_agentMetaCallback) { _agentMetaCallback(meta); _agentMetaCallback = null; }
 }
 
+// Helper: load internal agent meta as a map { session_id: meta }
+async function _loadAgentMetaMap() {
+    try {
+        const resp = await fetch('/internal_agents');
+        const data = await resp.json();
+        const map = {};
+        if (data.agents) {
+            for (const a of data.agents) map[a.session] = a.meta || {};
+        }
+        return map;
+    } catch (e) { return {}; }
+}
+
+// Resolve display title: prefer agent meta name, fallback to original title
+function _resolveTitle(originalTitle, sessionId, agentMap) {
+    const meta = agentMap[sessionId];
+    if (meta && meta.name) return meta.name;
+    return originalTitle;
+}
+
 async function editAgentMeta(sessionId) {
     // Load current meta from backend
     let existingMeta = {};
     try {
-        const resp = await fetch('/internal_agents');
-        const data = await resp.json();
-        if (data.agents) {
-            const found = data.agents.find(a => a.session === sessionId);
-            if (found && found.meta) existingMeta = found.meta;
-        }
+        const agentMap = await _loadAgentMetaMap();
+        existingMeta = agentMap[sessionId] || {};
     } catch (e) { /* ignore */ }
     // If tools is object, convert back to comma string for display
     if (existingMeta.tools && typeof existingMeta.tools === 'object') {
@@ -1491,7 +1507,8 @@ async function loadSessionList() {
         listEl.innerHTML = `<div class="text-xs text-gray-400 text-center py-4">${t('loading')}</div>`;
     }
     try {
-        const resp = await fetch('/proxy_sessions');
+        // Load sessions and agent meta in parallel
+        const [resp, agentMap] = await Promise.all([fetch('/proxy_sessions'), _loadAgentMetaMap()]);
         const data = await resp.json();
         if (!data.sessions || data.sessions.length === 0) {
             listEl.innerHTML = `<div class="text-xs text-gray-400 text-center py-4">${t('history_empty')}</div>`;
@@ -1501,11 +1518,12 @@ async function loadSessionList() {
         data.sessions.sort((a, b) => b.session_id.localeCompare(a.session_id));
         for (const s of data.sessions) {
             const isActive = s.session_id === currentSessionId;
+            const displayTitle = _resolveTitle(s.title, s.session_id, agentMap);
             const div = document.createElement('div');
             div.className = 'session-item' + (isActive ? ' active' : '');
             div.dataset.sessionId = s.session_id;
             div.innerHTML = `
-                <div class="session-title">${escapeHtml(s.title)}</div>
+                <div class="session-title">${escapeHtml(displayTitle)}</div>
                 <div class="session-meta">#${s.session_id.slice(-6)} · ${s.message_count}${t('messages_count')}</div>
                 <button class="session-edit" onclick="event.stopPropagation(); editAgentMeta('${s.session_id}')">✏️</button>
                 <button class="session-delete" onclick="event.stopPropagation(); deleteSession('${s.session_id}')">${t('delete_session')}</button>
@@ -1525,9 +1543,10 @@ async function loadSessionList() {
 // 增量刷新：不重建DOM，只更新标题/计数 + 状态发光
 async function refreshHistoryList() {
     try {
-        const [sessResp, statusResp] = await Promise.all([
+        const [sessResp, statusResp, agentMap] = await Promise.all([
             fetch('/proxy_sessions'),
-            fetch('/proxy_sessions_status')
+            fetch('/proxy_sessions_status'),
+            _loadAgentMetaMap()
         ]);
         const sessData = await sessResp.json();
         const statusData = statusResp.ok ? await statusResp.json() : {};
@@ -1561,7 +1580,7 @@ async function refreshHistoryList() {
             if (div) {
                 // 更新标题和计数
                 const titleEl = div.querySelector('.session-title');
-                const newTitle = escapeHtml(s.title);
+                const newTitle = escapeHtml(_resolveTitle(s.title, s.session_id, agentMap));
                 if (titleEl && titleEl.innerHTML !== newTitle) titleEl.innerHTML = newTitle;
                 const metaEl = div.querySelector('.session-meta');
                 if (metaEl) {
@@ -1587,8 +1606,9 @@ async function refreshHistoryList() {
                 div = document.createElement('div');
                 div.className = 'session-item' + (s.session_id === currentSessionId ? ' active' : '');
                 div.dataset.sessionId = s.session_id;
+                const displayTitle = _resolveTitle(s.title, s.session_id, agentMap);
                 div.innerHTML = `
-                    <div class="session-title">${escapeHtml(s.title)}</div>
+                    <div class="session-title">${escapeHtml(displayTitle)}</div>
                     <div class="session-meta">#${s.session_id.slice(-6)} · ${s.message_count}${t('messages_count')}</div>
                     <button class="session-edit" onclick="event.stopPropagation(); editAgentMeta('${s.session_id}')">✏️</button>
                     <button class="session-delete" onclick="event.stopPropagation(); deleteSession('${s.session_id}')">${t('delete_session')}</button>
@@ -4050,9 +4070,13 @@ async function loadAvailableSessions() {
     const container = document.getElementById('group-available-sessions');
     container.innerHTML = '<div class="text-xs text-gray-400 p-2">' + t('loading') + '</div>';
     try {
-        const resp = await fetch(`/proxy_groups/${currentGroupId}/sessions`, {
-            headers: { 'Authorization': 'Bearer ' + getAuthToken() }
-        });
+        // Load sessions, group detail, and agent meta in parallel
+        const [resp, agentMap] = await Promise.all([
+            fetch(`/proxy_groups/${currentGroupId}/sessions`, {
+                headers: { 'Authorization': 'Bearer ' + getAuthToken() }
+            }),
+            _loadAgentMetaMap()
+        ]);
         if (!resp.ok) return;
         const data = await resp.json();
         const sessions = data.sessions || [];
@@ -4072,7 +4096,7 @@ async function loadAvailableSessions() {
         container.innerHTML = sessions.map(s => {
             const key = currentUserId + '#' + s.session_id;
             const checked = memberSet.has(key) ? 'checked' : '';
-            const title = s.title || s.session_id;
+            const title = _resolveTitle(s.title || s.session_id, s.session_id, agentMap);
             return `
                 <label class="session-checkbox">
                     <input type="checkbox" ${checked} onchange="toggleGroupAgent('${s.session_id}', this.checked)">

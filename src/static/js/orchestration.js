@@ -270,13 +270,34 @@ function _orchCreateExpertCard(exp, isCustom) {
     return card;
 }
 
+// Helper: load internal agent meta as a map { session_id: meta }
+async function _orchLoadAgentMetaMap() {
+    try {
+        const resp = await fetch('/internal_agents');
+        const data = await resp.json();
+        const map = {};
+        if (data.agents) {
+            for (const a of data.agents) map[a.session] = a.meta || {};
+        }
+        return map;
+    } catch (e) { return {}; }
+}
+
+// Resolve display title: prefer agent meta name, fallback to original title
+function _orchResolveTitle(originalTitle, sessionId, agentMap) {
+    const meta = agentMap[sessionId];
+    if (meta && meta.name) return meta.name;
+    return originalTitle;
+}
+
 // ── Load Session Agents ──
 async function orchLoadSessionAgents() {
     const list = document.getElementById('orch-expert-list-sessions');
     if (!list) return;
     list.innerHTML = '<div style="padding:6px 10px;font-size:10px;color:#9ca3af;text-align:center;">⏳ ' + t('loading') + '</div>';
     try {
-        const resp = await fetch('/proxy_sessions');
+        // Load sessions and agent meta in parallel
+        const [resp, agentMap] = await Promise.all([fetch('/proxy_sessions'), _orchLoadAgentMetaMap()]);
         const data = await resp.json();
         list.innerHTML = '';
         if (!data.sessions || data.sessions.length === 0) {
@@ -289,7 +310,7 @@ async function orchLoadSessionAgents() {
             const card = document.createElement('div');
             card.className = 'orch-expert-card';
             card.draggable = true;
-            const title = s.title || 'Untitled';
+            const title = _orchResolveTitle(s.title || 'Untitled', s.session_id, agentMap);
             const shortId = s.session_id.slice(-8);
             const msgCount = s.message_count || 0;
             card.innerHTML = `<span class="orch-emoji">💬</span><div style="min-width:0;flex:1;"><div class="orch-name" title="${escapeHtml(title)}">${escapeHtml(title)}</div><div class="orch-tag" style="color:#6366f1;font-family:monospace;">#${escapeHtml(shortId)} · ${msgCount} msgs</div></div>`;
@@ -2458,7 +2479,8 @@ async function orchShowSessionSelectModal() {
 
     const listEl = overlay.querySelector('#orch-session-select-list');
     try {
-        const resp = await fetch('/proxy_sessions');
+        // Load sessions and agent meta in parallel
+        const [resp, agentMap] = await Promise.all([fetch('/proxy_sessions'), _orchLoadAgentMetaMap()]);
         const data = await resp.json();
         listEl.innerHTML = '';
 
@@ -2480,7 +2502,8 @@ async function orchShowSessionSelectModal() {
             for (const s of data.sessions) {
                 const item = document.createElement('div');
                 item.className = 'orch-session-item';
-                item.innerHTML = `<span class="orch-session-icon">💬</span><div style="flex:1;min-width:0;"><div class="orch-session-title">${escapeHtml(s.title || 'Untitled')}</div><div class="orch-session-id">#${s.session_id.slice(-6)} · ${t('orch_msg_count', {count: s.message_count||0})}</div></div>`;
+                const resolvedTitle = _orchResolveTitle(s.title || 'Untitled', s.session_id, agentMap);
+                item.innerHTML = `<span class="orch-session-icon">💬</span><div style="flex:1;min-width:0;"><div class="orch-session-title">${escapeHtml(resolvedTitle)}</div><div class="orch-session-id">#${s.session_id.slice(-6)} · ${t('orch_msg_count', {count: s.message_count||0})}</div></div>`;
                 item.addEventListener('click', () => {
                     listEl.querySelectorAll('.orch-session-item,.orch-session-new').forEach(el => el.classList.remove('selected'));
                     item.classList.add('selected');

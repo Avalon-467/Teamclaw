@@ -1383,13 +1383,13 @@ def proxy_tunnel_stop():
 
 # ------------------------------------------------------------------
 # Internal Agent CRUD  — per-user agent list stored as JSON
-# Path: data/user_files/{user_id}/internalagent/{user_id}_agent.json
+# Path: data/user_files/internalagent/{user_id}_agent.json
 # Structure: [ { "session": "<id>", "meta": { ... } }, ... ]
 # ------------------------------------------------------------------
 
 def _ia_path(user_id: str) -> str:
     """Return the JSON file path for a user's internal-agent list."""
-    return os.path.join(root_dir, "data", "user_files", user_id, "internalagent", f"{user_id}_agent.json")
+    return os.path.join(root_dir, "data", "user_files", "internalagent", f"{user_id}_agent.json")
 
 
 def _ia_load(user_id: str) -> list:
