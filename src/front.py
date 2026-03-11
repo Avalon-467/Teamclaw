@@ -571,6 +571,260 @@ def proxy_openclaw_agent_bind():
         return jsonify({"ok": False, "error": str(e)}), 500
 
 
+# ------------------------------------------------------------------
+# Team OpenClaw Snapshot — export/restore agent configs in team folder
+# ------------------------------------------------------------------
+
+def _team_snapshot_path(user_id: str, team: str) -> str:
+    """Return the path to the team's openclaw_agents.json snapshot file."""
+    return os.path.join(root_dir, "data", "user_files", user_id, "teams", team, "openclaw_agents.json")
+
+
+def _team_snapshot_load(user_id: str, team: str) -> dict:
+    """Load the team's openclaw agents snapshot; return {} if missing."""
+    p = _team_snapshot_path(user_id, team)
+    if not os.path.isfile(p):
+        return {}
+    try:
+        with open(p, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return {}
+
+
+def _team_snapshot_save(user_id: str, team: str, data: dict):
+    """Save the team's openclaw agents snapshot to disk."""
+    p = _team_snapshot_path(user_id, team)
+    os.makedirs(os.path.dirname(p), exist_ok=True)
+    with open(p, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
+
+
+@app.route("/team_openclaw_snapshot", methods=["GET"])
+def team_openclaw_snapshot_get():
+    """Get the team's saved OpenClaw agent snapshots.
+    Query: ?team=<name>
+    Returns: { ok, agents: { "shortname": { config, workspace_files }, ... } }
+    """
+    user_id = session.get("user_id")
+    if not user_id:
+        return jsonify({"error": "未登录"}), 401
+    team = request.args.get("team", "")
+    if not team:
+        return jsonify({"ok": False, "error": "team is required"}), 400
+    data = _team_snapshot_load(user_id, team)
+    return jsonify({"ok": True, "agents": data})
+
+
+@app.route("/team_openclaw_snapshot/export", methods=["POST"])
+def team_openclaw_snapshot_export():
+    """Export (save) an OpenClaw agent's full config into the team snapshot file.
+    Body: { "team": "...", "agent_name": "full_name_with_prefix", "short_name": "without_prefix" }
+    Fetches agent detail + workspace files from oasis server and saves to team folder.
+    """
+    user_id = session.get("user_id")
+    if not user_id:
+        return jsonify({"error": "未登录"}), 401
+
+    body = request.get_json(force=True)
+    team = body.get("team", "")
+    agent_name = body.get("agent_name", "")
+    short_name = body.get("short_name", "") or agent_name
+
+    if not team or not agent_name:
+        return jsonify({"ok": False, "error": "team and agent_name are required"}), 400
+
+    # Fetch snapshot from oasis server
+    try:
+        r = requests.get(
+            f"{OASIS_BASE_URL}/sessions/openclaw/agent-snapshot",
+            params={"name": agent_name},
+            timeout=30,
+        )
+        snapshot = r.json()
+        if not snapshot.get("ok"):
+            return jsonify({"ok": False, "error": snapshot.get("error", "Export failed")}), r.status_code
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+    # Save to team snapshot file
+    data = _team_snapshot_load(user_id, team)
+    data[short_name] = {
+        "config": snapshot.get("config", {}),
+        "workspace_files": snapshot.get("workspace_files", {}),
+    }
+    _team_snapshot_save(user_id, team, data)
+
+    file_count = len(snapshot.get("workspace_files", {}))
+    return jsonify({
+        "ok": True,
+        "short_name": short_name,
+        "agent_name": agent_name,
+        "file_count": file_count,
+        "message": f"Exported '{agent_name}' → team snapshot as '{short_name}' ({file_count} files)",
+    })
+
+
+@app.route("/team_openclaw_snapshot/restore", methods=["POST"])
+def team_openclaw_snapshot_restore():
+    """Restore an OpenClaw agent from the team snapshot.
+    Body: { "team": "...", "short_name": "...", "target_agent_name": "full_name_with_prefix" }
+    Reads from team snapshot file and sends to oasis server's restore endpoint.
+    """
+    user_id = session.get("user_id")
+    if not user_id:
+        return jsonify({"error": "未登录"}), 401
+
+    body = request.get_json(force=True)
+    team = body.get("team", "")
+    short_name = body.get("short_name", "")
+    target_name = body.get("target_agent_name", "")
+
+    if not team or not short_name:
+        return jsonify({"ok": False, "error": "team and short_name are required"}), 400
+    if not target_name:
+        target_name = team + "_" + short_name
+
+    # Load snapshot
+    data = _team_snapshot_load(user_id, team)
+    agent_snapshot = data.get(short_name)
+    if not agent_snapshot:
+        return jsonify({"ok": False, "error": f"No snapshot found for '{short_name}' in team '{team}'"}), 404
+
+    # Send to oasis server restore endpoint
+    try:
+        r = requests.post(
+            f"{OASIS_BASE_URL}/sessions/openclaw/agent-restore",
+            json={
+                "agent_name": target_name,
+                "config": agent_snapshot.get("config", {}),
+                "workspace_files": agent_snapshot.get("workspace_files", {}),
+            },
+            timeout=60,
+        )
+        result = r.json()
+        return jsonify(result), r.status_code
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
+@app.route("/team_openclaw_snapshot/export_all", methods=["POST"])
+def team_openclaw_snapshot_export_all():
+    """Export ALL team-prefixed OpenClaw agents into the team snapshot.
+    Body: { "team": "..." }
+    Fetches the agent list, filters by team prefix, and exports each one.
+    """
+    user_id = session.get("user_id")
+    if not user_id:
+        return jsonify({"error": "未登录"}), 401
+
+    body = request.get_json(force=True)
+    team = body.get("team", "")
+    if not team:
+        return jsonify({"ok": False, "error": "team is required"}), 400
+
+    prefix = team + "_"
+
+    # Fetch all openclaw agents
+    try:
+        r = requests.get(f"{OASIS_BASE_URL}/sessions/openclaw", timeout=15)
+        agents_data = r.json()
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+    agents = agents_data.get("agents", [])
+    team_agents = [a for a in agents if (a.get("name") or "").startswith(prefix)]
+
+    if not team_agents:
+        return jsonify({"ok": True, "exported": 0, "message": f"No agents with prefix '{prefix}'"}), 200
+
+    data = _team_snapshot_load(user_id, team)
+    exported = 0
+    errors = []
+
+    for a in team_agents:
+        full_name = a["name"]
+        short_name = full_name[len(prefix):]  # strip team prefix
+        try:
+            r = requests.get(
+                f"{OASIS_BASE_URL}/sessions/openclaw/agent-snapshot",
+                params={"name": full_name},
+                timeout=30,
+            )
+            snapshot = r.json()
+            if snapshot.get("ok"):
+                data[short_name] = {
+                    "config": snapshot.get("config", {}),
+                    "workspace_files": snapshot.get("workspace_files", {}),
+                }
+                exported += 1
+            else:
+                errors.append(f"{full_name}: {snapshot.get('error', 'failed')}")
+        except Exception as e:
+            errors.append(f"{full_name}: {e}")
+
+    _team_snapshot_save(user_id, team, data)
+
+    return jsonify({
+        "ok": True,
+        "exported": exported,
+        "total": len(team_agents),
+        "errors": errors,
+        "message": f"Exported {exported}/{len(team_agents)} agents to team snapshot",
+    })
+
+
+@app.route("/team_openclaw_snapshot/restore_all", methods=["POST"])
+def team_openclaw_snapshot_restore_all():
+    """Restore ALL agents from the team snapshot.
+    Body: { "team": "..." }
+    For each agent in the snapshot, creates/updates the OpenClaw agent with team prefix.
+    """
+    user_id = session.get("user_id")
+    if not user_id:
+        return jsonify({"error": "未登录"}), 401
+
+    body = request.get_json(force=True)
+    team = body.get("team", "")
+    if not team:
+        return jsonify({"ok": False, "error": "team is required"}), 400
+
+    data = _team_snapshot_load(user_id, team)
+    if not data:
+        return jsonify({"ok": True, "restored": 0, "message": "No snapshots found"}), 200
+
+    restored = 0
+    errors = []
+
+    for short_name, agent_snapshot in data.items():
+        target_name = team + "_" + short_name
+        try:
+            r = requests.post(
+                f"{OASIS_BASE_URL}/sessions/openclaw/agent-restore",
+                json={
+                    "agent_name": target_name,
+                    "config": agent_snapshot.get("config", {}),
+                    "workspace_files": agent_snapshot.get("workspace_files", {}),
+                },
+                timeout=60,
+            )
+            result = r.json()
+            if result.get("ok"):
+                restored += 1
+            else:
+                errors.append(f"{target_name}: {result.get('errors', result.get('error', 'failed'))}")
+        except Exception as e:
+            errors.append(f"{target_name}: {e}")
+
+    return jsonify({
+        "ok": True,
+        "restored": restored,
+        "total": len(data),
+        "errors": errors,
+        "message": f"Restored {restored}/{len(data)} agents from team snapshot",
+    })
+
+
 @app.route("/proxy_session_history", methods=["POST"])
 def proxy_session_history():
     """代理获取指定会话的历史消息"""
@@ -1383,8 +1637,8 @@ def proxy_tunnel_stop():
 
 # ------------------------------------------------------------------
 # Internal Agent CRUD  — per-user agent list stored as JSON
-# Path: data/user_files/internalagent/{user_id}_agent.json
-#   or: data/user_files/{user_id}/teams/{team}/{user_id}_agent.json  (team mode)
+# Path: data/user_files/internalagent/oasis_agents.json
+#   or: data/user_files/{user_id}/teams/{team}/oasis_agents.json  (team mode)
 # Structure: [ { "session": "<id>", "meta": { ... } }, ... ]
 # ------------------------------------------------------------------
 
@@ -1393,8 +1647,8 @@ def _ia_path(user_id: str, team: str = "") -> str:
     If team is specified, use the team-scoped path under the user's folder.
     """
     if team:
-        return os.path.join(root_dir, "data", "user_files", user_id, "teams", team, f"{user_id}_agent.json")
-    return os.path.join(root_dir, "data", "user_files", "internalagent", f"{user_id}_agent.json")
+        return os.path.join(root_dir, "data", "user_files", user_id, "teams", team, "oasis_agents.json")
+    return os.path.join(root_dir, "data", "user_files", "internalagent", "oasis_agents.json")
 
 
 def _ia_load(user_id: str, team: str = "") -> list:

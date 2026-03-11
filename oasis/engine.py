@@ -7,7 +7,7 @@ Manages the full lifecycle of a discussion:
 Three expert backends:
   1. ExpertAgent  — direct LLM (stateless, name="tag#temp#N")
   2. SessionExpert — internal session agent (stateful, name="tag#oasis#name" or "#oasis#name")
-     - name is resolved to session_id via internal agent JSON ({user_id}_agent.json)
+     - name is resolved to session_id via internal agent JSON (oasis_agents.json)
      - tag (if present) enables persona injection from presets
   3. ExternalExpert — external OpenAI-compatible API (name="tag#ext#id")
      - Directly calls external endpoints (DeepSeek, GPT-4, Ollama, etc)
@@ -37,7 +37,7 @@ Expert pool sourcing (YAML-only, schedule_file or schedule_yaml required):
       - all_experts: true
 
 No separate expert-session storage: session_ids are resolved from agent names
-via internal agent JSON ({user_id}_agent.json), then used to access the
+via internal agent JSON (oasis_agents.json), then used to access the
 Agent checkpoint DB.
 
 Execution modes:
@@ -81,17 +81,17 @@ def _load_internal_agents(user_id: str, team: str = "") -> list[dict]:
     """Load the internal-agent JSON list for a user.
 
     If team is specified, load from the team-scoped path:
-      data/user_files/{user_id}/teams/{team}/{user_id}_agent.json
+      data/user_files/{user_id}/teams/{team}/oasis_agents.json
     Otherwise load from:
-      data/user_files/internalagent/{user_id}_agent.json
+      data/user_files/internalagent/oasis_agents.json
 
     Returns list of {"session": "<id>", "meta": {"name": ..., "tag": ...}} entries.
     Returns [] if file missing or unreadable.
     """
     if team:
-        p = os.path.join(_PROJECT_ROOT, "data", "user_files", user_id, "teams", team, f"{user_id}_agent.json")
+        p = os.path.join(_PROJECT_ROOT, "data", "user_files", user_id, "teams", team, "oasis_agents.json")
     else:
-        p = os.path.join(_INTERNAL_AGENT_DIR, f"{user_id}_agent.json")
+        p = os.path.join(_INTERNAL_AGENT_DIR, "oasis_agents.json")
     if not os.path.isfile(p):
         return []
     try:

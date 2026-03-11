@@ -495,8 +495,6 @@ async function orchLoadOpenClawSessions() {
             if (toolProfile) metaLine += '🔧' + toolProfile;
             if (skillCount) metaLine += (metaLine ? ' · ' : '') + '🧩' + skillCount;
 
-            card.innerHTML = `<span class="orch-emoji">🦞</span><div style="min-width:0;flex:1;"><div class="orch-name" title="${escapeHtml(agentName)}">${escapeHtml(title)}</div>${mdl ? '<div class="orch-tag" style="color:#10b981;font-family:monospace;">' + escapeHtml(mdl) + '</div>' : ''}${metaLine ? '<div class="orch-tag" style="color:#6b7280;font-size:9px;">' + escapeHtml(metaLine) + '</div>' : ''}</div><div style="display:flex;flex-direction:column;gap:2px;flex-shrink:0;">${agentWs ? '<button class="orch-oc-edit-btn" data-ws="' + escapeHtml(agentWs) + '" data-agent="' + escapeHtml(agentName) + '" title="' + t('orch_oc_edit_files') + '" style="background:none;border:none;cursor:pointer;font-size:12px;padding:1px 3px;opacity:0.5;line-height:1;" onmouseenter="this.style.opacity=1" onmouseleave="this.style.opacity=0.5">📝</button>' : ''}<button class="orch-oc-cfg-btn" data-agent="${escapeHtml(agentName)}" title="${t('orch_oc_config')}" style="background:none;border:none;cursor:pointer;font-size:12px;padding:1px 3px;opacity:0.5;line-height:1;" onmouseenter="this.style.opacity=1" onmouseleave="this.style.opacity=0.5">⚙️</button></div>`;
-            // model format: agent:<name> (CLI uses --agent <name>, no session-id)
             // When team mode is active, strip the team prefix from the name
             // so that the YAML stays portable across different team setups.
             // The oasis engine will re-add the prefix at runtime based on the team parameter.
@@ -507,6 +505,9 @@ async function orchLoadOpenClawSessions() {
                     yamlName = agentName.slice(prefix.length);
                 }
             }
+
+            card.innerHTML = `<span class="orch-emoji">🦞</span><div style="min-width:0;flex:1;"><div class="orch-name" title="${escapeHtml(agentName)}">${escapeHtml(title)}</div>${mdl ? '<div class="orch-tag" style="color:#10b981;font-family:monospace;">' + escapeHtml(mdl) + '</div>' : ''}${metaLine ? '<div class="orch-tag" style="color:#6b7280;font-size:9px;">' + escapeHtml(metaLine) + '</div>' : ''}</div><div style="display:flex;flex-direction:column;gap:2px;flex-shrink:0;">${(orch.teamEnabled && orch.teamName) ? '<button class="orch-oc-snap-btn" data-agent="' + escapeHtml(agentName) + '" data-short="' + escapeHtml(yamlName) + '" title="Export to team snapshot" style="background:none;border:none;cursor:pointer;font-size:12px;padding:1px 3px;opacity:0.5;line-height:1;" onmouseenter="this.style.opacity=1" onmouseleave="this.style.opacity=0.5">📤</button>' : ''}${agentWs ? '<button class="orch-oc-edit-btn" data-ws="' + escapeHtml(agentWs) + '" data-agent="' + escapeHtml(agentName) + '" title="' + t('orch_oc_edit_files') + '" style="background:none;border:none;cursor:pointer;font-size:12px;padding:1px 3px;opacity:0.5;line-height:1;" onmouseenter="this.style.opacity=1" onmouseleave="this.style.opacity=0.5">📝</button>' : ''}<button class="orch-oc-cfg-btn" data-agent="${escapeHtml(agentName)}" title="${t('orch_oc_config')}" style="background:none;border:none;cursor:pointer;font-size:12px;padding:1px 3px;opacity:0.5;line-height:1;" onmouseenter="this.style.opacity=1" onmouseleave="this.style.opacity=0.5">⚙️</button></div>`;
+            // model format: agent:<name> (CLI uses --agent <name>, no session-id)
             const modelStr = 'agent:' + yamlName;
             const nodeData = {
                 type: 'external', name: yamlName, tag: 'openclaw', emoji: '🦞', temperature: 0.7,
@@ -533,7 +534,89 @@ async function orchLoadOpenClawSessions() {
                 });
                 cfgBtn.addEventListener('dblclick', (e) => e.stopPropagation());
             }
+            // Bind snapshot export button (team mode only)
+            const snapBtn = card.querySelector('.orch-oc-snap-btn');
+            if (snapBtn) {
+                snapBtn.addEventListener('click', async (e) => {
+                    e.stopPropagation();
+                    const sBtn = e.currentTarget;
+                    const fullName = sBtn.dataset.agent;
+                    const shortName = sBtn.dataset.short;
+                    sBtn.textContent = '⏳';
+                    try {
+                        const r = await fetch('/team_openclaw_snapshot/export', {
+                            method: 'POST', headers: {'Content-Type': 'application/json'},
+                            body: JSON.stringify({ team: orch.teamName, agent_name: fullName, short_name: shortName }),
+                        });
+                        const res = await r.json();
+                        if (res.ok) {
+                            orchToast('📤 ' + res.message);
+                        } else {
+                            orchToast('❌ ' + (res.error || 'Export failed'));
+                        }
+                    } catch(err) { orchToast('❌ Network error'); }
+                    sBtn.textContent = '📤';
+                });
+                snapBtn.addEventListener('dblclick', (e) => e.stopPropagation());
+            }
             list.appendChild(card);
+        }
+
+        // Team mode: add Export All / Restore All buttons
+        if (orch.teamEnabled && orch.teamName) {
+            const btnBar = document.createElement('div');
+            btnBar.style.cssText = 'display:flex;gap:4px;padding:6px 8px;border-top:1px solid #e5e7eb;';
+            btnBar.innerHTML = `
+                <button id="orch-oc-export-all" style="flex:1;padding:4px 8px;border-radius:4px;border:1px solid #059669;background:#ecfdf5;color:#059669;cursor:pointer;font-size:10px;font-weight:600;" title="Export all team agents config to team folder">📤 Export</button>
+                <button id="orch-oc-restore-all" style="flex:1;padding:4px 8px;border-radius:4px;border:1px solid #7c3aed;background:#f5f3ff;color:#7c3aed;cursor:pointer;font-size:10px;font-weight:600;" title="Restore all agents from team snapshot">📥 Restore</button>
+            `;
+            list.appendChild(btnBar);
+
+            // Export All: save all team agents' full config to team folder
+            btnBar.querySelector('#orch-oc-export-all').addEventListener('click', async (e) => {
+                e.stopPropagation();
+                const btn = e.currentTarget;
+                btn.disabled = true; btn.textContent = '⏳ Exporting...';
+                try {
+                    const r = await fetch('/team_openclaw_snapshot/export_all', {
+                        method: 'POST', headers: {'Content-Type': 'application/json'},
+                        body: JSON.stringify({ team: orch.teamName }),
+                    });
+                    const res = await r.json();
+                    if (res.ok) {
+                        orchToast('📤 ' + res.message);
+                    } else {
+                        orchToast('❌ ' + (res.error || 'Export failed'));
+                    }
+                } catch(err) { orchToast('❌ Network error'); }
+                btn.disabled = false; btn.textContent = '📤 Export';
+            });
+
+            // Restore All: restore agents from team snapshot
+            btnBar.querySelector('#orch-oc-restore-all').addEventListener('click', async (e) => {
+                e.stopPropagation();
+                const btn = e.currentTarget;
+                if (!confirm('Restore all agents from team snapshot? This will create/update OpenClaw agents with prefix "' + orch.teamName + '_".')) return;
+                btn.disabled = true; btn.textContent = '⏳ Restoring...';
+                try {
+                    const r = await fetch('/team_openclaw_snapshot/restore_all', {
+                        method: 'POST', headers: {'Content-Type': 'application/json'},
+                        body: JSON.stringify({ team: orch.teamName }),
+                    });
+                    const res = await r.json();
+                    if (res.ok) {
+                        orchToast('📥 ' + res.message);
+                        if (res.errors && res.errors.length > 0) {
+                            orchToast('⚠️ Errors: ' + res.errors.join('; '));
+                        }
+                        // Reload the list to show newly created agents
+                        setTimeout(() => orchLoadOpenClawSessions(), 1000);
+                    } else {
+                        orchToast('❌ ' + (res.error || 'Restore failed'));
+                    }
+                } catch(err) { orchToast('❌ Network error'); }
+                btn.disabled = false; btn.textContent = '📥 Restore';
+            });
         }
     } catch(e) {
         list.innerHTML = '<div style="padding:6px 10px;font-size:10px;color:#dc2626;text-align:center;">❌ ' + t('error') + '</div>';

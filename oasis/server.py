@@ -1498,6 +1498,221 @@ async def publicnet_info():
     }
 
 
+# ------------------------------------------------------------------
+# OpenClaw agent snapshot — export full config + workspace files
+# ------------------------------------------------------------------
+
+@app.get("/sessions/openclaw/agent-snapshot")
+async def export_openclaw_agent_snapshot(name: str = Query(...)):
+    """Export a complete snapshot of an OpenClaw agent for portability.
+
+    Returns: {
+        ok, agent_name,
+        config: { skills, skills_all, tools: {profile, alsoAllow, deny}, model },
+        workspace_files: { "IDENTITY.md": "content...", "TOOLS.md": "content...", ... }
+    }
+    """
+    # 1. Get agent detail (skills, tools, workspace path)
+    config = _fetch_openclaw_full_config()
+    defaults = config.get("defaults", {}) if config else {}
+    agent_list = config.get("list", []) if config else []
+
+    agent_detail = None
+    for a in agent_list:
+        if a.get("id") == name or a.get("name") == name:
+            agent_detail = _build_agent_detail(a, defaults)
+            break
+
+    if not agent_detail:
+        # Fallback: try CLI
+        cli_agents = _fetch_openclaw_agents_via_cli()
+        if cli_agents:
+            for a in cli_agents:
+                if a.get("name") == name or a.get("id") == name:
+                    agent_detail = {
+                        "name": a.get("name", name),
+                        "workspace": a.get("workspace", defaults.get("workspace", "")),
+                        "tools": {"profile": "", "alsoAllow": [], "deny": []},
+                        "skills": [],
+                        "skills_all": True,
+                        "model": {},
+                    }
+                    break
+
+    if not agent_detail:
+        return JSONResponse({"ok": False, "error": f"Agent '{name}' not found"}, status_code=404)
+
+    # 2. Read workspace core files
+    workspace_files = {}
+    ws = agent_detail.get("workspace", "")
+    if ws:
+        ws_path = os.path.expanduser(ws)
+        if os.path.isdir(ws_path):
+            for fname in _OPENCLAW_CORE_FILES:
+                fpath = os.path.join(ws_path, fname)
+                if os.path.isfile(fpath):
+                    try:
+                        with open(fpath, "r", encoding="utf-8", errors="replace") as f:
+                            workspace_files[fname] = f.read()
+                    except Exception:
+                        pass
+
+    return {
+        "ok": True,
+        "agent_name": name,
+        "config": {
+            "skills": agent_detail.get("skills", []),
+            "skills_all": agent_detail.get("skills_all", True),
+            "tools": agent_detail.get("tools", {}),
+            "model": agent_detail.get("model", {}),
+        },
+        "workspace_files": workspace_files,
+    }
+
+
+@app.post("/sessions/openclaw/agent-restore")
+async def restore_openclaw_agent_snapshot(req: Request):
+    """Restore an OpenClaw agent from a snapshot.
+
+    1. Create agent if not exists (openclaw agents add)
+    2. Update skills/tools config (openclaw config set)
+    3. Write workspace files
+
+    Body: { agent_name, config: {...}, workspace_files: {...}, workspace?: "custom path" }
+    """
+    if not _OPENCLAW_BIN:
+        return JSONResponse({"ok": False, "error": "openclaw CLI not available"}, status_code=500)
+
+    body = await req.json()
+    agent_name = (body.get("agent_name") or "").strip()
+    if not agent_name:
+        return JSONResponse({"ok": False, "error": "agent_name is required"}, status_code=400)
+
+    snapshot_config = body.get("config", {})
+    snapshot_files = body.get("workspace_files", {})
+    custom_ws = (body.get("workspace") or "").strip()
+
+    errors = []
+
+    # Step 1: Check if agent exists; create if not
+    existing = _fetch_openclaw_agents_via_cli() or []
+    agent_exists = any(a.get("name") == agent_name for a in existing)
+    workspace = ""
+
+    if not agent_exists:
+        # Determine workspace path
+        if custom_ws:
+            new_workspace = os.path.expanduser(custom_ws)
+        else:
+            default_ws = _get_openclaw_default_workspace()
+            if default_ws:
+                parent_dir = os.path.dirname(default_ws.rstrip("/"))
+                new_workspace = os.path.join(parent_dir, f"workspace-{agent_name}")
+            else:
+                new_workspace = os.path.expanduser(f"~/workspace-{agent_name}")
+
+        try:
+            result = subprocess.run(
+                [_OPENCLAW_BIN, "agents", "add", agent_name, "--workspace", new_workspace, "--non-interactive"],
+                capture_output=True, text=True, timeout=30,
+            )
+            if result.returncode != 0:
+                err_msg = (result.stderr or result.stdout or "Unknown error").strip()[:500]
+                errors.append(f"Create agent failed: {err_msg}")
+            else:
+                workspace = new_workspace
+        except Exception as e:
+            errors.append(f"Create agent failed: {e}")
+    else:
+        # Find existing workspace
+        for a in existing:
+            if a.get("name") == agent_name:
+                workspace = a.get("workspace", "")
+                break
+
+    # Step 2: Update skills/tools config via update-config endpoint logic
+    if snapshot_config:
+        # Find agent index in config
+        config = _fetch_openclaw_full_config()
+        agent_list = config.get("list", []) if config else []
+        agent_idx = None
+        for i, a in enumerate(agent_list):
+            if a.get("id") == agent_name or a.get("name") == agent_name:
+                agent_idx = i
+                break
+
+        if agent_idx is None:
+            agent_idx = len(agent_list)
+            # Create config entry
+            init_entry = {"id": agent_name, "name": agent_name}
+            if workspace:
+                init_entry["workspace"] = workspace
+            try:
+                subprocess.run(
+                    [_OPENCLAW_BIN, "config", "set",
+                     f"agents.list[{agent_idx}]", json.dumps(init_entry), "--json"],
+                    capture_output=True, text=True, timeout=10,
+                )
+            except Exception as e:
+                errors.append(f"Create config entry failed: {e}")
+
+        # Update skills
+        skills_val = snapshot_config.get("skills")
+        skills_all = snapshot_config.get("skills_all", False)
+        if skills_all:
+            # Remove skills key = all skills
+            try:
+                subprocess.run(
+                    [_OPENCLAW_BIN, "config", "set",
+                     f"agents.list[{agent_idx}].skills", "--delete", "--json"],
+                    capture_output=True, text=True, timeout=10,
+                )
+            except Exception:
+                pass
+        elif skills_val is not None:
+            try:
+                subprocess.run(
+                    [_OPENCLAW_BIN, "config", "set",
+                     f"agents.list[{agent_idx}].skills", json.dumps(skills_val), "--json"],
+                    capture_output=True, text=True, timeout=10,
+                )
+            except Exception as e:
+                errors.append(f"Set skills failed: {e}")
+
+        # Update tools
+        tools_cfg = snapshot_config.get("tools", {})
+        if tools_cfg:
+            try:
+                subprocess.run(
+                    [_OPENCLAW_BIN, "config", "set",
+                     f"agents.list[{agent_idx}].tools", json.dumps(tools_cfg), "--json"],
+                    capture_output=True, text=True, timeout=10,
+                )
+            except Exception as e:
+                errors.append(f"Set tools failed: {e}")
+
+    # Step 3: Write workspace files
+    if workspace and snapshot_files:
+        ws_path = os.path.expanduser(workspace)
+        os.makedirs(ws_path, exist_ok=True)
+        for fname, content in snapshot_files.items():
+            safe_name = os.path.basename(fname)
+            fpath = os.path.join(ws_path, safe_name)
+            try:
+                with open(fpath, "w", encoding="utf-8") as f:
+                    f.write(content)
+            except Exception as e:
+                errors.append(f"Write {safe_name} failed: {e}")
+
+    return {
+        "ok": len(errors) == 0,
+        "agent_name": agent_name,
+        "workspace": workspace,
+        "errors": errors,
+        "message": f"Agent '{agent_name}' restored" + (f" with {len(errors)} error(s)" if errors else " successfully"),
+    }
+
+
 # --- Entrypoint ---
 if __name__ == "__main__":
     port = int(os.getenv("PORT_OASIS", "51202"))
