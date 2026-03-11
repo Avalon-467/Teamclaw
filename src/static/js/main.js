@@ -995,6 +995,20 @@ function applyTranslations() {
 
     // 更新 title
     document.title = 'Teamclaw | AI Agent';
+
+    // 刷新编排面板的专家列表（专家名称和分类标签跟随语言切换）
+    if (typeof orchRenderExpertSidebar === 'function') {
+        orchRenderExpertSidebar();
+    }
+    // 刷新画布上已有的节点名称（跟随语言切换）
+    if (typeof orch !== 'undefined' && orch.nodes && typeof orchRenderNode === 'function' && typeof orchRenderEdges === 'function') {
+        orch.nodes.forEach(node => {
+            const el = document.getElementById('onode-' + node.id);
+            if (el) el.remove();
+            orchRenderNode(node);
+        });
+        orchRenderEdges();
+    }
 }
 
 marked.setOptions({

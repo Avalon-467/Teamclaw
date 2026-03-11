@@ -179,17 +179,18 @@ function orchRenderExpertSidebar() {
 
     // 分类标签映射（公共专家也作为一个分类）
     const catLabels = {
-        '_public': {icon: '🌟', name: '公共专家'},
-        'design': {icon: '🎨', name: '设计'},
-        'engineering': {icon: '⚙️', name: '工程'},
-        'marketing': {icon: '📢', name: '营销'},
-        'product': {icon: '📦', name: '产品'},
-        'project-management': {icon: '📋', name: '项目管理'},
-        'spatial-computing': {icon: '🥽', name: '空间计算'},
-        'specialized': {icon: '🔬', name: '专项'},
-        'support': {icon: '🛡️', name: '支持'},
-        'testing': {icon: '🧪', name: '测试'},
+        '_public': {icon: '🌟', zh: '公共专家', en: 'Public Experts'},
+        'design': {icon: '🎨', zh: '设计', en: 'Design'},
+        'engineering': {icon: '⚙️', zh: '工程', en: 'Engineering'},
+        'marketing': {icon: '📢', zh: '营销', en: 'Marketing'},
+        'product': {icon: '📦', zh: '产品', en: 'Product'},
+        'project-management': {icon: '📋', zh: '项目管理', en: 'Project Mgmt'},
+        'spatial-computing': {icon: '🥽', zh: '空间计算', en: 'Spatial Computing'},
+        'specialized': {icon: '🔬', zh: '专项', en: 'Specialized'},
+        'support': {icon: '🛡️', zh: '支持', en: 'Support'},
+        'testing': {icon: '🧪', zh: '测试', en: 'Testing'},
     };
+    const isZh = (typeof currentLang !== 'undefined' && currentLang === 'zh-CN');
 
     // 所有非自定义专家都按 category 分组（公共专家用 _public 分类）
     const expertsByCategory = {};
@@ -216,14 +217,15 @@ function orchRenderExpertSidebar() {
         });
         sortedCats.forEach(cat => {
             const items = expertsByCategory[cat];
-            const info = catLabels[cat] || {icon: '📂', name: cat};
+            const info = catLabels[cat] || {icon: '📂', zh: cat, en: cat};
+            const catName = isZh ? info.zh : info.en;
             const isPublic = (cat === '_public');
             const wrapper = document.createElement('div');
             wrapper.className = 'orch-agency-cat-group';
 
             const header = document.createElement('div');
             header.className = 'orch-agency-cat-header' + (isPublic ? ' expanded' : '');
-            header.innerHTML = `<span class="cat-icon">${info.icon}</span><span class="cat-name">${info.name}</span><span class="cat-count">${items.length}</span><span class="cat-arrow">▶</span>`;
+            header.innerHTML = `<span class="cat-icon">${info.icon}</span><span class="cat-name">${catName}</span><span class="cat-count">${items.length}</span><span class="cat-arrow">▶</span>`;
 
             const list = document.createElement('div');
             list.className = 'orch-agency-cat-list' + (isPublic ? ' expanded' : '');
@@ -254,7 +256,10 @@ function _orchCreateExpertCard(exp, isCustom) {
     const card = document.createElement('div');
     card.className = 'orch-expert-card';
     card.draggable = true;
-    card.innerHTML = `<span class="orch-emoji">${exp.emoji}</span><div style="min-width:0;flex:1;"><div class="orch-name" title="${escapeHtml(exp.name)}">${escapeHtml(exp.name)}</div><div class="orch-tag">${escapeHtml(exp.tag)}</div></div><span class="orch-temp">${exp.temperature||''}</span>${isCustom ? '<button class="orch-expert-del-btn" title="' + t('orch_ctx_delete') + '" style="font-size:10px;background:none;border:none;cursor:pointer;color:#dc2626;padding:0 2px;margin-left:2px;">✕</button>' : ''}`;
+    // 根据当前语言选择显示名称
+    const _isZh = (typeof currentLang !== 'undefined' && currentLang === 'zh-CN');
+    const displayName = _isZh ? (exp.name_zh || exp.name) : (exp.name_en || exp.name);
+    card.innerHTML = `<span class="orch-emoji">${exp.emoji}</span><div style="min-width:0;flex:1;"><div class="orch-name" title="${escapeHtml(displayName)}">${escapeHtml(displayName)}</div><div class="orch-tag">${escapeHtml(exp.tag)}</div></div><span class="orch-temp">${exp.temperature||''}</span>${isCustom ? '<button class="orch-expert-del-btn" title="' + t('orch_ctx_delete') + '" style="font-size:10px;background:none;border:none;cursor:pointer;color:#dc2626;padding:0 2px;margin-left:2px;">✕</button>' : ''}`;
     orchBindCardEvents(card, {type:'expert', ...exp});
     if (isCustom) {
         card.querySelector('.orch-expert-del-btn').addEventListener('click', async (ev) => {
@@ -1477,6 +1482,9 @@ function orchAddNode(data, x, y) {
     const id = 'on' + orch.nid++;
     const inst = data.instance || orchNextInstance(data);
     const node = { id, name: data.name, tag: data.tag||'custom', emoji: data.emoji||'⭐', x: Math.round(x), y: Math.round(y), type: data.type||'expert', temperature: data.temperature||0.5, author: data.author||t('orch_default_author'), content: data.content||'', session_id: data.session_id||'', source: data.source||'', instance: inst, stateful: data.stateful||false };
+    // Preserve bilingual name fields
+    if (data.name_zh) node.name_zh = data.name_zh;
+    if (data.name_en) node.name_en = data.name_en;
     // Preserve selector node flag
     if (data.isSelector) node.isSelector = true;
     // Preserve session agent name for YAML generation
@@ -1520,6 +1528,9 @@ function orchRenderNode(node) {
     if (isExternal) el.style.borderColor = '#2ecc71';
 
     const status = orch.sessionStatuses[node.tag] || orch.sessionStatuses[node.name] || 'idle';
+    // Bilingual display name for canvas node
+    const _nodeIsZh = (typeof currentLang !== 'undefined' && currentLang === 'zh-CN');
+    const nodeDisplayName = _nodeIsZh ? (node.name_zh || node.name) : (node.name_en || node.name);
     const instBadge = `<span style="display:inline-block;background:#2563eb;color:#fff;font-size:9px;font-weight:700;border-radius:50%;min-width:16px;height:16px;line-height:16px;text-align:center;margin-left:3px;flex-shrink:0;">${node.instance||1}</span>`;
     let tagLine;
     if (isSession) {
@@ -1546,7 +1557,7 @@ function orchRenderNode(node) {
     const selectorBadgeHtml = node.isSelector ? '<div class="orch-selector-badge">🎯 SELECTOR</div>' : '';
     el.innerHTML = `
         <span class="orch-node-emoji">${node.emoji}</span>
-        <div style="min-width:0;flex:1;"><div class="orch-node-name" style="display:flex;align-items:center;">${escapeHtml(node.name)}${instBadge}${statefulBadge}</div>${tagLine}${instrPreview}</div>
+        <div style="min-width:0;flex:1;"><div class="orch-node-name" style="display:flex;align-items:center;">${escapeHtml(nodeDisplayName)}${instBadge}${statefulBadge}</div>${tagLine}${instrPreview}</div>
         <div class="orch-node-del" title="${t('orch_node_remove')}">×</div>
         <div class="orch-port port-in" data-node="${node.id}" data-dir="in"></div>
         <div class="orch-port port-out" data-node="${node.id}" data-dir="out"></div>
@@ -2034,7 +2045,7 @@ function orchSetupCanvas() {
                     orchRenderNode(hitNode);
                     orchRenderEdges();
                     orchUpdateYaml();
-                    orchToast('🏷️ ' + t('orch_ia_tag_set') + ' ' + data.tag + ' → ' + hitNode.name);
+                    orchToast('🏷️ ' + t('orch_ia_tag_set') + ' ' + data.tag + ' → ' + ((typeof currentLang !== 'undefined' && currentLang === 'zh-CN') ? (hitNode.name_zh || hitNode.name) : (hitNode.name_en || hitNode.name)));
                     return;
                 }
             }
@@ -2472,7 +2483,7 @@ function orchShowExternalModal(node) {
     overlay.id = 'orch-external-modal';
     const hdrs = (node.headers && typeof node.headers === 'object') ? JSON.stringify(node.headers, null, 2) : '';
     overlay.innerHTML = `<div class="orch-modal" style="max-width:480px;">
-        <h3>🌐 ${escapeHtml(node.name)} — External Agent</h3>
+        <h3>🌐 ${escapeHtml((typeof currentLang !== 'undefined' && currentLang === 'zh-CN') ? (node.name_zh || node.name) : (node.name_en || node.name))} — External Agent</h3>
         <label style="font-size:11px;color:#9ca3af;margin-bottom:2px;display:block;">API URL *</label>
         <input type="text" id="orch-ext-url" value="${escapeHtml(node.api_url||'')}" placeholder="https://api.example.com/v1" style="font-family:monospace;font-size:12px;">
         <label style="font-size:11px;color:#9ca3af;margin-bottom:2px;margin-top:8px;display:block;">API Key</label>

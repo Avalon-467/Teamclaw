@@ -480,6 +480,11 @@ async def list_experts(user_id: str = ""):
             "persona": persona_preview,
             "source": c.get("source", "public"),
         }
+        # 双语名称：公共专家有 name_en，agency 专家有 name_zh
+        if c.get("name_zh"):
+            entry["name_zh"] = c["name_zh"]
+        if c.get("name_en"):
+            entry["name_en"] = c["name_en"]
         # 为 agency 专家附加分类和描述
         if c.get("category"):
             entry["category"] = c["category"]
