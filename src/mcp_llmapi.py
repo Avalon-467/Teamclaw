@@ -80,10 +80,17 @@ async def call_llm_api(
     payload = {
         "model": model,
         "messages": messages,
-        "temperature": temperature,
         "max_tokens": max_tokens,
         "stream": False,
     }
+    # 推理模型（o1/o3/o4 系列）不支持自定义 temperature，只能用默认值
+    _model_lower = model.lower()
+    _is_reasoning = any(
+        _model_lower.startswith(p) and (len(_model_lower) == len(p) or _model_lower[len(p)] in "-_.")
+        for p in ("o1", "o3", "o4")
+    )
+    if not _is_reasoning:
+        payload["temperature"] = temperature
 
     try:
         async with httpx.AsyncClient(timeout=timeout) as client:

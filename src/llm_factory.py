@@ -66,6 +66,22 @@ _MODEL_PROVIDER_PATTERNS: dict[str, str] = {
     "groq": "openai",
 }
 
+# 不支持自定义 temperature 的模型前缀（如 OpenAI 推理模型 o1/o3/o4 系列）
+# 这些模型只允许 temperature=1，传其他值会报 400 错误
+_NO_TEMPERATURE_PREFIXES = ("o1", "o3", "o4")
+
+
+def _model_supports_temperature(model: str) -> bool:
+    """检查模型是否支持自定义 temperature 参数。"""
+    model_lower = model.lower()
+    for prefix in _NO_TEMPERATURE_PREFIXES:
+        if model_lower.startswith(prefix) and (
+            len(model_lower) == len(prefix)        # 精确匹配 "o1"
+            or model_lower[len(prefix)] in "-_."   # 匹配 "o3-mini", "o4-mini" 等
+        ):
+            return False
+    return True
+
 
 def create_chat_model(
     *,
@@ -79,6 +95,9 @@ def create_chat_model(
 
     可覆盖的参数：temperature / max_tokens / timeout / max_retries
     模型、API Key、Base URL、Provider 均从环境变量读取。
+
+    注意：对不支持自定义 temperature 的模型（如 OpenAI o1/o3/o4 推理系列），
+    会自动忽略 temperature 参数，使用模型默认值。
     """
     api_key = os.getenv("LLM_API_KEY")
     base_url = os.getenv("LLM_BASE_URL", "https://api.deepseek.com").strip()
@@ -87,6 +106,10 @@ def create_chat_model(
 
     if not api_key:
         raise ValueError("未检测到 LLM_API_KEY，请在环境变量中设置。")
+
+    # 对不支持 temperature 的模型，强制使用默认值 1
+    supports_temp = _model_supports_temperature(model)
+    effective_temp = temperature if supports_temp else 1
 
     # 1) 自动推断 provider
     if not provider:
@@ -104,7 +127,7 @@ def create_chat_model(
         kwargs = dict(
             model=model,
             google_api_key=api_key,
-            temperature=temperature,
+            temperature=effective_temp,
             max_output_tokens=max_tokens,
             timeout=timeout,
             max_retries=max_retries,
@@ -118,7 +141,7 @@ def create_chat_model(
         kwargs = dict(
             model=model,
             api_key=api_key,
-            temperature=temperature,
+            temperature=effective_temp,
             max_tokens=max_tokens,
             timeout=timeout,
             max_retries=max_retries,
@@ -133,7 +156,7 @@ def create_chat_model(
             model=model,
             api_key=api_key,
             base_url=base_url,
-            temperature=temperature,
+            temperature=effective_temp,
             max_tokens=max_tokens,
             timeout=timeout,
             max_retries=max_retries,
@@ -147,7 +170,7 @@ def create_chat_model(
         model=model,
         base_url=openai_base,
         api_key=api_key,
-        temperature=temperature,
+        temperature=effective_temp,
         max_tokens=max_tokens,
         timeout=timeout,
         max_retries=max_retries,
