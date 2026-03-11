@@ -290,7 +290,70 @@ function _orchResolveTitle(originalTitle, sessionId, agentMap) {
     return originalTitle;
 }
 
-// ── Load Session Agents ──
+// ── Add Internal Agent Modal ──
+function orchShowAddInternalAgentModal() {
+    const overlay = document.createElement('div');
+    overlay.className = 'orch-modal-overlay';
+    overlay.id = 'orch-add-ia-overlay';
+    overlay.innerHTML = `
+        <div class="orch-modal" style="min-width:380px;max-width:460px;">
+            <h3>${t('orch_add_internal_agent_title')}</h3>
+            <div style="display:flex;flex-direction:column;gap:8px;margin:10px 0;">
+                <label style="font-size:11px;font-weight:600;color:#374151;">${t('orch_ia_name')}
+                    <input id="orch-ia-name" type="text" placeholder="my_agent" style="width:100%;padding:6px 8px;border:1px solid #d1d5db;border-radius:6px;font-size:12px;margin-top:2px;">
+                </label>
+                <label style="font-size:11px;font-weight:600;color:#374151;">${t('orch_ia_tag')}
+                    <input id="orch-ia-tag" type="text" placeholder="${t('orch_ia_tag_placeholder')}" style="width:100%;padding:6px 8px;border:1px solid #d1d5db;border-radius:6px;font-size:12px;margin-top:2px;">
+                </label>
+                <div id="orch-ia-drop-zone" style="border:2px dashed #d1d5db;border-radius:8px;padding:12px;text-align:center;font-size:11px;color:#9ca3af;cursor:default;transition:all .15s;">
+                    📦 ${t('orch_ia_tag_placeholder')}
+                </div>
+            </div>
+            <div class="orch-modal-btns">
+                <button id="orch-ia-cancel" style="padding:6px 14px;border-radius:6px;border:1px solid #d1d5db;background:white;color:#374151;cursor:pointer;font-size:12px;">${t('orch_modal_cancel')}</button>
+                <button id="orch-ia-save" style="padding:6px 14px;border-radius:6px;border:none;background:#6366f1;color:white;cursor:pointer;font-size:12px;">${t('orch_modal_save')}</button>
+            </div>
+        </div>
+    `;
+    document.body.appendChild(overlay);
+    overlay.querySelector('#orch-ia-cancel').addEventListener('click', () => overlay.remove());
+    overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.remove(); });
+    // Drop zone: accept expert drag to set tag
+    const dropZone = overlay.querySelector('#orch-ia-drop-zone');
+    dropZone.addEventListener('dragover', (e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'copy'; dropZone.style.borderColor = '#6366f1'; dropZone.style.background = '#eef2ff'; });
+    dropZone.addEventListener('dragleave', () => { dropZone.style.borderColor = '#d1d5db'; dropZone.style.background = ''; });
+    dropZone.addEventListener('drop', (e) => {
+        e.preventDefault();
+        dropZone.style.borderColor = '#d1d5db'; dropZone.style.background = '';
+        try {
+            const data = JSON.parse(e.dataTransfer.getData('application/json'));
+            if (data.tag && data.tag !== 'manual' && data.tag !== 'conditional') {
+                document.getElementById('orch-ia-tag').value = data.tag;
+                dropZone.innerHTML = '✅ Tag: <b>' + escapeHtml(data.tag) + '</b> (' + escapeHtml(data.name || '') + ')';
+                dropZone.style.borderColor = '#6366f1'; dropZone.style.color = '#374151';
+            }
+        } catch(err) {}
+    });
+    // Save: create new session + internal agent entry
+    overlay.querySelector('#orch-ia-save').addEventListener('click', async () => {
+        const name = document.getElementById('orch-ia-name').value.trim();
+        const tag = document.getElementById('orch-ia-tag').value.trim();
+        if (!name) { orchToast('⚠️ Name is required'); return; }
+        // Generate a new session id
+        const newSid = Date.now().toString(36) + Math.random().toString(36).substr(2, 4);
+        try {
+            await fetch('/internal_agents', {
+                method: 'POST', headers: {'Content-Type':'application/json'},
+                body: JSON.stringify({ session: newSid, meta: { name, tag: tag || '' } })
+            });
+            orchToast('✅ ' + t('orch_ia_created') + ': ' + name);
+            overlay.remove();
+            orchLoadSessionAgents();
+        } catch(e) { orchToast('❌ ' + t('orch_toast_net_error')); }
+    });
+}
+
+// ── Load Internal Agents ──
 async function orchLoadSessionAgents() {
     const list = document.getElementById('orch-expert-list-sessions');
     if (!list) return;
@@ -302,18 +365,24 @@ async function orchLoadSessionAgents() {
         list.innerHTML = '';
 
         // Build merged session list: start from proxy_sessions, then add any JSON-only entries
-        const sessions = (data.sessions || []).slice();
-        const seenIds = new Set(sessions.map(s => s.session_id));
+        const allSessions = (data.sessions || []).slice();
+        const seenIds = new Set(allSessions.map(s => s.session_id));
         // Add sessions that exist in internal agent JSON but not in proxy_sessions
         for (const [sid, meta] of Object.entries(agentMap)) {
             if (!seenIds.has(sid)) {
-                sessions.push({ session_id: sid, title: meta.name || 'Untitled', message_count: 0 });
+                allSessions.push({ session_id: sid, title: meta.name || 'Untitled', message_count: 0 });
                 seenIds.add(sid);
             }
         }
 
+        // Only show sessions that have a name in the agent JSON
+        const sessions = allSessions.filter(s => {
+            const meta = agentMap[s.session_id];
+            return meta && meta.name;
+        });
+
         if (sessions.length === 0) {
-            list.innerHTML = '<div style="padding:6px 10px;font-size:10px;color:#d1d5db;text-align:center;">No sessions yet</div>';
+            list.innerHTML = '<div style="padding:6px 10px;font-size:10px;color:#d1d5db;text-align:center;">No named agents yet</div>';
             return;
         }
         // Sort by session_id descending (newest first)
@@ -325,15 +394,15 @@ async function orchLoadSessionAgents() {
             const title = _orchResolveTitle(s.title || 'Untitled', s.session_id, agentMap);
             const shortId = s.session_id.slice(-8);
             const msgCount = s.message_count || 0;
-            card.innerHTML = `<span class="orch-emoji">💬</span><div style="min-width:0;flex:1;"><div class="orch-name" title="${escapeHtml(title)}">${escapeHtml(title)}</div><div class="orch-tag" style="color:#6366f1;font-family:monospace;">#${escapeHtml(shortId)} · ${msgCount} msgs</div></div>`;
             // Carry agent meta tag (from internal agent JSON) if available
             const meta = agentMap[s.session_id] || {};
             const agentTag = meta.tag || '';
+            card.innerHTML = `<span class="orch-emoji">🤖</span><div style="min-width:0;flex:1;"><div class="orch-name" title="${escapeHtml(title)}">${escapeHtml(title)}</div><div class="orch-tag" style="color:#6366f1;font-family:monospace;">${agentTag ? '🏷️' + escapeHtml(agentTag) + ' · ' : ''}#${escapeHtml(shortId)}</div></div>`;
             const nodeData = {
                 type: 'session_agent',
                 name: title,
                 tag: agentTag || '',
-                emoji: '💬',
+                emoji: '🤖',
                 temperature: 0.5,
                 session_id: s.session_id,
                 agent_name: meta.name || title,
@@ -342,7 +411,7 @@ async function orchLoadSessionAgents() {
             list.appendChild(card);
         }
     } catch(e) {
-        console.error('Load session agents failed:', e);
+        console.error('Load internal agents failed:', e);
         list.innerHTML = '<div style="padding:6px 10px;font-size:10px;color:#dc2626;text-align:center;">❌ ' + t('error') + '</div>';
     }
 }
@@ -1454,7 +1523,8 @@ function orchRenderNode(node) {
     const instBadge = `<span style="display:inline-block;background:#2563eb;color:#fff;font-size:9px;font-weight:700;border-radius:50%;min-width:16px;height:16px;line-height:16px;text-align:center;margin-left:3px;flex-shrink:0;">${node.instance||1}</span>`;
     let tagLine;
     if (isSession) {
-        tagLine = `<div class="orch-node-tag" style="color:#6366f1;font-family:monospace;">#${(node.session_id||'').slice(-8)}</div>`;
+        const tagLabel = node.tag ? `🏷️${node.tag} · ` : '';
+        tagLine = `<div class="orch-node-tag" style="color:#6366f1;font-family:monospace;">${tagLabel}#${(node.session_id||'').slice(-8)}</div>`;
     } else if (isExternal) {
         let extDesc = '';
         if (node.api_url) {
@@ -1944,6 +2014,29 @@ function orchSetupCanvas() {
                     orchSetNodeSelector(node);
                 }
                 return;
+            }
+            // Expert dropped on an internal agent node → set its tag
+            if (data.type === 'expert' || (!data.type && data.tag)) {
+                const hitNode = orchFindNodeAtPoint(e.clientX, e.clientY);
+                if (hitNode && hitNode.type === 'session_agent' && data.tag && data.tag !== 'manual' && data.tag !== 'conditional') {
+                    const oldTag = hitNode.tag;
+                    hitNode.tag = data.tag;
+                    // Also update the backend internal agent JSON
+                    if (hitNode.session_id) {
+                        fetch('/internal_agents/' + encodeURIComponent(hitNode.session_id), {
+                            method: 'PUT', headers: {'Content-Type':'application/json'},
+                            body: JSON.stringify({ meta: { tag: data.tag } })
+                        }).catch(() => {});
+                    }
+                    // Re-render node to reflect new tag
+                    const el = document.getElementById('onode-' + hitNode.id);
+                    if (el) el.remove();
+                    orchRenderNode(hitNode);
+                    orchRenderEdges();
+                    orchUpdateYaml();
+                    orchToast('🏷️ ' + t('orch_ia_tag_set') + ' ' + data.tag + ' → ' + hitNode.name);
+                    return;
+                }
             }
             const cp = orchClientToCanvas(e.clientX, e.clientY);
             orchAddNode(data, cp.x - 55, cp.y - 20);

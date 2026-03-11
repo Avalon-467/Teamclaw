@@ -48,11 +48,11 @@ Backward compatibility:
     - Linear mode (no depends_on): sequential edges are auto-created
     - DAG mode (has depends_on): depends_on is converted to edges
 
-Expert name format (unchanged):
-  "tag#temp#N"          → ExpertAgent
-  "tag#oasis#id"        → SessionExpert (oasis)
+Expert name format:
+  "tag#temp#N"          → ExpertAgent (stateless LLM)
+  "tag#oasis#name"      → SessionExpert (name→session lookup, tag→persona)
+  "#oasis#name"         → SessionExpert (name→session lookup, no tag)
   "name#ext#id"         → ExternalExpert
-  "title#session_id"    → SessionExpert (regular)
   Any name + "#new"     → force new session
 """
 

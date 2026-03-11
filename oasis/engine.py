@@ -585,6 +585,7 @@ class DiscussionEngine:
                             selector_output = p.content
                             break
                     # Parse [oasis reply choose N]
+                    print(f"  [OASIS] 🔍 Selector '{nid}' raw output (first 200 chars): {selector_output[:200]!r}")
                     match = _OASIS_REPLY_CHOOSE_RE.search(selector_output)
                     if match:
                         choice_num = int(match.group(1))
@@ -766,8 +767,13 @@ class DiscussionEngine:
                             "\n\n⚠️ SELECTOR INSTRUCTION:\n"
                             "你需要根据上下文选择下一步操作。可选路径如下：\n"
                             + "\n".join(choices_desc) +
-                            "\n请在你的回复中包含对应的选择标签，例如 [oasis reply choose 1]。\n"
-                            "只选一个。"
+                            "\n\n🔴 关键格式要求（必须严格遵守）：\n"
+                            "你的回复**第一行**必须是以下格式之一（完全匹配，包含方括号）：\n"
+                            "[oasis reply choose 1]\n"
+                            "[oasis reply choose 2]\n"
+                            "... 等等（仅选一个）。\n"
+                            "选择标记必须放在回复的最开头第一行！后面可以跟你的分析理由。\n"
+                            "这是系统识别你选择的唯一方式，不输出此格式将导致默认选择第一项。"
                         )
                 combined_instr = (instr + selector_instr) if instr else selector_instr
                 print(f"  [OASIS] 🎤 {agents[0].name} speaks" + (f" (instruction: {combined_instr[:60]}...)" if combined_instr else "") + (" [SELECTOR]" if step.is_selector else ""))

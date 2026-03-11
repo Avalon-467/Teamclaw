@@ -73,7 +73,7 @@
             <div class="p-3 border-b bg-gray-50 flex justify-between items-center flex-shrink-0">
                 <span class="text-sm font-bold text-gray-700" data-i18n="history_title">🤖 Agents</span>
                 <div class="flex items-center gap-2">
-                    <button id="toggle-oasis-sessions-btn" onclick="toggleOasisSessionsVisible()" class="text-[10px] text-gray-400 hover:text-blue-600 px-1.5 py-0.5 rounded border border-gray-200 transition-colors" title="切换 OASIS/普通会话">🏛️ 切换到 OASIS</button>
+                    <button id="toggle-oasis-sessions-btn" onclick="toggleNamedSessionsVisible()" class="text-[10px] text-gray-400 hover:text-blue-600 px-1.5 py-0.5 rounded border border-gray-200 transition-colors" title="切换 已命名/无名会话">🏷️ 切换到无名会话</button>
                     <button onclick="deleteAllSessions()" class="text-xs text-red-400 hover:text-red-600" data-i18n="delete_all">🗑️ 清空全部</button>
                     <button onclick="closeSessionSidebar()" class="text-gray-400 hover:text-gray-600 text-lg leading-none">&times;</button>
                 </div>
@@ -340,11 +340,14 @@
                         <div class="orch-grid-row-divider" id="orch-grid-row-divider"></div>
                         <!-- 下行 -->
                         <div class="orch-grid-row" id="orch-grid-row-bottom">
-                            <!-- Bottom-left: Session agents -->
+                            <!-- Bottom-left: Internal agents -->
                             <div class="orch-sidebar-grid-cell" id="orch-cell-bl">
                                 <div class="orch-sidebar-grid-cell-header">
-                                    <span data-i18n="orch_session_agents">💬 Session Agents</span>
-                                    <button onclick="orchLoadSessionAgents()" data-i18n-title="refresh" title="刷新">🔄</button>
+                                    <span data-i18n="orch_internal_agents">🤖 Internal Agents</span>
+                                    <span style="display:flex;gap:2px;">
+                                        <button onclick="orchShowAddInternalAgentModal()" data-i18n-title="orch_add_internal_agent_title" title="新建 Agent" style="color:#6366f1;">➕</button>
+                                        <button onclick="orchLoadSessionAgents()" data-i18n-title="refresh" title="刷新">🔄</button>
+                                    </span>
                                 </div>
                                 <div class="orch-expert-list" id="orch-expert-list-sessions"></div>
                             </div>

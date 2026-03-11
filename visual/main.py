@@ -284,7 +284,9 @@ def layout_to_yaml(data: dict) -> str:
     settings = data.get("settings", {})
     has_conditional = bool(conditional_edges_raw) or data.get("hasConditional", False)
     has_selector = bool(selector_edges_raw) or data.get("hasSelector", False)
-    use_v2 = has_conditional or has_selector
+    # Always use version 2 graph format (with explicit edges).
+    # Version 1 is only supported for backward-compatible reading (scheduler.py auto-converts).
+    use_v2 = True
 
     repeat = settings.get("repeat", False)
     node_map = {n["id"]: n for n in nodes}
@@ -431,8 +433,8 @@ def layout_to_yaml(data: dict) -> str:
             }
         })
 
-    # ── Version 2 graph output when conditional or selector edges exist ──
-    if use_v2 and (conditional_edges_raw or selector_edges_raw):
+    # ── Version 2 graph output (default for all layouts) ──
+    if use_v2:
         # In version 2 mode, all nodes need an id and we use explicit edges
         v2_plan = []
         # Build set of selector node ids
@@ -665,7 +667,7 @@ def _build_llm_prompt(data: dict) -> str:
     else:
         stateful_str = "All experts are stateless (lightweight, no memory, suitable for debates/brainstorming)"
 
-    # ── Generate current rule YAML as reference ──
+    # ── Generate current rule YAML (version 2 graph format) as reference ──
     try:
         current_rule_yaml = layout_to_yaml(data)
     except Exception:
@@ -674,78 +676,108 @@ def _build_llm_prompt(data: dict) -> str:
     # ── Build the final prompt ──
     prompt = f"""You are an OASIS schedule YAML generator. Based on the user's visual arrangement of expert agents on a canvas, generate an optimal OASIS-compatible YAML schedule.
 
-## OASIS YAML Format Rules
+## OASIS YAML Format Rules (Version 2 — Graph Mode)
 
-The YAML supports two modes: **Linear** (simple chain) and **DAG** (directed acyclic graph with parallelism).
+All YAML schedules use **version: 2** with an explicit graph model: `plan` defines nodes, `edges` defines connections,
+and `conditional_edges` / `selector_edges` handle branching/routing.
 
-### Linear Mode (simple sequential pipeline):
+### Basic Graph Structure:
 ```yaml
-version: 1
-repeat: true/false
-plan:
-  - expert: "tag#temp#1"          # Preset expert instance 1 (stateless, uses tag)
-  - expert: "tag#temp#2"          # Same expert, 2nd instance
-  - expert: "tag#oasis#new"       # Preset expert (stateful session, auto-create)
-  - expert: "tag#oasis#name"      # Internal session agent by name (tag→persona lookup)
-  - expert: "#oasis#name"         # Internal session agent by name (no tag)
-  - parallel:                     # Multiple experts speak simultaneously
-      - "creative#temp#1"
-      - "Title#session_id"
-  - all_experts: true             # All selected experts speak at once
-  - manual:                       # Inject fixed content (bypass LLM)
-      author: "主持人"
-      content: "Please summarize..."
-```
-
-### DAG Mode (when nodes have fan-in or fan-out — i.e. a node has multiple predecessors or successors):
-When the workflow is NOT a simple chain, use `id` and `depends_on` fields to express the dependency graph.
-The engine will run nodes in parallel whenever their dependencies are satisfied — no unnecessary waiting.
-
-```yaml
-version: 1
+version: 2
 repeat: false
 plan:
-  - id: n1                        # Unique step identifier (use the canvas node id)
-    expert: "creative#temp#1"     # Root node — no depends_on, starts immediately
+  - id: n1                        # Every node MUST have a unique id
+    expert: "creative#temp#1"     # Stateless preset expert
   - id: n2
-    expert: "critical#temp#1"     # Another root — runs in PARALLEL with n1
+    expert: "critical#temp#1"
   - id: n3
-    expert: "writer#temp#1"
-    depends_on: [n1, n2]          # Fan-in: waits for BOTH n1 and n2 to finish
+    expert: "#oasis#agent_name"   # Stateful internal session agent (by name)
   - id: n4
-    expert: "reviewer#temp#1"
-    depends_on: [n3]              # Runs after n3 completes
-```
-
-**DAG rules:**
-- Every step MUST have a unique `id` field.
-- `depends_on` is a list of step ids that must complete before this step starts. Omit it for root nodes (no predecessors).
-- The graph MUST be acyclic (no circular dependencies).
-- Steps with no dependency relationship run in parallel automatically.
-- `manual` steps can also have `id`/`depends_on`:
-  ```yaml
+    expert: "tag#oasis#agent_name" # Session agent with tag (tag→persona)
   - id: m1
     manual:
       author: "主持人"
-      content: "Summarize the above"
-    depends_on: [n3, n4]
-  ```
+      content: "Please summarize"
 
-**When to use which mode:**
-- Use **Linear** when the workflow is a simple A→B→C chain (every node has at most one predecessor and one successor).
-- Use **DAG** when any node has multiple incoming edges (fan-in) or any node has multiple outgoing edges (fan-out).
+edges:                             # Fixed edges: always fire when source completes
+  - [n1, n3]                       # n1 → n3
+  - [n2, n3]                       # n2 → n3 (fan-in: n3 waits for BOTH n1 and n2)
+  - [n3, n4]                       # n3 → n4
+  - [n4, m1]                       # n4 → m1
+```
+
+### Conditional Branching:
+```yaml
+conditional_edges:
+  - source: n3
+    condition: "last_post_contains:APPROVED"
+    then: n4                       # condition true → go to n4
+    else: n2                       # condition false → loop back to n2
+```
+
+Supported conditions: `last_post_contains:<keyword>`, `last_post_not_contains:<keyword>`,
+`post_count_gte:<N>`, `post_count_lt:<N>`, `always`, `!<expr>` (negate).
+
+### Selector Routing (LLM-powered branching):
+```yaml
+plan:
+  - id: router
+    expert: "#oasis#router_agent"  # ⚠️ Selector MUST use #oasis# format (stateful, has context)
+    selector: true                 # Mark as selector node
+
+selector_edges:
+  - source: router
+    choices:
+      1: branch_a                  # [oasis reply choose 1] → branch_a
+      2: branch_b                  # [oasis reply choose 2] → branch_b
+      3: __end__                   # [oasis reply choose 3] → end
+```
+
+⚠️ **IMPORTANT for selector nodes**: Selector nodes MUST use `#oasis#name` or `tag#oasis#name` format
+(stateful session agents with memory). Do NOT use `#temp#` for selectors — temp agents are stateless
+and cannot retain context across rounds, which causes them to always pick the default choice.
+
+### Parallel Groups (within plan):
+```yaml
+plan:
+  - id: brainstorm
+    parallel:
+      - expert: "creative#temp#1"
+      - expert: "critical#temp#1"
+```
+
+### All Experts:
+```yaml
+plan:
+  - id: discuss
+    all_experts: true              # All experts speak simultaneously
+```
+
+**Graph rules:**
+- Every step MUST have a unique `id` field.
+- Edges define execution order: nodes with all incoming edges satisfied run in parallel automatically.
+- Nodes with no incoming edges are entry points (start immediately).
+- Use `__end__` as a target to terminate the workflow.
+- The graph supports cycles (via conditional/selector edges for loops).
 
 ## Expert Name Formats
-1. `tag#temp#N` — Preset expert instance N (stateless), e.g. "creative#temp#1", "creative#temp#2" (same expert used twice)
+1. `tag#temp#N` — Preset expert instance N (stateless, no memory), e.g. "creative#temp#1". ⚠️ NOT suitable for selector nodes.
 2. `tag#oasis#new` — Preset expert (stateful session, auto-creates new session), use when the individual node has stateful=true
 3. `tag#oasis#name` — Internal session agent by name (tag enables persona lookup), e.g. "test#oasis#test1"
 4. `#oasis#name` — Internal session agent by name (no tag), e.g. "#oasis#test1"
-## Available Step Types
-1. `expert: "Name"` — Single expert speaks in order
-2. `parallel: ["A", "B"]` — Multiple experts speak simultaneously (linear mode only)
-3. `all_experts: true` — Everyone speaks at once (linear mode only)
+
+⚠️ For **selector nodes** (nodes with `selector: true`), you MUST use `#oasis#` format (type 3 or 4).
+`#temp#` agents have no memory and cannot make informed routing decisions based on conversation history.
+
+## Available Step Types (all require `id` field)
+1. `expert: "Name"` — Single expert speaks
+2. `parallel: [...]` — Multiple experts speak simultaneously
+3. `all_experts: true` — Everyone speaks at once
 4. `manual: {{author, content}}` — Inject fixed text (no LLM)
-5. `id` + `depends_on` — DAG dependency declaration (DAG mode, can combine with expert or manual)
+5. `selector: true` + `expert` — Selector node (LLM-powered routing, must be #oasis# format)
+
+## Special Node: __end__
+Use `__end__` as an edge target to terminate the workflow. It is not a plan node.
 
 ## Current Canvas State
 
@@ -764,12 +796,10 @@ plan:
 ## Current Rule YAML (Auto-generated Reference)
 
 **IMPORTANT**: The following YAML was auto-generated from the canvas layout using a rule-based algorithm.
+It uses version 2 graph format with explicit `edges`, `conditional_edges`, and `selector_edges`.
 It contains the complete configuration for each agent (including api_url, headers, model, etc.).
-If the reference YAML contains `id` and `depends_on` fields, it means the workflow is a DAG —
-you MUST preserve DAG format in your output. The auto-generated dependency graph is accurate;
-focus on verifying the expert configurations and adjusting if needed.
-For simple linear workflows (no `id`/`depends_on`), the ordering may need adjustment based on
-the canvas relationships and spatial layout analysis above.
+The auto-generated graph structure is accurate; focus on verifying the expert configurations,
+edge connections, and adjusting if needed. Your output MUST also use version 2 format.
 
 ```yaml
 {current_rule_yaml if current_rule_yaml else "# (no rule YAML could be generated)"}
@@ -778,12 +808,13 @@ the canvas relationships and spatial layout analysis above.
 ## Your Task
 
 Based on the above canvas arrangement, generate an OASIS YAML schedule that:
-1. Respects the explicit connections (edges define dependency order)
-2. Uses **DAG format** (id + depends_on) when the workflow has fan-in or fan-out; uses **linear format** for simple chains
+1. Uses **version 2** graph format (plan + edges + conditional_edges + selector_edges)
+2. Respects the explicit connections (edges define execution order)
 3. Respects the explicit groups (parallel groups = simultaneous speaking)
 4. Interprets the spatial arrangement when no explicit connections exist
 5. Uses `repeat: {str(settings.get('repeat', False)).lower()}`
 6. Maximizes parallelism — nodes with no dependency relationship should be able to run concurrently
+7. Selector nodes MUST use `#oasis#` format (stateful, with memory)
 
 You MUST follow this exact order:
 1. FIRST, call the `set_oasis_workflow` tool to save the generated YAML as a named workflow (so the workflow is immediately ready to use from the OASIS panel).
@@ -842,8 +873,9 @@ def agent_generate_yaml():
                         "1. FIRST: Call the `set_oasis_workflow` MCP tool to save the generated YAML as a named workflow "
                         "(use a descriptive name based on the task/experts, e.g. 'code_review_pipeline', 'brainstorm_trio').\n"
                         "2. THEN: Output the complete YAML schedule in your response text.\n\n"
-                        "The schedule supports two modes: LINEAR (simple sequential steps) and DAG (steps with `id` and `depends_on` "
-                        "fields for parallel execution with dependency tracking). Use DAG mode when the workflow has fan-in or fan-out.\n"
+                        "The schedule uses version 2 graph format: `plan` defines nodes (each with a unique `id`), "
+                        "`edges` defines connections, and `conditional_edges`/`selector_edges` handle branching.\n"
+                        "Selector nodes MUST use #oasis# format (stateful agents with memory). "
                         "No markdown fences around the YAML. Both steps are mandatory and the order matters — save first, then output."
                     ),
                 },

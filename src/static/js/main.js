@@ -163,7 +163,13 @@ const i18n = {
         orch_expert_pool_text: '专家池',
         orch_preset_experts: '📚 预设专家',
         orch_custom_experts: '🛠️ 自定义专家',
-        orch_session_agents: '💬 Session Agent',
+        orch_internal_agents: '🤖 Internal Agent',
+        orch_add_internal_agent_title: '新建 Internal Agent',
+        orch_ia_name: 'Agent 名称',
+        orch_ia_tag: '标签 (Tag)',
+        orch_ia_tag_placeholder: '可拖入专家设置，或手动输入',
+        orch_ia_created: 'Internal Agent 已创建',
+        orch_ia_tag_set: 'Tag 已设置为',
 orch_openclaw_sessions: '🦞 OpenClaw',
         orch_add_openclaw_title: '新建 OpenClaw Agent',
         orch_openclaw_agent_name: 'Agent 名称',
@@ -620,7 +626,13 @@ orch_openclaw_sessions: '🦞 OpenClaw',
         orch_expert_pool_text: 'Expert Pool',
         orch_preset_experts: '📚 Preset Experts',
         orch_custom_experts: '🛠️ Custom Experts',
-        orch_session_agents: '💬 Session Agents',
+        orch_internal_agents: '🤖 Internal Agents',
+        orch_add_internal_agent_title: 'New Internal Agent',
+        orch_ia_name: 'Agent Name',
+        orch_ia_tag: 'Tag',
+        orch_ia_tag_placeholder: 'Drag an expert to set, or type manually',
+        orch_ia_created: 'Internal Agent created',
+        orch_ia_tag_set: 'Tag set to',
 orch_openclaw_sessions: '🦞 OpenClaw',
         orch_add_openclaw_title: 'New OpenClaw Agent',
         orch_openclaw_agent_name: 'Agent Name',
@@ -1481,23 +1493,26 @@ function closeSessionSidebar() {
     sessionSidebarOpen = false;
 }
 
-// Session filter mode: 'oasis' = only show oasis sessions, 'other' = only show non-oasis sessions
-let sessionFilterMode = 'other';
+// Session filter mode: 'named' = show sessions with agent name, 'unnamed' = show sessions without
+let sessionFilterMode = 'named';
+// Cached agent meta map (session_id → {name, tag, ...}), refreshed on each loadSessionList/refreshHistoryList
+let _cachedAgentMap = {};
 
-function isOasisSession(sessionId) {
-    return sessionId && sessionId.includes('#oasis#');
+function isNamedSession(sessionId) {
+    const meta = _cachedAgentMap[sessionId];
+    return meta && meta.name;
 }
 
 function shouldShowSession(sessionId) {
-    const isOasis = isOasisSession(sessionId);
-    return sessionFilterMode === 'oasis' ? isOasis : !isOasis;
+    const named = isNamedSession(sessionId);
+    return sessionFilterMode === 'named' ? named : !named;
 }
 
-function toggleOasisSessionsVisible() {
-    sessionFilterMode = sessionFilterMode === 'oasis' ? 'other' : 'oasis';
+function toggleNamedSessionsVisible() {
+    sessionFilterMode = sessionFilterMode === 'named' ? 'unnamed' : 'named';
     const btn = document.getElementById('toggle-oasis-sessions-btn');
     if (btn) {
-        btn.textContent = sessionFilterMode === 'oasis' ? '🏛️ 切换到普通会话' : '🏛️ 切换到 OASIS';
+        btn.textContent = sessionFilterMode === 'named' ? '🏷️ 切换到无名会话' : '🏷️ 切换到已命名 Agents';
     }
     // Apply filter to all session items
     document.querySelectorAll('.session-item[data-session-id]').forEach(el => {
@@ -1513,14 +1528,24 @@ async function loadSessionList() {
     try {
         // Load sessions and agent meta in parallel
         const [resp, agentMap] = await Promise.all([fetch('/proxy_sessions'), _loadAgentMetaMap()]);
+        _cachedAgentMap = agentMap; // cache for shouldShowSession
         const data = await resp.json();
-        if (!data.sessions || data.sessions.length === 0) {
+        // Merge: add sessions from agent JSON that are not in proxy_sessions
+        const allSessions = (data.sessions || []).slice();
+        const seenIds = new Set(allSessions.map(s => s.session_id));
+        for (const [sid, meta] of Object.entries(agentMap)) {
+            if (!seenIds.has(sid) && meta && meta.name) {
+                allSessions.push({ session_id: sid, title: meta.name || 'Untitled', message_count: 0 });
+                seenIds.add(sid);
+            }
+        }
+        if (allSessions.length === 0) {
             listEl.innerHTML = `<div class="text-xs text-gray-400 text-center py-4">${t('history_empty')}</div>`;
             return;
         }
         listEl.innerHTML = '';
-        data.sessions.sort((a, b) => b.session_id.localeCompare(a.session_id));
-        for (const s of data.sessions) {
+        allSessions.sort((a, b) => b.session_id.localeCompare(a.session_id));
+        for (const s of allSessions) {
             const isActive = s.session_id === currentSessionId;
             const displayTitle = _resolveTitle(s.title, s.session_id, agentMap);
             const div = document.createElement('div');
@@ -1554,7 +1579,16 @@ async function refreshHistoryList() {
         ]);
         const sessData = await sessResp.json();
         const statusData = statusResp.ok ? await statusResp.json() : {};
+        _cachedAgentMap = agentMap; // cache for shouldShowSession
         const sessions = sessData.sessions || [];
+        // Merge: add named sessions from agent JSON that are not in proxy_sessions
+        const seenIds = new Set(sessions.map(s => s.session_id));
+        for (const [sid, meta] of Object.entries(agentMap)) {
+            if (!seenIds.has(sid) && meta && meta.name) {
+                sessions.push({ session_id: sid, title: meta.name || 'Untitled', message_count: 0 });
+                seenIds.add(sid);
+            }
+        }
         const listEl = document.getElementById('session-list');
         if (sessions.length === 0) {
             listEl.innerHTML = `<div class="text-xs text-gray-400 text-center py-4">${t('history_empty')}</div>`;
@@ -1731,7 +1765,7 @@ async function deleteAllSessions() {
         }
     });
     if (visibleIds.length === 0) return;
-    const modeLabel = sessionFilterMode === 'oasis' ? 'OASIS' : '普通';
+    const modeLabel = sessionFilterMode === 'named' ? '已命名' : '无名';
     if (!confirm(`确认删除当前显示的 ${visibleIds.length} 个${modeLabel}会话？`)) return;
     try {
         let failCount = 0;
