@@ -648,12 +648,12 @@ def team_openclaw_snapshot_export():
         return jsonify({"ok": False, "error": str(e)}), 500
 
     # Save to team snapshot file
-    data = _openclaw_agents_load(user_id, team)
+    data = _team_openclaw_agents_load(user_id, team)
     data[short_name] = {
         "config": snapshot.get("config", {}),
         "workspace_files": snapshot.get("workspace_files", {}),
     }
-    _openclaw_agents_save(user_id, team, data)
+    _team_openclaw_agents_save(user_id, team, data)
 
     file_count = len(snapshot.get("workspace_files", {}))
     return jsonify({
@@ -686,7 +686,7 @@ def team_openclaw_snapshot_restore():
         target_name = team + "_" + short_name
 
     # Load snapshot
-    data = _openclaw_agents_load(user_id, team)
+    data = _team_openclaw_agents_load(user_id, team)
     agent_snapshot = data.get(short_name)
     if not agent_snapshot:
         return jsonify({"ok": False, "error": f"No snapshot found for '{short_name}' in team '{team}'"}), 404
@@ -738,7 +738,7 @@ def team_openclaw_snapshot_export_all():
     if not team_agents:
         return jsonify({"ok": True, "exported": 0, "message": f"No agents with prefix '{prefix}'"}), 200
 
-    data = _openclaw_agents_load(user_id, team)
+    data = _team_openclaw_agents_load(user_id, team)
     exported = 0
     errors = []
 
@@ -763,7 +763,7 @@ def team_openclaw_snapshot_export_all():
         except Exception as e:
             errors.append(f"{full_name}: {e}")
 
-    _openclaw_agents_save(user_id, team, data)
+    _team_openclaw_agents_save(user_id, team, data)
 
     return jsonify({
         "ok": True,
@@ -789,7 +789,7 @@ def team_openclaw_snapshot_restore_all():
     if not team:
         return jsonify({"ok": False, "error": "team is required"}), 400
 
-    data = _openclaw_agents_load(user_id, team)
+    data = _team_openclaw_agents_load(user_id, team)
     if not data:
         return jsonify({"ok": True, "restored": 0, "message": "No snapshots found"}), 200
 
@@ -1913,6 +1913,61 @@ def delete_team(team_name):
             "message": f"Team '{team_name}' deleted",
             "deleted_agents": deleted_count,
             "errors": errors
+        })
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/teams/<team_name>/members", methods=["GET"])
+def get_team_members(team_name):
+    """Get all members (agents) in a team.
+    Returns list of agents with name, type (oasis/ext), tag, and session.
+    """
+    user_id = session.get("user_id")
+    if not user_id:
+        return jsonify({"error": "未登录"}), 401
+    
+    # Validate team name
+    if "/" in team_name or "\\" in team_name or team_name.startswith("."):
+        return jsonify({"error": "Invalid team name"}), 400
+    
+    team_dir = os.path.join(root_dir, "data", "user_files", user_id, "teams", team_name)
+    
+    if not os.path.exists(team_dir):
+        return jsonify({"error": "Team not found"}), 404
+    
+    try:
+        members = []
+        
+        # Load internal agents (oasis type)
+        internal_agents = _ia_load(user_id, team_name)
+        for agent in internal_agents:
+            meta = agent.get("meta", {})
+            members.append({
+                "name": meta.get("name", ""),
+                "type": "oasis",
+                "tag": meta.get("tag", ""),
+                "session": agent.get("session", "")
+            })
+        
+        # Load external agents from openclaw_agents.json
+        openclaw_path = os.path.join(team_dir, "openclaw_agents.json")
+        if os.path.isfile(openclaw_path):
+            with open(openclaw_path, "r", encoding="utf-8") as f:
+                openclaw_data = json.load(f)
+                if isinstance(openclaw_data, list):
+                    for agent in openclaw_data:
+                        members.append({
+                            "name": agent.get("name", ""),
+                            "type": "ext",
+                            "tag": agent.get("tag", ""),
+                            "session": agent.get("session", "")
+                        })
+        
+        return jsonify({
+            "status": "success",
+            "team": team_name,
+            "members": members
         })
     except Exception as e:
         return jsonify({"error": str(e)}), 500

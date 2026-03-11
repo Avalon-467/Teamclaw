@@ -134,10 +134,10 @@ const i18n = {
         tab_orchestrate: '🤝 工作流',
 
         // 群聊
-        group_title: '👥 群聊列表',
+        group_title: '👥 团队列表',
         group_new: '+ 新建',
-        group_no_groups: '暂无群聊',
-        group_select_hint: '选择或创建一个群聊',
+        group_no_groups: '暂无团队',
+        group_select_hint: '选择一个团队进行群聊',
         group_members_btn: '👤 成员',
         group_mute: '🔇 急停',
         group_unmute: '🔊 恢复',
@@ -145,11 +145,11 @@ const i18n = {
         group_current_members: '当前成员',
         group_add_agents: '添加 Agent Session',
         group_input_placeholder: '发送消息...',
-        group_create_title: '创建群聊',
-        group_name_placeholder: '群聊名称',
+        group_create_title: '新建团队',
+        group_name_placeholder: '团队名称',
         group_no_sessions: '没有可用的 Agent Session',
         group_create_btn: '创建',
-        group_delete_confirm: '确定删除此群聊？',
+        group_delete_confirm: '确定删除此团队？',
         group_owner: '群主',
         group_agent: 'Agent',
         group_msg_count: '条消息',
@@ -618,10 +618,10 @@ orch_openclaw_sessions: '🦞 OpenClaw',
         tab_orchestrate: '🤝 Workflow',
 
         // Group chat
-        group_title: '👥 Group Chats',
+        group_title: '👥 Team List',
         group_new: '+ New',
-        group_no_groups: 'No group chats',
-        group_select_hint: 'Select or create a group chat',
+        group_no_groups: 'No teams',
+        group_select_hint: 'Select a team to start chat',
         group_members_btn: '👤 Members',
         group_mute: '🔇 Stop',
         group_unmute: '🔊 Resume',
@@ -629,11 +629,11 @@ orch_openclaw_sessions: '🦞 OpenClaw',
         group_current_members: 'Current Members',
         group_add_agents: 'Add Agent Session',
         group_input_placeholder: 'Send a message...',
-        group_create_title: 'Create Group Chat',
-        group_name_placeholder: 'Group name',
+        group_create_title: 'Create Team',
+        group_name_placeholder: 'Team name',
         group_no_sessions: 'No available Agent Sessions',
         group_create_btn: 'Create',
-        group_delete_confirm: 'Delete this group chat?',
+        group_delete_confirm: 'Delete this team?',
         group_owner: 'Owner',
         group_agent: 'Agent',
         group_msg_count: 'messages',
@@ -3986,20 +3986,19 @@ function stopGroupListPolling() {
 
 async function loadGroupList() {
     try {
-        const resp = await fetch('/proxy_groups', {
-            headers: { 'Authorization': 'Bearer ' + getAuthToken() }
-        });
+        const resp = await fetch('/teams');
         if (!resp.ok) return;
-        const groups = await resp.json();
-        renderGroupList(groups);
+        const data = await resp.json();
+        const teams = data.teams || [];
+        renderGroupList(teams);
     } catch (e) {
-        console.error('Failed to load groups:', e);
+        console.error('Failed to load teams:', e);
     }
 }
 
-function renderGroupList(groups) {
+function renderGroupList(teams) {
     const container = document.getElementById('group-list');
-    if (!groups || groups.length === 0) {
+    if (!teams || teams.length === 0) {
         container.innerHTML = `
             <div class="group-empty-state" style="padding:40px 0;">
                 <div class="empty-icon">👥</div>
@@ -4007,21 +4006,25 @@ function renderGroupList(groups) {
             </div>`;
         return;
     }
-    container.innerHTML = groups.map(g => {
-        const isActive = g.group_id === currentGroupId;
+    container.innerHTML = teams.map(team => {
+        const isActive = team === currentGroupId;
         return `
-            <div class="group-item ${isActive ? 'active' : ''}" onclick="openGroup('${g.group_id}')">
-                <div class="group-name">${escapeHtml(g.name)}</div>
-                <div class="group-meta">${g.member_count || 0} ${t('group_member_count')} · ${g.message_count || 0} ${t('group_msg_count')}</div>
-                <button class="group-delete-btn" onclick="event.stopPropagation(); deleteGroup('${g.group_id}')">${t('delete_session')}</button>
+            <div class="group-item ${isActive ? 'active' : ''}" onclick="openGroup('${team}')">
+                <div class="group-name">${escapeHtml(team)}</div>
+                <div class="group-meta">点击进入群聊</div>
+                <button class="group-delete-btn" onclick="event.stopPropagation(); deleteTeamByName('${team}')">🗑️</button>
             </div>`;
     }).join('');
 }
 
-async function openGroup(groupId) {
-    currentGroupId = groupId;
+async function openGroup(teamName) {
+    currentGroupId = teamName;
     groupLastMsgId = 0;
     stopGroupPolling();
+
+    // Hide team members overlay if shown
+    let overlay = document.getElementById('team-members-overlay');
+    if (overlay) overlay.style.display = 'none';
 
     // Mobile: switch to chat view
     document.getElementById('page-group').classList.add('mobile-chat-open');
@@ -4030,45 +4033,44 @@ async function openGroup(groupId) {
     const activeChat = document.getElementById('group-active-chat');
     activeChat.style.display = 'flex';
 
-    // Load group detail
-    try {
-        const resp = await fetch(`/proxy_groups/${groupId}`, {
-            headers: { 'Authorization': 'Bearer ' + getAuthToken() }
-        });
-        if (!resp.ok) return;
-        const detail = await resp.json();
+    // 设置团队名称和ID
+    document.getElementById('group-active-name').textContent = teamName;
+    document.getElementById('group-active-id').textContent = '#Team';
 
-        document.getElementById('group-active-name').textContent = detail.name;
-        document.getElementById('group-active-id').textContent = '#' + groupId.slice(-8);
-
-        // Build sender -> title mapping from members
-        for (const key of Object.keys(groupSenderTitles)) delete groupSenderTitles[key];
-        for (const m of (detail.members || [])) {
-            if (m.is_agent && m.title) {
-                const senderKey = m.user_id + '#' + m.session_id;
-                groupSenderTitles[senderKey] = m.title;
-            }
-        }
-
-        renderGroupMessages(detail.messages || []);
-        renderGroupMembers(detail.members || []);
-
-        // Track last message ID
-        if (detail.messages && detail.messages.length > 0) {
-            groupLastMsgId = detail.messages[detail.messages.length - 1].id;
-        }
-
-        // Start polling for new messages
-        startGroupPolling(groupId);
-
-        // Load mute status
-        await loadGroupMuteStatus(groupId);
-
-        // Update group list selection
-        loadGroupList();
-    } catch (e) {
-        console.error('Failed to open group:', e);
+    // 清空消息框内容（保留成员表格）
+    const box = document.getElementById('group-messages-box');
+    overlay = document.getElementById('team-members-overlay');
+    if (overlay) {
+        overlay.style.display = 'none';
     }
+    box.innerHTML = '<div style="text-align:center;color:#9ca3af;padding:40px 0;font-size:13px;">暂无消息</div>' +
+        '<div id="team-members-overlay" class="team-members-overlay" style="display:none;">' +
+        '<div class="team-members-header">' +
+        '<h3 class="font-bold text-gray-800">👥 团队成员</h3>' +
+        '<button onclick="toggleTeamMembersView()" class="text-gray-400 hover:text-gray-600 text-sm">&times;</button>' +
+        '</div>' +
+        '<div class="team-members-table-container">' +
+        '<table class="team-members-table">' +
+        '<thead>' +
+        '<tr>' +
+        '<th class="text-left">名称</th>' +
+        '<th class="text-left">类型</th>' +
+        '<th class="text-left">标签</th>' +
+        '<th class="text-left">会话</th>' +
+        '</tr>' +
+        '</thead>' +
+        '<tbody id="team-members-table-body">' +
+        '</tbody>' +
+        '</table>' +
+        '</div>' +
+        '</div>';
+
+    // 清空成员列表
+    document.getElementById('group-current-members').innerHTML = '<div class="text-xs text-gray-400 p-2">加载中...</div>';
+    document.getElementById('group-available-sessions').innerHTML = '<div class="text-xs text-gray-400 p-2">加载中...</div>';
+
+    // 更新团队列表选中状态
+    loadGroupList();
 }
 
 function groupBackToList() {
@@ -4283,66 +4285,178 @@ async function toggleGroupAgent(sessionId, add) {
     }
 }
 
-function showCreateGroupModal() {
-    // 用自定义弹窗替代 prompt()，兼容移动端
-    let overlay = document.getElementById('group-create-overlay');
-    if (!overlay) {
-        overlay = document.createElement('div');
-        overlay.id = 'group-create-overlay';
-        overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.4);z-index:300;display:flex;align-items:center;justify-content:center;';
-        overlay.innerHTML = `
-            <div style="background:white;border-radius:12px;padding:20px;width:90%;max-width:320px;box-shadow:0 10px 40px rgba(0,0,0,0.2);">
-                <div style="font-size:14px;font-weight:600;color:#374151;margin-bottom:12px;" data-i18n="group_create_title">${t('group_create_title')}</div>
-                <input id="group-create-name-input" type="text" placeholder="${t('group_name_placeholder')}" data-i18n-placeholder="group_name_placeholder"
-                    style="width:100%;box-sizing:border-box;padding:8px 12px;border:1px solid #d1d5db;border-radius:8px;font-size:14px;outline:none;" />
-                <div style="display:flex;gap:8px;margin-top:14px;justify-content:flex-end;">
-                    <button onclick="closeCreateGroupModal()" style="padding:6px 16px;border-radius:8px;border:1px solid #d1d5db;background:white;font-size:13px;cursor:pointer;color:#6b7280;">取消</button>
-                    <button onclick="submitCreateGroup()" style="padding:6px 16px;border-radius:8px;border:none;background:#2563eb;color:white;font-size:13px;font-weight:600;cursor:pointer;">${t('group_create_btn')}</button>
-                </div>
-            </div>`;
-        document.body.appendChild(overlay);
-        // Enter to submit
-        document.getElementById('group-create-name-input').addEventListener('keydown', (e) => {
-            if (e.key === 'Enter') { e.preventDefault(); submitCreateGroup(); }
-        });
-    } else {
-        overlay.style.display = 'flex';
+function showCreateTeamModal() {
+    const modal = document.getElementById('create-team-modal');
+    if (modal) {
+        modal.style.display = 'flex';
+        setTimeout(() => {
+            document.getElementById('team-name-input').focus();
+        }, 100);
     }
-    const input = document.getElementById('group-create-name-input');
-    input.value = '';
-    setTimeout(() => input.focus(), 100);
 }
 
-function closeCreateGroupModal() {
-    const overlay = document.getElementById('group-create-overlay');
-    if (overlay) overlay.style.display = 'none';
+function closeCreateTeamModal() {
+    const modal = document.getElementById('create-team-modal');
+    if (modal) modal.style.display = 'none';
 }
 
-function submitCreateGroup() {
-    const input = document.getElementById('group-create-name-input');
+async function submitCreateTeam() {
+    const input = document.getElementById('team-name-input');
     const name = (input.value || '').trim();
-    if (!name) return;
-    closeCreateGroupModal();
-    createGroup(name);
-}
+    if (!name) {
+        alert('请输入团队名称');
+        return;
+    }
 
-async function createGroup(name) {
     try {
-        const resp = await fetch('/proxy_groups', {
+        const resp = await fetch('/teams', {
             method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'Authorization': 'Bearer ' + getAuthToken()
-            },
-            body: JSON.stringify({ name: name, members: [] })
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ team: name })
         });
-        if (!resp.ok) { alert('创建失败'); return; }
-        const data = await resp.json();
+        if (!resp.ok) {
+            const err = await resp.json();
+            alert('创建失败: ' + (err.error || '未知错误'));
+            return;
+        }
+        closeCreateTeamModal();
         await loadGroupList();
-        openGroup(data.group_id);
+        openGroup(name);
     } catch (e) {
         alert('创建失败: ' + e.message);
     }
+}
+
+async function deleteTeamByName(teamName) {
+    if (!confirm(`确定要删除团队 "${teamName}" 吗？`)) return;
+    try {
+        const resp = await fetch(`/teams/${encodeURIComponent(teamName)}`, {
+            method: 'DELETE'
+        });
+        if (!resp.ok) {
+            const err = await resp.json();
+            alert('删除失败: ' + (err.error || '未知错误'));
+            return;
+        }
+        if (currentGroupId === teamName) {
+            currentGroupId = null;
+            document.getElementById('group-active-chat').style.display = 'none';
+            document.getElementById('group-empty-placeholder').style.display = 'flex';
+            document.getElementById('page-group').classList.remove('mobile-chat-open');
+            stopGroupPolling();
+        }
+        loadGroupList();
+    } catch (e) {
+        alert('删除失败: ' + e.message);
+    }
+}
+
+function toggleTeamMembersView() {
+    const overlay = document.getElementById('team-members-overlay');
+    if (!overlay) return;
+    
+    if (overlay.style.display === 'none' || overlay.style.display === '') {
+        overlay.style.display = 'flex';
+        loadTeamMembers();
+    } else {
+        overlay.style.display = 'none';
+    }
+}
+
+async function loadTeamMembers() {
+    if (!currentGroupId) return;
+    
+    const tbody = document.getElementById('team-members-table-body');
+    tbody.innerHTML = '<tr><td colspan="4" class="text-center text-gray-400 py-8">加载中...</td></tr>';
+    
+    try {
+        const resp = await fetch(`/teams/${encodeURIComponent(currentGroupId)}/members`);
+        if (!resp.ok) {
+            tbody.innerHTML = '<tr><td colspan="4" class="text-center text-red-400 py-8">加载失败</td></tr>';
+            return;
+        }
+        
+        const data = await resp.json();
+        const members = data.members || [];
+        
+        if (members.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="4" class="text-center text-gray-400 py-8">暂无成员</td></tr>';
+            return;
+        }
+        
+        tbody.innerHTML = members.map(m => {
+            const typeBadge = m.type === 'oasis' 
+                ? '<span class="text-xs bg-blue-50 text-blue-600 px-2 py-1 rounded">Oasis</span>'
+                : '<span class="text-xs bg-green-50 text-green-600 px-2 py-1 rounded">Ext</span>';
+            return `
+                <tr>
+                    <td class="font-medium text-gray-800">${escapeHtml(m.name)}</td>
+                    <td>${typeBadge}</td>
+                    <td>${escapeHtml(m.tag || '-')}</td>
+                    <td class="font-mono text-xs text-gray-500">${escapeHtml(m.session || '-')}</td>
+                </tr>`;
+        }).join('');
+    } catch (e) {
+        console.error('Failed to load team members:', e);
+        tbody.innerHTML = '<tr><td colspan="4" class="text-center text-red-400 py-8">加载失败: ' + e.message + '</td></tr>';
+    }
+}
+
+async function deleteGroup(groupId) {    if (!currentGroupId) return;
+    try {
+        const resp = await fetch('/teams/snapshot/download', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ team: currentGroupId })
+        });
+        if (!resp.ok) {
+            const err = await resp.json();
+            alert('下载失败: ' + (err.error || '未知错误'));
+            return;
+        }
+        const blob = await resp.blob();
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `${currentGroupId}_team_snapshot.zip`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+    } catch (e) {
+        alert('下载失败: ' + e.message);
+    }
+}
+
+async function uploadTeam(input) {
+    const file = input.files[0];
+    if (!file) return;
+    
+    if (!confirm(`确定要上传并恢复团队快照吗？这将覆盖当前团队的内部Agent配置。`)) {
+        input.value = '';
+        return;
+    }
+
+    const formData = new FormData();
+    formData.append('file', file);
+    formData.append('team', currentGroupId);
+
+    try {
+        const resp = await fetch('/teams/snapshot/upload', {
+            method: 'POST',
+            body: formData
+        });
+        if (!resp.ok) {
+            const err = await resp.json();
+            alert('上传失败: ' + (err.error || '未知错误'));
+            return;
+        }
+        alert('上传成功！');
+        loadGroupList();
+    } catch (e) {
+        alert('上传失败: ' + e.message);
+    }
+    input.value = '';
 }
 
 async function deleteGroup(groupId) {

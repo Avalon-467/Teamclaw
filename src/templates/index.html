@@ -229,17 +229,17 @@
             <div style="display:flex; flex:1; overflow:hidden;">
                 <!-- Group list sidebar -->
                 <div class="group-list-sidebar">
-                    <div class="p-3 border-b bg-gray-50 flex justify-between items-center flex-shrink-0">
-                        <span class="text-sm font-bold text-gray-700" data-i18n="group_title">👥 群聊列表</span>
+                    <div class="p-4 border-b bg-gray-50 flex flex-col gap-3 flex-shrink-0">
+                        <span class="text-base font-bold text-gray-700" data-i18n="group_title">👥 团队列表</span>
                         <div class="flex items-center gap-2">
-                            <button onclick="toggleSessionSidebar()" class="text-[10px] bg-gray-50 text-gray-600 hover:bg-gray-100 px-2 py-1 rounded border border-gray-200" data-i18n-title="history_title" title="Agents">🤖</button>
-                            <button onclick="showCreateGroupModal()" class="text-xs bg-blue-50 text-blue-600 hover:bg-blue-100 px-2 py-1 rounded border border-blue-200" data-i18n="group_new">+ 新建</button>
+                            <button onclick="toggleSessionSidebar()" class="text-xs bg-gray-50 text-gray-600 hover:bg-gray-100 px-3 py-2 rounded border border-gray-200" data-i18n-title="history_title" title="Agents">🤖</button>
+                            <button onclick="showCreateTeamModal()" class="flex-1 bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg font-bold text-sm transition-all">➕ 新建团队</button>
                         </div>
                     </div>
                     <div id="group-list" class="flex-1 overflow-y-auto">
                         <div class="group-empty-state" style="padding:40px 0;">
                             <div class="empty-icon">👥</div>
-                            <div class="empty-text" data-i18n="group_no_groups">暂无群聊</div>
+                            <div class="empty-text" data-i18n="group_no_groups">暂无团队</div>
                         </div>
                     </div>
                 </div>
@@ -248,7 +248,7 @@
                 <div class="group-chat-area" id="group-chat-area">
                     <div class="group-empty-state" id="group-empty-placeholder">
                         <div class="empty-icon">💬</div>
-                        <div class="empty-text" data-i18n="group_select_hint">选择或创建一个群聊</div>
+                        <div class="empty-text" data-i18n="group_select_hint">选择一个团队进行群聊</div>
                     </div>
                     <!-- Active group chat (hidden initially) -->
                     <div id="group-active-chat" style="display:none; flex-direction:column; height:100%;">
@@ -259,11 +259,40 @@
                                 <span id="group-active-id" class="text-[10px] text-gray-400 ml-1"></span>
                             </div>
                             <div class="flex items-center gap-2">
+                                <button id="team-download-btn" onclick="downloadTeam()" class="text-xs bg-green-50 text-green-600 hover:bg-green-100 px-2 py-1 rounded border border-green-200" title="下载团队">📥 下载</button>
+                                <button id="team-upload-btn" onclick="document.getElementById('team-upload-input').click()" class="text-xs bg-purple-50 text-purple-600 hover:bg-purple-100 px-2 py-1 rounded border border-purple-200" title="上传团队">📤 上传</button>
+                                <input type="file" id="team-upload-input" accept=".zip" style="display:none;" onchange="uploadTeam(this)">
+                                <button onclick="toggleTeamMembersView()" class="text-xs bg-blue-50 text-blue-600 hover:bg-blue-100 px-2 py-1 rounded border border-blue-200" title="团队成员">👥 成员</button>
                                 <button id="group-mute-btn" onclick="toggleGroupMute()" class="text-xs px-2 py-1 rounded border font-bold" style="background:#fef2f2;color:#dc2626;border-color:#fecaca;" data-i18n="group_mute">🔇 急停</button>
-                                <button onclick="toggleGroupMemberPanel()" class="text-xs bg-gray-50 hover:bg-gray-100 px-2 py-1 rounded border border-gray-200" data-i18n="group_members_btn">👤 成员</button>
+                                <button onclick="deleteTeam()" class="text-xs bg-red-50 text-red-600 hover:bg-red-100 px-2 py-1 rounded border border-red-200" title="删除团队">🗑️</button>
                             </div>
                         </div>
-                        <div id="group-messages-box" class="group-messages-box"></div>
+                        <div id="group-messages-box" class="group-messages-box">
+                            <!-- Team members table overlay -->
+                            <div id="team-members-overlay" class="team-members-overlay" style="display:none;">
+                                <div class="team-members-header">
+                                    <h3 class="font-bold text-gray-800">👥 团队成员</h3>
+                                    <button onclick="toggleTeamMembersView()" class="text-gray-400 hover:text-gray-600 text-sm">&times;</button>
+                                </div>
+                                <div class="team-members-table-container">
+                                    <table class="team-members-table">
+                                        <thead>
+                                            <tr>
+                                                <th class="text-left">名称</th>
+                                                <th class="text-left">类型</th>
+                                                <th class="text-left">标签</th>
+                                                <th class="text-left">会话</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody id="team-members-table-body">
+                                            <tr>
+                                                <td colspan="4" class="text-center text-gray-400 py-8">加载中...</td>
+                                            </tr>
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
+                        </div>
                         <div class="group-input-area" style="position:relative;">
                             <div class="mention-popup" id="mention-popup">
                                 <div class="mention-title">@ 选择要通知的 Agent</div>
@@ -665,6 +694,27 @@
                 <div style="flex:1"></div>
                 <button onclick="closeSettings()" class="settings-btn settings-btn-cancel" data-i18n="cancel">取消</button>
                 <button onclick="saveSettings()" class="settings-btn settings-btn-save" data-i18n="settings_save">保存</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Create Team Modal -->
+    <div id="create-team-modal" class="settings-modal-overlay" style="display:none;" onclick="if(event.target===this)closeCreateTeamModal()">
+        <div class="settings-modal" style="max-width:400px;">
+            <div class="settings-header">
+                <h2>👥 新建团队</h2>
+                <button onclick="closeCreateTeamModal()" class="settings-close-btn">&times;</button>
+            </div>
+            <div class="settings-body">
+                <div class="p-4">
+                    <label class="block text-sm font-medium text-gray-700 mb-2">团队名称</label>
+                    <input type="text" id="team-name-input" class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" placeholder="请输入团队名称" onkeydown="if(event.key==='Enter'){event.preventDefault();submitCreateTeam();}">
+                </div>
+            </div>
+            <div class="settings-footer">
+                <div style="flex:1"></div>
+                <button onclick="closeCreateTeamModal()" class="settings-btn settings-btn-cancel">取消</button>
+                <button onclick="submitCreateTeam()" class="settings-btn settings-btn-save bg-blue-600 hover:bg-blue-700">创建</button>
             </div>
         </div>
     </div>
