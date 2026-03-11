@@ -1,6 +1,7 @@
 from flask import Flask, render_template, request, jsonify, session, Response
 import requests
 import os
+import json
 from dotenv import load_dotenv
 
 # 加载 .env 配置
@@ -1378,6 +1379,101 @@ def proxy_tunnel_stop():
     if os.path.isfile(_TUNNEL_PIDFILE):
         os.remove(_TUNNEL_PIDFILE)
     return jsonify({"status": "stopped"})
+
+
+# ------------------------------------------------------------------
+# Internal Agent CRUD  — per-user agent list stored as JSON
+# Path: data/user_files/internalagent/{user_id}_agent.json
+# Structure: [ { "session": "<id>", "meta": { ... } }, ... ]
+# ------------------------------------------------------------------
+
+def _ia_path(user_id: str) -> str:
+    """Return the JSON file path for a user's internal-agent list."""
+    return os.path.join(root_dir, "data", "user_files", "internalagent", f"{user_id}_agent.json")
+
+
+def _ia_load(user_id: str) -> list:
+    """Load internal-agent list; return [] if file missing."""
+    p = _ia_path(user_id)
+    if not os.path.isfile(p):
+        return []
+    with open(p, "r", encoding="utf-8") as f:
+        return json.load(f)
+
+
+def _ia_save(user_id: str, data: list):
+    """Persist internal-agent list to disk."""
+    p = _ia_path(user_id)
+    os.makedirs(os.path.dirname(p), exist_ok=True)
+    with open(p, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
+
+
+@app.route("/internal_agents", methods=["GET"])
+def ia_list():
+    """Return the full internal-agent list for the logged-in user."""
+    user_id = session.get("user_id")
+    if not user_id:
+        return jsonify({"error": "未登录"}), 401
+    return jsonify({"status": "success", "agents": _ia_load(user_id)})
+
+
+@app.route("/internal_agents", methods=["POST"])
+def ia_add():
+    """Add a new internal agent entry.
+    Body: { "session": "<id>", "meta": { ... optional ... } }
+    """
+    user_id = session.get("user_id")
+    if not user_id:
+        return jsonify({"error": "未登录"}), 401
+    body = request.get_json(force=True)
+    sid = body.get("session")
+    if not sid:
+        return jsonify({"error": "missing required field: session"}), 400
+    agents = _ia_load(user_id)
+    # Prevent duplicate session
+    if any(a["session"] == sid for a in agents):
+        return jsonify({"error": f"session '{sid}' already exists"}), 409
+    entry = {"session": sid, "meta": body.get("meta", {})}
+    agents.append(entry)
+    _ia_save(user_id, agents)
+    return jsonify({"status": "success", "agent": entry})
+
+
+@app.route("/internal_agents/<sid>", methods=["PUT", "PATCH"])
+def ia_update(sid):
+    """Update the meta of an existing internal agent.
+    Body: { "meta": { ...fields to merge... } }
+    """
+    user_id = session.get("user_id")
+    if not user_id:
+        return jsonify({"error": "未登录"}), 401
+    body = request.get_json(force=True)
+    agents = _ia_load(user_id)
+    for a in agents:
+        if a["session"] == sid:
+            new_meta = body.get("meta", {})
+            if not isinstance(a.get("meta"), dict):
+                a["meta"] = {}
+            a["meta"].update(new_meta)
+            _ia_save(user_id, agents)
+            return jsonify({"status": "success", "agent": a})
+    return jsonify({"error": "not found"}), 404
+
+
+@app.route("/internal_agents/<sid>", methods=["DELETE"])
+def ia_delete(sid):
+    """Remove an internal agent entry by session id."""
+    user_id = session.get("user_id")
+    if not user_id:
+        return jsonify({"error": "未登录"}), 401
+    agents = _ia_load(user_id)
+    before = len(agents)
+    agents = [a for a in agents if a["session"] != sid]
+    if len(agents) == before:
+        return jsonify({"error": "not found"}), 404
+    _ia_save(user_id, agents)
+    return jsonify({"status": "success", "deleted": sid})
 
 
 if __name__ == "__main__":

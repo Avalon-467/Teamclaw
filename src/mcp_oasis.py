@@ -113,10 +113,10 @@ async def list_oasis_experts(username: str = "") -> str:
 
             lines.append(
                 "\n💡 在 schedule_yaml 中使用 expert 的 tag 来指定参与者。"
-                "\n   四种格式:"
+                "\n   三种格式:"
                 "\n   • \"tag#temp#N\"         — 直连LLM，无状态"
-                "\n   • \"tag#oasis#随机ID\"   — 有状态session，跨轮记忆"
-                "\n   • \"标题#session_id\"    — 普通agent session"
+                "\n   • \"tag#oasis#name\"     — 内部session agent，按name查找"
+                "\n   • \"#oasis#name\"        — 内部session agent（无tag）"
                 "\n   • \"tag#ext#id\"         — 外部API（DeepSeek/GPT-4等）"
             )
             return "\n".join(lines)
@@ -270,14 +270,10 @@ async def list_oasis_sessions(username: str = "") -> str:
     """
     List all oasis-managed expert sessions for the current user.
 
-    Oasis sessions are identified by "#oasis#" in their session_id
-    (e.g. "creative#oasis#ab12cd34", where "creative" is the expert tag).
-    They live in the normal Agent checkpoint DB and are auto-created
-    when first used in a discussion.
-
-    No separate storage or pre-creation is needed.  Just use session_ids
-    in "tag#oasis#<random>" format in your schedule_yaml expert names.
-    Append "#new" to force a brand-new session (ID replaced with random UUID).
+    Internal session agents are configured in {user_id}_agent.json with
+    name→session_id mappings. In YAML, use "tag#oasis#name" or "#oasis#name"
+    format — the engine resolves the name to the actual session_id.
+    Append "#new" to force a brand-new session (resolved ID replaced with random UUID).
 
     Args:
         username: (auto-injected) current user identity; do NOT set manually
@@ -298,8 +294,9 @@ async def list_oasis_sessions(username: str = "") -> str:
             if not sessions:
                 return (
                     "📭 暂无 oasis 专家 session。\n\n"
-                    "💡 无需预创建。在 schedule_yaml 中使用\n"
-                    "   \"tag#oasis#随机ID\" 格式的名称即可，首次使用时自动创建。\n"
+                    "💡 在 schedule_yaml 中使用\n"
+                    "   \"tag#oasis#name\" 或 \"#oasis#name\" 格式即可。\n"
+                    "   agent name 会自动映射到对应的 session。\n"
                     "   加 \"#new\" 后缀可确保创建全新 session。"
                 )
 
@@ -355,38 +352,32 @@ async def post_to_oasis(
     If both are provided, schedule_file takes priority (file content is used, schedule_yaml is ignored).
     If the user already has a saved YAML workflow file, just use schedule_file — no need to write schedule_yaml again.
 
-    **Four Agent Types** (name must contain '#'; engine dispatches by format):
+    **Three Agent Types** (name must contain '#'; engine dispatches by format):
 
       Type 1 — Direct LLM (stateless, fast):
         "tag#temp#N"            → ExpertAgent. Stateless single-shot LLM call per round.
                                   tag maps to preset expert name/persona; N is instance number.
                                   Example: "creative#temp#1", "critical#temp#2"
 
-      Type 2 — Oasis Session (stateful, has memory):
-        "tag#oasis#id"          → SessionExpert (oasis-managed). Stateful bot session with
-                                  conversation memory across rounds. tag maps to preset persona
-                                  (injected as system prompt on first round). id can be any string;
-                                  new IDs auto-create sessions on first use.
-                                  Example: "data#oasis#analysis01", "synthesis#oasis#abc123"
+      Type 2 — Internal Session Agent (stateful, has memory):
+        "tag#oasis#name"        → SessionExpert. Resolves agent name to session_id via
+                                  internal agent JSON ({user_id}_agent.json). tag enables
+                                  persona injection from presets.
+                                  Example: "test#oasis#test1", "creative#oasis#my_agent"
+        "#oasis#name"           → SessionExpert (no tag). Same name→session lookup,
+                                  no persona injection unless auto-detected from JSON.
+                                  Example: "#oasis#test1"
 
-      Type 3 — Regular Agent Session (your existing bot):
-        "Title#session_id"      → SessionExpert (regular). Connects to an existing agent session.
-                                  No identity injection — the session's own system prompt defines it.
-                                  Useful for bringing personal bot sessions into discussions.
-                                  Example: "助手#default", "Coder#my-project"
-
-      Type 4 — External API (DeepSeek, GPT-4, Ollama, etc):
+      Type 3 — External API (DeepSeek, GPT-4, Ollama, etc):
         "tag#ext#id"            → ExternalExpert. Calls any external OpenAI-compatible API directly.
                                   Does NOT go through the local agent. External service assumed stateful.
                                   Supports custom headers via YAML `headers` field.
                                   Example: "deepseek#ext#ds1"
 
-    Session ID conventions:
-      - New IDs auto-create sessions on first use (no pre-creation needed).
-      - Append "#new" to force a brand-new session (ID replaced with random UUID):
-          "creative#oasis#ab12#new"  → "#new" stripped, ID replaced with UUID
-          "助手#my_session#new"      → same treatment
-      - Oasis sessions identified by "#oasis#" in session_id, stored in Agent checkpoint DB.
+    Session conventions:
+      - Agent names are resolved to session_ids via internal agent JSON.
+      - Append "#new" to force a brand-new session (resolved session_id replaced with random UUID):
+          "tag#oasis#name#new"  → "#new" stripped, resolved session_id replaced with UUID
 
     For simple all-parallel with all preset experts, use:
       version: 1
@@ -820,10 +811,10 @@ def _parse_expert_name(raw: str) -> dict:
 
     Formats:
       tag#temp#N         → expert, instance=N
-      tag#oasis#xxx      → expert (bot session)
+      tag#oasis#new      → expert (stateful, auto-create session)
+      tag#oasis#<name>   → session_agent (name→session lookup, tag→persona)
+      #oasis#<name>      → session_agent (name→session lookup, no tag)
       tag#ext#id         → external (external API agent)
-      Title#session_id   → session_agent
-      Title#sid#N         → session_agent, instance=N
     """
     parts = raw.split("#")
     tag = parts[0]
@@ -841,13 +832,29 @@ def _parse_expert_name(raw: str) -> dict:
         }
 
     if len(parts) >= 3 and parts[1] == "oasis":
+        oasis_val = parts[2]
+        # "tag#oasis#new" → stateful expert (auto-create new session)
+        if oasis_val == "new":
+            return {
+                "type": "expert",
+                "tag": tag,
+                "name": _TAG_NAMES.get(tag, tag),
+                "emoji": _TAG_EMOJI.get(tag, "⭐"),
+                "temperature": 0.5,
+                "instance": 1,
+                "session_id": "",
+                "stateful": True,
+            }
+        # "tag#oasis#<name>" or "#oasis#<name>" → session_agent (name-based)
+        inst = int(parts[3]) if len(parts) >= 4 and parts[3].isdigit() else 1
         return {
-            "type": "expert",
-            "tag": tag,
-            "name": _TAG_NAMES.get(tag, tag),
-            "emoji": _TAG_EMOJI.get(tag, "⭐"),
+            "type": "session_agent",
+            "tag": tag or "",
+            "name": oasis_val,
+            "agent_name": oasis_val,
+            "emoji": "💬",
             "temperature": 0.5,
-            "instance": 1,
+            "instance": inst,
             "session_id": "",
         }
 
@@ -876,17 +883,15 @@ def _parse_expert_name(raw: str) -> dict:
             "ext_id": ext_id,
         }
 
-    # session_agent: Title#session_id or Title#session_id#N
-    sid = parts[1] if len(parts) >= 2 else ""
-    inst = int(parts[2]) if len(parts) >= 3 and parts[2].isdigit() else 1
+    # Unrecognized format — treat as unknown expert
     return {
-        "type": "session_agent",
-        "tag": "session",
-        "name": tag,
-        "emoji": "🤖",
-        "temperature": 0.7,
-        "instance": inst,
-        "session_id": sid,
+        "type": "expert",
+        "tag": tag or "custom",
+        "name": tag or raw,
+        "emoji": "❓",
+        "temperature": 0.5,
+        "instance": 1,
+        "session_id": "",
     }
 
 
@@ -897,6 +902,7 @@ def _yaml_to_layout_data(yaml_str: str) -> dict:
     Nodes are auto-positioned left-to-right (sequential) / top-to-bottom (parallel).
     Supports DAG mode: steps with ``id`` and ``depends_on`` fields are laid out
     using topological-level positioning (independent branches in parallel columns).
+    Supports Version 2 graph mode: explicit edges, conditional_edges, selector_edges.
     """
     data = _yaml.safe_load(yaml_str)
     if not isinstance(data, dict) or "plan" not in data:
@@ -904,6 +910,11 @@ def _yaml_to_layout_data(yaml_str: str) -> dict:
 
     plan = data.get("plan", [])
     repeat = data.get("repeat", True)
+    version = data.get("version", 1)
+
+    # Version 2: explicit graph with edges / conditional_edges / selector_edges
+    if version >= 2:
+        return _yaml_v2_to_layout(data)
 
     # Detect DAG mode: any step has an 'id' field
     is_dag = any(isinstance(s, dict) and "id" in s for s in plan)
@@ -912,6 +923,226 @@ def _yaml_to_layout_data(yaml_str: str) -> dict:
         return _yaml_dag_to_layout(plan, repeat)
     else:
         return _yaml_linear_to_layout(plan, repeat)
+
+
+def _yaml_v2_to_layout(data: dict) -> dict:
+    """Convert Version 2 graph YAML to canvas layout JSON.
+
+    Handles explicit edges, conditional_edges, selector_edges, and selector nodes.
+    Nodes are positioned using topological-level layout based on the edges list.
+    """
+    plan = data.get("plan", [])
+    repeat = data.get("repeat", False)
+    raw_edges = data.get("edges", [])
+    raw_cond_edges = data.get("conditional_edges", [])
+    raw_sel_edges = data.get("selector_edges", [])
+
+    nodes: list[dict] = []
+    edges: list[dict] = []
+
+    nid = 1
+    eid = 1
+
+    # ── Layout constants ──
+    MARGIN_X = 60
+    MARGIN_Y = 40
+    GAP_X = 260
+    GAP_Y = 90
+
+    # Build set of selector node step_ids
+    selector_step_ids = set()
+    for se in raw_sel_edges:
+        src = se.get("source", "")
+        if src:
+            selector_step_ids.add(src)
+
+    # First pass: create nodes, build step_id → node_id mapping
+    step_id_to_node_id: dict[str, str] = {}
+    step_ids_ordered: list[str] = []
+
+    for step in plan:
+        if not isinstance(step, dict):
+            continue
+        step_id = str(step.get("id", ""))
+        node_id = f"on{nid}"; nid += 1
+
+        if "expert" in step:
+            raw = step["expert"]
+            info = _parse_expert_name(raw)
+            node = {
+                "id": node_id,
+                "x": 0, "y": 0,
+                **info,
+                "author": "主持人",
+                "content": step.get("instruction", ""),
+                "source": "",
+            }
+            if info.get("type") == "external":
+                for _ek in ("api_url", "api_key", "model"):
+                    if _ek in step:
+                        node[_ek] = step[_ek]
+                if "headers" in step and isinstance(step["headers"], dict):
+                    node["headers"] = step["headers"]
+            # Mark selector nodes
+            if step.get("selector") or step_id in selector_step_ids:
+                node["isSelector"] = True
+        elif "manual" in step:
+            manual = step["manual"]
+            node = {
+                "id": node_id,
+                "x": 0, "y": 0,
+                "type": "manual", "tag": "manual",
+                "name": "手动注入", "emoji": "📝",
+                "temperature": 0, "instance": 1, "session_id": "",
+                "author": manual.get("author", "主持人") if isinstance(manual, dict) else "主持人",
+                "content": manual.get("content", "") if isinstance(manual, dict) else "",
+                "source": "",
+            }
+        elif "all_experts" in step:
+            node = {
+                "id": node_id,
+                "x": 0, "y": 0,
+                "type": "expert", "tag": "all",
+                "name": "全员讨论", "emoji": "👥",
+                "temperature": 0.5, "instance": 1, "session_id": "",
+                "author": "主持人", "content": "", "source": "",
+            }
+        else:
+            continue
+
+        nodes.append(node)
+        if step_id:
+            step_id_to_node_id[step_id] = node_id
+            step_ids_ordered.append(step_id)
+
+    # Build edges from explicit edges list
+    for e in raw_edges:
+        if isinstance(e, list) and len(e) >= 2:
+            src_nid = step_id_to_node_id.get(str(e[0]))
+            tgt_nid = step_id_to_node_id.get(str(e[1]))
+        elif isinstance(e, dict):
+            src_nid = step_id_to_node_id.get(str(e.get("source", "")))
+            tgt_nid = step_id_to_node_id.get(str(e.get("target", "")))
+        else:
+            continue
+        if src_nid and tgt_nid:
+            edges.append({"id": f"oe{eid}", "source": src_nid, "target": tgt_nid})
+            eid += 1
+
+    # ── Topological layout using edges (longest path) ──
+    # Build predecessor map from edges
+    preds: dict[str, list[str]] = {sid: [] for sid in step_ids_ordered}
+    for e in raw_edges:
+        if isinstance(e, list) and len(e) >= 2:
+            src_sid, tgt_sid = str(e[0]), str(e[1])
+        elif isinstance(e, dict):
+            src_sid = str(e.get("source", ""))
+            tgt_sid = str(e.get("target", ""))
+        else:
+            continue
+        if tgt_sid in preds and src_sid in step_id_to_node_id:
+            preds[tgt_sid].append(src_sid)
+
+    # NOTE: conditional_edges and selector_edges are NOT added to preds
+    # because they may form cycles (e.g. else-branch loops back),
+    # which would cause infinite recursion in the topological sort.
+    # Only fixed edges (which form a DAG) are used for layer computation.
+
+    layer: dict[str, int] = {}
+    _visiting: set[str] = set()  # cycle guard
+    def _get_layer(sid: str) -> int:
+        if sid in layer:
+            return layer[sid]
+        if sid in _visiting:
+            # Cycle detected — break it by treating as root
+            layer[sid] = 0
+            return 0
+        _visiting.add(sid)
+        deps = preds.get(sid, [])
+        if not deps:
+            layer[sid] = 0
+        else:
+            layer[sid] = max(_get_layer(d) for d in deps) + 1
+        _visiting.discard(sid)
+        return layer[sid]
+
+    for sid in step_ids_ordered:
+        _get_layer(sid)
+
+    # Group by layer
+    layers: dict[int, list[tuple[str, dict]]] = {}
+    for sid in step_ids_ordered:
+        lv = layer.get(sid, 0)
+        nd = next((n for n in nodes if n["id"] == step_id_to_node_id.get(sid)), None)
+        if nd:
+            layers.setdefault(lv, []).append((sid, nd))
+
+    # Barycenter ordering
+    node_y: dict[str, float] = {}
+    for lv in sorted(layers.keys()):
+        layer_items = layers[lv]
+        if lv > 0:
+            def _bary(sid: str) -> float:
+                deps = preds.get(sid, [])
+                ys = [node_y[d] for d in deps if d in node_y]
+                return sum(ys) / len(ys) if ys else 0.0
+            layer_items.sort(key=lambda t: _bary(t[0]))
+            layers[lv] = layer_items
+        count = len(layer_items)
+        total_h = (count - 1) * GAP_Y
+        y_start = MARGIN_Y + max(0, (400 - total_h) // 2)
+        for i, (sid, _nd) in enumerate(layer_items):
+            y = y_start + i * GAP_Y
+            node_y[sid] = y
+
+    # Assign final x, y coordinates
+    for lv, layer_items in sorted(layers.items()):
+        x = MARGIN_X + lv * GAP_X
+        for sid, nd in layer_items:
+            nd["x"] = x
+            nd["y"] = int(node_y.get(sid, MARGIN_Y))
+
+    # Build conditional edges output for frontend
+    cond_edges_out = []
+    for ce in raw_cond_edges:
+        src_nid = step_id_to_node_id.get(str(ce.get("source", "")))
+        then_nid = step_id_to_node_id.get(str(ce.get("then", "")))
+        else_nid = step_id_to_node_id.get(str(ce.get("else", ""))) if ce.get("else") else ""
+        if src_nid and then_nid:
+            cond_edges_out.append({
+                "source": src_nid,
+                "condition": ce.get("condition", ""),
+                "then": then_nid,
+                "else": else_nid or "",
+            })
+
+    # Build selector edges output for frontend
+    sel_edges_out = []
+    for se in raw_sel_edges:
+        src_nid = step_id_to_node_id.get(str(se.get("source", "")))
+        choices = se.get("choices", {})
+        if src_nid and choices:
+            mapped_choices = {}
+            for num, tgt_sid in choices.items():
+                tgt_nid = step_id_to_node_id.get(str(tgt_sid))
+                if tgt_nid:
+                    mapped_choices[int(num)] = tgt_nid
+            if mapped_choices:
+                sel_edges_out.append({"source": src_nid, "choices": mapped_choices})
+
+    layout = {
+        "nodes": nodes,
+        "edges": edges,
+        "conditionalEdges": cond_edges_out,
+        "selectorEdges": sel_edges_out,
+        "groups": [],
+        "settings": {
+            "repeat": repeat,
+            "max_rounds": 5,
+            "cluster_threshold": 150,
+        },
+    }
+    return layout
 
 
 def _yaml_dag_to_layout(plan: list, repeat: bool) -> dict:

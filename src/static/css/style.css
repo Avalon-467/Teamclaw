@@ -472,6 +472,12 @@ header {
     border-radius: 8px; background: #faf5ff; border: 1px dashed #a855f7; cursor: grab; font-size: 12px;
 }
 .orch-manual-card:hover { background: #f3e8ff; }
+.orch-start-card { background: #ecfdf5 !important; border-color: #10b981 !important; }
+.orch-start-card:hover { background: #d1fae5 !important; }
+.orch-end-card { background: #fef2f2 !important; border-color: #ef4444 !important; }
+.orch-end-card:hover { background: #fee2e2 !important; }
+.orch-cond-card { background: #fffbeb !important; border-color: #f59e0b !important; }
+.orch-cond-card:hover { background: #fef3c7 !important; }
 
 .orch-canvas-wrapper { flex: 1; display: flex; flex-direction: column; min-width: 0; }
 .orch-toolbar {
@@ -773,6 +779,46 @@ header {
 .session-item { position: relative; }
 .session-item:hover .session-delete { display: block; }
 .session-item .session-delete:hover { background: #fca5a5; }
+/* Agent edit button on session items */
+.session-item .session-edit {
+    display: none; position: absolute; right: 50px; top: 50%; transform: translateY(-50%);
+    background: #dbeafe; color: #2563eb; border: none; border-radius: 4px;
+    font-size: 11px; padding: 2px 6px; cursor: pointer; line-height: 1.2;
+}
+.session-item:hover .session-edit { display: block; }
+.session-item .session-edit:hover { background: #bfdbfe; }
+/* Agent Meta Modal */
+.agent-meta-overlay {
+    position: fixed; inset: 0; background: rgba(0,0,0,0.4); z-index: 10000;
+    display: flex; align-items: center; justify-content: center;
+}
+.agent-meta-dialog {
+    background: white; border-radius: 12px; width: 360px; max-width: 90vw;
+    box-shadow: 0 20px 60px rgba(0,0,0,0.2); overflow: hidden;
+}
+.agent-meta-header {
+    display: flex; justify-content: space-between; align-items: center;
+    padding: 14px 18px; border-bottom: 1px solid #e5e7eb; background: #f9fafb;
+}
+.agent-meta-header h3 { margin: 0; font-size: 15px; font-weight: 600; color: #374151; }
+.agent-meta-close { background: none; border: none; font-size: 20px; color: #9ca3af; cursor: pointer; line-height: 1; }
+.agent-meta-close:hover { color: #374151; }
+.agent-meta-body { padding: 16px 18px; display: flex; flex-direction: column; gap: 8px; }
+.agent-meta-label { font-size: 12px; font-weight: 600; color: #6b7280; margin-bottom: -4px; }
+.agent-meta-input {
+    padding: 7px 10px; border: 1px solid #d1d5db; border-radius: 6px; font-size: 13px;
+    outline: none; transition: border-color 0.15s;
+}
+.agent-meta-input:focus { border-color: #3b82f6; box-shadow: 0 0 0 2px rgba(59,130,246,0.15); }
+.agent-meta-footer {
+    display: flex; justify-content: flex-end; gap: 8px; padding: 12px 18px;
+    border-top: 1px solid #e5e7eb; background: #f9fafb;
+}
+.agent-meta-btn { padding: 6px 16px; border-radius: 6px; font-size: 13px; cursor: pointer; border: 1px solid transparent; }
+.agent-meta-btn-cancel { background: #f3f4f6; color: #374151; border-color: #d1d5db; }
+.agent-meta-btn-cancel:hover { background: #e5e7eb; }
+.agent-meta-btn-save { background: #3b82f6; color: white; }
+.agent-meta-btn-save:hover { background: #2563eb; }
 @keyframes session-glow-user {
     0%, 100% { box-shadow: 0 0 4px 1px rgba(59,130,246,0.3); }
     50% { box-shadow: 0 0 10px 3px rgba(59,130,246,0.5); }
@@ -1077,4 +1123,35 @@ header {
 @media (max-width: 768px) {
     .settings-modal { width: 100%; max-width: 100%; max-height: 100vh; border-radius: 0; }
     .settings-field { flex-direction: column; }
+}
+
+/* ── START / END Node Badges ── */
+.orch-node-badge {
+    position: absolute; top: -10px; font-size: 9px; font-weight: 700;
+    padding: 1px 6px; border-radius: 6px; pointer-events: none; z-index: 25;
+    letter-spacing: 0.5px; text-transform: uppercase;
+}
+.orch-start-badge { left: 8px; background: #16a34a; color: #fff; box-shadow: 0 0 6px #16a34a80; }
+.orch-end-badge { right: 8px; background: #dc2626; color: #fff; box-shadow: 0 0 6px #dc262680; }
+
+/* ── Conditional Edge Labels on SVG ── */
+.orch-edge-label {
+    font-size: 10px; font-weight: 600; pointer-events: none;
+    paint-order: stroke; stroke: white; stroke-width: 3px; fill: #374151;
+}
+.orch-then-label { fill: #16a34a; }
+.orch-else-label { fill: #ea580c; }
+.orch-selector-label { fill: #8b5cf6; }
+
+/* ── Selector Node Style ── */
+.orch-node.selector-type {
+    border-color: #8b5cf6 !important;
+    box-shadow: 0 0 8px #8b5cf680, inset 0 0 0 1px #8b5cf640;
+}
+.orch-selector-badge {
+    position: absolute; bottom: -10px; left: 50%; transform: translateX(-50%);
+    font-size: 8px; font-weight: 700; padding: 1px 6px; border-radius: 6px;
+    pointer-events: none; z-index: 25; letter-spacing: 0.5px;
+    background: #8b5cf6; color: #fff; box-shadow: 0 0 6px #8b5cf680;
+    white-space: nowrap;
 }

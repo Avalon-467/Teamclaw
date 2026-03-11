@@ -188,12 +188,12 @@ def _node_yaml_name(node: dict) -> str:
 
     For expert nodes:
       - stateful=False (default) → "tag#temp#<instance>" (stateless ExpertAgent)
-      - stateful=True            → "tag#oasis#new"       (stateful SessionExpert)
+      - stateful=True            → "tag#oasis#new"       (stateful SessionExpert, auto-create)
     For external nodes:
       - "tag#ext#<ext_id>"  (external API agent)
     For session_agent nodes:
-      - "title#session_id#<instance>" when instance > 1 (multiple uses of same session)
-      - "title#session_id"            when instance == 1
+      - with tag:  "tag#oasis#<agent_name>"   (tag enables persona lookup)
+      - no tag:    "#oasis#<agent_name>"      (name→session lookup, engine resolves)
     """
     inst = node.get("instance", 1)
     node_type = node.get("type", "expert")
@@ -204,19 +204,20 @@ def _node_yaml_name(node: dict) -> str:
         return f"{tag}#ext#{ext_id}"
 
     if node_type == "session_agent":
-        title = node.get("name", "Agent")[:7]
+        agent_name = node.get("agent_name") or node.get("name", "Agent")
+        tag = node.get("tag", "")
         sid = node.get("session_id", "")
-        if sid:
-            # Oasis sessions already have the format "tag#oasis#id",
-            # so don't prepend title to avoid breaking tag resolution.
-            if "#oasis#" in sid:
-                if inst > 1:
-                    return f"{sid}#{inst}"
-                return sid
+        # Unified format: all session agents use #oasis#<name>
+        # tag#oasis#name (tag enables persona lookup)
+        # #oasis#name    (no tag, just name → session lookup by engine)
+        if tag and tag not in ("session", ""):
             if inst > 1:
-                return f"{title}#{sid}#{inst}"
-            return f"{title}#{sid}"
-        return title
+                return f"{tag}#oasis#{agent_name}#{inst}"
+            return f"{tag}#oasis#{agent_name}"
+        else:
+            if inst > 1:
+                return f"#oasis#{agent_name}#{inst}"
+            return f"#oasis#{agent_name}"
 
     tag = node.get("tag", "custom")
     # Per-node stateful flag: if set, use stateful session mode
@@ -277,8 +278,13 @@ def layout_to_yaml(data: dict) -> str:
     """
     nodes = data.get("nodes", [])
     edges = data.get("edges", [])
+    conditional_edges_raw = data.get("conditionalEdges", [])
+    selector_edges_raw = data.get("selectorEdges", [])
     groups = data.get("groups", [])
     settings = data.get("settings", {})
+    has_conditional = bool(conditional_edges_raw) or data.get("hasConditional", False)
+    has_selector = bool(selector_edges_raw) or data.get("hasSelector", False)
+    use_v2 = has_conditional or has_selector
 
     repeat = settings.get("repeat", False)
     node_map = {n["id"]: n for n in nodes}
@@ -425,6 +431,80 @@ def layout_to_yaml(data: dict) -> str:
             }
         })
 
+    # ── Version 2 graph output when conditional or selector edges exist ──
+    if use_v2 and (conditional_edges_raw or selector_edges_raw):
+        # In version 2 mode, all nodes need an id and we use explicit edges
+        v2_plan = []
+        # Build set of selector node ids
+        selector_node_ids = set()
+        for n in nodes:
+            if n.get("isSelector", False):
+                selector_node_ids.add(n["id"])
+        for node in nodes:
+            if node["id"] in grouped_node_ids:
+                continue  # groups are handled separately
+            step = {"id": node["id"]}
+            if node.get("isSelector", False):
+                step["selector"] = True
+            if node.get("type") == "manual":
+                step["manual"] = {
+                    "author": node.get("author", "主持人"),
+                    "content": node.get("content", ""),
+                }
+            else:
+                step["expert"] = _node_yaml_name(node)
+                if node.get("content"):
+                    step["instruction"] = node["content"]
+                if node.get("type") == "external":
+                    for _ek in ("api_url", "api_key", "model"):
+                        if node.get(_ek):
+                            step[_ek] = node[_ek]
+                    if node.get("headers") and isinstance(node["headers"], dict):
+                        step["headers"] = node["headers"]
+            v2_plan.append(step)
+
+        # Build fixed edges list — exclude edges from selector nodes
+        # (selector node outgoing edges become selector_edges choices)
+        v2_edges = []
+        for e in edges:
+            if e["source"] not in selector_node_ids:
+                v2_edges.append([e["source"], e["target"]])
+
+        # Build conditional edges list
+        v2_cond_edges = []
+        for ce in conditional_edges_raw:
+            cond_entry = {
+                "source": ce.get("source", ""),
+                "condition": ce.get("condition", ""),
+                "then": ce.get("then", ""),
+            }
+            if ce.get("else"):
+                cond_entry["else"] = ce["else"]
+            v2_cond_edges.append(cond_entry)
+
+        # Build selector edges list
+        v2_sel_edges = []
+        for se in selector_edges_raw:
+            sel_entry = {
+                "source": se.get("source", ""),
+                "choices": se.get("choices", {}),
+            }
+            v2_sel_edges.append(sel_entry)
+
+        schedule = {
+            "version": 2,
+            "repeat": repeat,
+            "plan": v2_plan if v2_plan else [{"all_experts": True}],
+            "edges": v2_edges,
+        }
+        if v2_cond_edges:
+            schedule["conditional_edges"] = v2_cond_edges
+        if v2_sel_edges:
+            schedule["selector_edges"] = v2_sel_edges
+
+        return yaml.dump(schedule, allow_unicode=True, default_flow_style=False, sort_keys=False)
+
+    # ── Version 1 output (no conditional edges) ──
     # Build final YAML structure
     schedule = {
         "version": 1,
@@ -606,7 +686,8 @@ plan:
   - expert: "tag#temp#1"          # Preset expert instance 1 (stateless, uses tag)
   - expert: "tag#temp#2"          # Same expert, 2nd instance
   - expert: "tag#oasis#new"       # Preset expert (stateful session, auto-create)
-  - expert: "Title#session_id"    # Existing session agent (with its own tools & memory)
+  - expert: "tag#oasis#name"      # Internal session agent by name (tag→persona lookup)
+  - expert: "#oasis#name"         # Internal session agent by name (no tag)
   - parallel:                     # Multiple experts speak simultaneously
       - "creative#temp#1"
       - "Title#session_id"
@@ -657,9 +738,8 @@ plan:
 ## Expert Name Formats
 1. `tag#temp#N` — Preset expert instance N (stateless), e.g. "creative#temp#1", "creative#temp#2" (same expert used twice)
 2. `tag#oasis#new` — Preset expert (stateful session, auto-creates new session), use when the individual node has stateful=true
-3. `Title#session_id` — Existing session agent, referenced by actual session_id, has its own system prompt, tools & memory
-4. `Title#session_id#N` — Same session agent used multiple times (N>1)
-
+3. `tag#oasis#name` — Internal session agent by name (tag enables persona lookup), e.g. "test#oasis#test1"
+4. `#oasis#name` — Internal session agent by name (no tag), e.g. "#oasis#test1"
 ## Available Step Types
 1. `expert: "Name"` — Single expert speaks in order
 2. `parallel: ["A", "B"]` — Multiple experts speak simultaneously (linear mode only)

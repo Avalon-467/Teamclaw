@@ -224,6 +224,14 @@ orch_openclaw_sessions: '🦞 OpenClaw',
         orch_oc_ch_guide_docs: '完整文档：',
         orch_oc_ch_desc: '点击 Channel 账号切换绑定状态（🔗已绑定 ⚪未绑定）',
         orch_manual_inject: '手动注入',
+        orch_start_node: '开始',
+        orch_end_node: '结束',
+        orch_cond_node: '选择器',
+        orch_start_author: 'begin',
+        orch_end_author: 'bend',
+        orch_start_default_content: '讨论开始',
+        orch_end_default_content: '讨论结束',
+        orch_cond_already_selector: '已经是选择器节点',
         orch_shortcuts_title: '快捷操作：',
         orch_shortcuts_body: '拖入专家到画布 · 连接端口=工作流 · Ctrl+G=分组 · 双击快速添加',
         // Orchestration toolbar buttons
@@ -272,6 +280,14 @@ orch_openclaw_sessions: '🦞 OpenClaw',
         orch_status_bar: '节点: {nodes} | 连线: {edges} | 分组: {groups}',
         orch_status_bar_init: '节点: 0 | 连线: 0 | 分组: 0',
         orch_manual_inject: '手动注入',
+        orch_start_node: '开始',
+        orch_end_node: '结束',
+        orch_cond_node: '选择器',
+        orch_start_author: 'begin',
+        orch_end_author: 'bend',
+        orch_start_default_content: '讨论开始',
+        orch_end_default_content: '讨论结束',
+        orch_cond_already_selector: '已经是选择器节点',
         orch_node_remove: '移除',
         orch_default_author: '主持人',
         orch_yaml_valid: '✅ 有效 YAML — {steps} 步骤 [{types}]',
@@ -286,6 +302,26 @@ orch_openclaw_sessions: '🦞 OpenClaw',
         orch_ctx_delete: '🗑️ 删除选中',
         orch_ctx_refresh_yaml: '🔄 刷新 YAML',
         orch_ctx_clear: '🗑️ 清空画布',
+        // Conditional edge
+        orch_ctx_set_cond: '⚡ 设为条件边',
+        orch_ctx_edit_cond: '✏️ 编辑条件边',
+        orch_ctx_remove_cond: '🔗 恢复为普通边',
+        orch_ctx_set_selector: '🎯 设为选择节点 (LLM路由)',
+        orch_ctx_unset_selector: '🔗 取消选择节点',
+        orch_modal_cond_edge: '⚡ 编辑条件边',
+        orch_cond_label_type: '条件类型',
+        orch_cond_label_keyword: '关键词',
+        orch_cond_label_number: '数值',
+        orch_cond_label_negate: '取反（NOT）',
+        orch_cond_opt_contains: '最后发言 包含关键词',
+        orch_cond_opt_not_contains: '最后发言 不包含关键词',
+        orch_cond_opt_count_gte: '发言总数 ≥ N',
+        orch_cond_opt_count_lt: '发言总数 < N',
+        orch_cond_opt_always: '始终为真（无条件）',
+        orch_cond_label_then: 'Then 目标（条件为真）',
+        orch_cond_label_else: 'Else 目标（条件为假/循环回边）',
+        orch_cond_none: '（无）',
+        orch_cond_val_required: '请填写关键词或数值',
         // Group labels
         orch_group_parallel: '🔀 并行',
         orch_group_all: '👥 全员',
@@ -645,6 +681,14 @@ orch_openclaw_sessions: '🦞 OpenClaw',
         orch_oc_ch_guide_docs: 'Full docs:',
         orch_oc_ch_desc: 'Click a channel account to toggle binding (🔗bound ⚪unbound)',
         orch_manual_inject: 'Manual Inject',
+        orch_start_node: 'Start',
+        orch_end_node: 'End',
+        orch_cond_node: 'Selector',
+        orch_start_author: 'begin',
+        orch_end_author: 'bend',
+        orch_start_default_content: 'Discussion started',
+        orch_end_default_content: 'Discussion ended',
+        orch_cond_already_selector: 'is already a selector',
         orch_shortcuts_title: 'Shortcuts: ',
         orch_shortcuts_body: 'Drag expert to canvas · Connect ports=workflow · Ctrl+G=group · Double-click to add',
         // Orchestration toolbar buttons
@@ -693,6 +737,14 @@ orch_openclaw_sessions: '🦞 OpenClaw',
         orch_status_bar: 'Nodes: {nodes} | Edges: {edges} | Groups: {groups}',
         orch_status_bar_init: 'Nodes: 0 | Edges: 0 | Groups: 0',
         orch_manual_inject: 'Manual Inject',
+        orch_start_node: 'Start',
+        orch_end_node: 'End',
+        orch_cond_node: 'Selector',
+        orch_start_author: 'begin',
+        orch_end_author: 'bend',
+        orch_start_default_content: 'Discussion started',
+        orch_end_default_content: 'Discussion ended',
+        orch_cond_already_selector: 'is already a selector',
         orch_node_remove: 'Remove',
         orch_default_author: 'Moderator',
         orch_yaml_valid: '✅ Valid YAML — {steps} steps [{types}]',
@@ -707,6 +759,26 @@ orch_openclaw_sessions: '🦞 OpenClaw',
         orch_ctx_delete: '🗑️ Delete Selected',
         orch_ctx_refresh_yaml: '🔄 Refresh YAML',
         orch_ctx_clear: '🗑️ Clear Canvas',
+        // Conditional edge
+        orch_ctx_set_cond: '⚡ Set as Conditional Edge',
+        orch_ctx_edit_cond: '✏️ Edit Conditional Edge',
+        orch_ctx_remove_cond: '🔗 Revert to Fixed Edge',
+        orch_ctx_set_selector: '🎯 Set as Selector Node (LLM Router)',
+        orch_ctx_unset_selector: '🔗 Unset Selector Node',
+        orch_modal_cond_edge: '⚡ Edit Conditional Edge',
+        orch_cond_label_type: 'Condition Type',
+        orch_cond_label_keyword: 'Keyword',
+        orch_cond_label_number: 'Number',
+        orch_cond_label_negate: 'Negate (NOT)',
+        orch_cond_opt_contains: 'Last post contains keyword',
+        orch_cond_opt_not_contains: 'Last post NOT contains keyword',
+        orch_cond_opt_count_gte: 'Post count ≥ N',
+        orch_cond_opt_count_lt: 'Post count < N',
+        orch_cond_opt_always: 'Always true (unconditional)',
+        orch_cond_label_then: 'Then Target (condition true)',
+        orch_cond_label_else: 'Else Target (condition false / loop back)',
+        orch_cond_none: '(none)',
+        orch_cond_val_required: 'Please enter keyword or number',
         // Group labels
         orch_group_parallel: '🔀 Parallel',
         orch_group_all: '👥 All Experts',
@@ -1236,19 +1308,122 @@ function updateSessionDisplay() {
     }
 }
 
+// ===== Agent Meta Modal Logic =====
+let _agentMetaCallback = null;  // resolve fn for the modal promise
+let _agentMetaMode = 'create';  // 'create' or 'edit'
+let _agentMetaSessionId = null;
+
+function openAgentMetaModal(mode, sessionId, existingMeta) {
+    _agentMetaMode = mode;
+    _agentMetaSessionId = sessionId;
+    const modal = document.getElementById('agent-meta-modal');
+    document.getElementById('agent-meta-modal-title').textContent =
+        mode === 'edit' ? '✏️ Edit Agent Settings' : '🤖 New Agent Settings';
+    document.getElementById('agent-meta-name').value = (existingMeta && existingMeta.name) || '';
+    document.getElementById('agent-meta-tools').value = (existingMeta && existingMeta.tools) || '';
+    document.getElementById('agent-meta-tag').value = (existingMeta && existingMeta.tag) || '';
+    modal.style.display = 'flex';
+    document.getElementById('agent-meta-name').focus();
+    return new Promise(resolve => { _agentMetaCallback = resolve; });
+}
+
+function closeAgentMetaModal() {
+    document.getElementById('agent-meta-modal').style.display = 'none';
+    if (_agentMetaCallback) { _agentMetaCallback(null); _agentMetaCallback = null; }
+}
+
+function _collectAgentMeta() {
+    const name = document.getElementById('agent-meta-name').value.trim() || null;
+    let tools = document.getElementById('agent-meta-tools').value.trim() || null;
+    const tag = document.getElementById('agent-meta-tag').value.trim() || null;
+    // Parse tools: if comma-separated, split to object
+    if (tools && tools !== 'all' && tools !== 'none') {
+        const obj = {};
+        tools.split(',').map(t => t.trim()).filter(Boolean).forEach(t => obj[t] = true);
+        tools = obj;
+    }
+    const meta = {};
+    if (name !== null) meta.name = name;
+    if (tools !== null) meta.tools = tools;
+    if (tag !== null) meta.tag = tag;
+    return meta;
+}
+
+async function submitAgentMeta() {
+    const meta = _collectAgentMeta();
+    if (_agentMetaMode === 'edit' && _agentMetaSessionId) {
+        // Update existing agent via PUT
+        try {
+            await fetch(`/internal_agents/${encodeURIComponent(_agentMetaSessionId)}`, {
+                method: 'PUT',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({ meta })
+            });
+        } catch (e) { console.warn('Failed to update agent meta', e); }
+    }
+    document.getElementById('agent-meta-modal').style.display = 'none';
+    if (_agentMetaCallback) { _agentMetaCallback(meta); _agentMetaCallback = null; }
+}
+
+// Helper: load internal agent meta as a map { session_id: meta }
+async function _loadAgentMetaMap() {
+    try {
+        const resp = await fetch('/internal_agents');
+        const data = await resp.json();
+        const map = {};
+        if (data.agents) {
+            for (const a of data.agents) map[a.session] = a.meta || {};
+        }
+        return map;
+    } catch (e) { return {}; }
+}
+
+// Resolve display title: prefer agent meta name, fallback to original title
+function _resolveTitle(originalTitle, sessionId, agentMap) {
+    const meta = agentMap[sessionId];
+    if (meta && meta.name) return meta.name;
+    return originalTitle;
+}
+
+async function editAgentMeta(sessionId) {
+    // Load current meta from backend
+    let existingMeta = {};
+    try {
+        const agentMap = await _loadAgentMetaMap();
+        existingMeta = agentMap[sessionId] || {};
+    } catch (e) { /* ignore */ }
+    // If tools is object, convert back to comma string for display
+    if (existingMeta.tools && typeof existingMeta.tools === 'object') {
+        existingMeta.tools = Object.keys(existingMeta.tools).join(',');
+    }
+    await openAgentMetaModal('edit', sessionId, existingMeta);
+}
+
 function handleNewSession() {
-    if (!confirm(t('new_session_confirm'))) return;
-    currentSessionId = generateSessionId();
-    sessionStorage.setItem('sessionId', currentSessionId);
-    updateSessionDisplay();
-    // Clear chat box for new conversation
-    const chatBox = document.getElementById('chat-box');
-    chatBox.innerHTML = `
-        <div class="flex justify-start">
-            <div class="message-agent bg-white border p-4 max-w-[85%] shadow-sm text-gray-700">
-                ${t('new_session_message')}
-            </div>
-        </div>`;
+    // Open the agent meta modal; after user submits, create session + write JSON
+    const newSid = generateSessionId();
+    openAgentMetaModal('create', newSid, {}).then(async (meta) => {
+        if (meta === null) return;  // User cancelled
+        currentSessionId = newSid;
+        sessionStorage.setItem('sessionId', currentSessionId);
+        updateSessionDisplay();
+        // Clear chat box for new conversation
+        const chatBox = document.getElementById('chat-box');
+        chatBox.innerHTML = `
+            <div class="flex justify-start">
+                <div class="message-agent bg-white border p-4 max-w-[85%] shadow-sm text-gray-700">
+                    ${t('new_session_message')}
+                </div>
+            </div>`;
+        // Write internal agent JSON
+        try {
+            await fetch('/internal_agents', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({ session: newSid, meta: meta })
+            });
+        } catch (e) { console.warn('Failed to save internal agent', e); }
+    });
 }
 
 // ===== 历史会话侧边栏 =====
@@ -1336,7 +1511,8 @@ async function loadSessionList() {
         listEl.innerHTML = `<div class="text-xs text-gray-400 text-center py-4">${t('loading')}</div>`;
     }
     try {
-        const resp = await fetch('/proxy_sessions');
+        // Load sessions and agent meta in parallel
+        const [resp, agentMap] = await Promise.all([fetch('/proxy_sessions'), _loadAgentMetaMap()]);
         const data = await resp.json();
         if (!data.sessions || data.sessions.length === 0) {
             listEl.innerHTML = `<div class="text-xs text-gray-400 text-center py-4">${t('history_empty')}</div>`;
@@ -1346,12 +1522,14 @@ async function loadSessionList() {
         data.sessions.sort((a, b) => b.session_id.localeCompare(a.session_id));
         for (const s of data.sessions) {
             const isActive = s.session_id === currentSessionId;
+            const displayTitle = _resolveTitle(s.title, s.session_id, agentMap);
             const div = document.createElement('div');
             div.className = 'session-item' + (isActive ? ' active' : '');
             div.dataset.sessionId = s.session_id;
             div.innerHTML = `
-                <div class="session-title">${escapeHtml(s.title)}</div>
+                <div class="session-title">${escapeHtml(displayTitle)}</div>
                 <div class="session-meta">#${s.session_id.slice(-6)} · ${s.message_count}${t('messages_count')}</div>
+                <button class="session-edit" onclick="event.stopPropagation(); editAgentMeta('${s.session_id}')">✏️</button>
                 <button class="session-delete" onclick="event.stopPropagation(); deleteSession('${s.session_id}')">${t('delete_session')}</button>
             `;
             div.onclick = () => switchToSession(s.session_id);
@@ -1369,9 +1547,10 @@ async function loadSessionList() {
 // 增量刷新：不重建DOM，只更新标题/计数 + 状态发光
 async function refreshHistoryList() {
     try {
-        const [sessResp, statusResp] = await Promise.all([
+        const [sessResp, statusResp, agentMap] = await Promise.all([
             fetch('/proxy_sessions'),
-            fetch('/proxy_sessions_status')
+            fetch('/proxy_sessions_status'),
+            _loadAgentMetaMap()
         ]);
         const sessData = await sessResp.json();
         const statusData = statusResp.ok ? await statusResp.json() : {};
@@ -1405,7 +1584,7 @@ async function refreshHistoryList() {
             if (div) {
                 // 更新标题和计数
                 const titleEl = div.querySelector('.session-title');
-                const newTitle = escapeHtml(s.title);
+                const newTitle = escapeHtml(_resolveTitle(s.title, s.session_id, agentMap));
                 if (titleEl && titleEl.innerHTML !== newTitle) titleEl.innerHTML = newTitle;
                 const metaEl = div.querySelector('.session-meta');
                 if (metaEl) {
@@ -1431,9 +1610,11 @@ async function refreshHistoryList() {
                 div = document.createElement('div');
                 div.className = 'session-item' + (s.session_id === currentSessionId ? ' active' : '');
                 div.dataset.sessionId = s.session_id;
+                const displayTitle = _resolveTitle(s.title, s.session_id, agentMap);
                 div.innerHTML = `
-                    <div class="session-title">${escapeHtml(s.title)}</div>
+                    <div class="session-title">${escapeHtml(displayTitle)}</div>
                     <div class="session-meta">#${s.session_id.slice(-6)} · ${s.message_count}${t('messages_count')}</div>
+                    <button class="session-edit" onclick="event.stopPropagation(); editAgentMeta('${s.session_id}')">✏️</button>
                     <button class="session-delete" onclick="event.stopPropagation(); deleteSession('${s.session_id}')">${t('delete_session')}</button>
                 `;
                 div.onclick = () => switchToSession(s.session_id);
@@ -1516,6 +1697,10 @@ async function deleteSession(sessionId) {
         });
         const data = await resp.json();
         if (resp.ok && data.status === 'success') {
+            // Also delete internal agent JSON record
+            try {
+                await fetch(`/internal_agents/${encodeURIComponent(sessionId)}`, { method: 'DELETE' });
+            } catch (e) { /* ignore if not found */ }
             // 如果删除的是当前会话，自动开一个新的
             if (sessionId === currentSessionId) {
                 currentSessionId = generateSessionId();
@@ -3889,9 +4074,13 @@ async function loadAvailableSessions() {
     const container = document.getElementById('group-available-sessions');
     container.innerHTML = '<div class="text-xs text-gray-400 p-2">' + t('loading') + '</div>';
     try {
-        const resp = await fetch(`/proxy_groups/${currentGroupId}/sessions`, {
-            headers: { 'Authorization': 'Bearer ' + getAuthToken() }
-        });
+        // Load sessions, group detail, and agent meta in parallel
+        const [resp, agentMap] = await Promise.all([
+            fetch(`/proxy_groups/${currentGroupId}/sessions`, {
+                headers: { 'Authorization': 'Bearer ' + getAuthToken() }
+            }),
+            _loadAgentMetaMap()
+        ]);
         if (!resp.ok) return;
         const data = await resp.json();
         const sessions = data.sessions || [];
@@ -3911,7 +4100,7 @@ async function loadAvailableSessions() {
         container.innerHTML = sessions.map(s => {
             const key = currentUserId + '#' + s.session_id;
             const checked = memberSet.has(key) ? 'checked' : '';
-            const title = s.title || s.session_id;
+            const title = _resolveTitle(s.title || s.session_id, s.session_id, agentMap);
             return `
                 <label class="session-checkbox">
                     <input type="checkbox" ${checked} onchange="toggleGroupAgent('${s.session_id}', this.checked)">
