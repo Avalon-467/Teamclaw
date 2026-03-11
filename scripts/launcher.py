@@ -207,18 +207,19 @@ print("  按 Ctrl+C 停止所有服务")
 print("============================================")
 print()
 
-# 自动打开浏览器（后台线程，避免无 GUI 环境阻塞主进程）
-import threading
+# 自动打开浏览器（仅在非 headless 模式下）
+if not is_headless:
+    import threading
 
-def _open_browser():
-    url = f"http://127.0.0.1:{PORT_FRONTEND}"
-    try:
-        webbrowser.open(url)
-        print(f"🌐 已自动打开浏览器: {url}")
-    except Exception:
-        print(f"⚠️  无法自动打开浏览器，请手动访问: {url}")
+    def _open_browser():
+        url = f"http://127.0.0.1:{PORT_FRONTEND}"
+        try:
+            webbrowser.open(url)
+            print(f"🌐 已自动打开浏览器: {url}")
+        except Exception:
+            print(f"⚠️  无法自动打开浏览器，请手动访问: {url}")
 
-threading.Thread(target=_open_browser, daemon=True).start()
+    threading.Thread(target=_open_browser, daemon=True).start()
 
 # 重启信号文件路径
 RESTART_FLAG = os.path.join(PROJECT_ROOT, ".restart_flag")
