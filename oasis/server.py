@@ -1266,7 +1266,10 @@ async def get_openclaw_agent_detail(name: str = Query(...)):
 
     all_skills.sort(key=lambda x: x["name"])
 
-    return {"ok": True, "agent": detail, "skills": all_skills}
+    # Non-bundled skills (workspace + managed only)
+    user_skills = [s for s in all_skills if s.get("source") != "bundled"]
+
+    return {"ok": True, "agent": detail, "skills": all_skills, "user_skills": user_skills}
 
 
 @app.get("/sessions/openclaw/skills")

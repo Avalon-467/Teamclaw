@@ -2396,7 +2396,8 @@ def delete_team_expert(team_name, tag):
 def download_team_snapshot():
     """Download a compressed snapshot of the team's data.
     Includes: oasis_agents.json, oasis_experts.json, 
-             openclaw_agents.json, and all .yaml files.
+             openclaw_agents.json, all .yaml files,
+             and skill folders (workspace + managed) for each openclaw agent.
     Note: oasis_sessions.json is excluded as it contains private session mappings.
     """
     user_id = session.get("user_id")
@@ -2416,6 +2417,7 @@ def download_team_snapshot():
     
     import zipfile
     import io
+    import shutil
     from datetime import datetime
     
     try:
@@ -2437,13 +2439,70 @@ def download_team_snapshot():
                     zipf.write(file_path, json_file)
             
             # Add all .yaml files
-            for root, dirs, files in os.walk(team_dir):
+            for root_path, dirs, files in os.walk(team_dir):
                 for file in files:
                     if file.endswith(('.yaml', '.yml')):
-                        file_path = os.path.join(root, file)
+                        file_path = os.path.join(root_path, file)
                         # Use relative path inside zip
                         rel_path = os.path.relpath(file_path, team_dir)
                         zipf.write(file_path, rel_path)
+
+            # --- Add skill folders for each openclaw agent ---
+            prefix = team + "_"
+            openclaw_path = os.path.join(team_dir, "openclaw_agents.json")
+            managed_skills_added = False
+
+            if os.path.exists(openclaw_path):
+                try:
+                    with open(openclaw_path, "r", encoding="utf-8") as f:
+                        openclaw_data = json.load(f)
+                except Exception:
+                    openclaw_data = {}
+
+                if isinstance(openclaw_data, dict):
+                    for short_name in openclaw_data:
+                        agent_name = prefix + short_name
+                        # Fetch agent detail from oasis server to get workspace path and user_skills
+                        try:
+                            r = requests.get(
+                                f"{OASIS_BASE_URL}/sessions/openclaw/agent-detail",
+                                params={"name": agent_name},
+                                timeout=15,
+                            )
+                            resp = r.json()
+                            if not resp.get("ok"):
+                                continue
+                            agent_detail = resp.get("agent", {})
+                            workspace = agent_detail.get("workspace", "")
+
+                            # 1. Add workspace skills to zip: skills/{short_name}/
+                            if workspace:
+                                ws_skills_dir = os.path.join(os.path.expanduser(workspace), "skills")
+                                if os.path.isdir(ws_skills_dir):
+                                    for dirpath, dirnames, filenames in os.walk(ws_skills_dir):
+                                        for fname in filenames:
+                                            abs_path = os.path.join(dirpath, fname)
+                                            rel_in_skills = os.path.relpath(abs_path, ws_skills_dir)
+                                            zip_path = os.path.join("skills", short_name, rel_in_skills)
+                                            zipf.write(abs_path, zip_path)
+
+                            # 2. Add managed skills to zip: skills/_managed/ (once)
+                            if not managed_skills_added:
+                                user_skills = resp.get("user_skills", [])
+                                for sk in user_skills:
+                                    if sk.get("source") == "managed" and sk.get("path"):
+                                        sk_path = sk["path"]
+                                        if os.path.isdir(sk_path):
+                                            for dirpath, dirnames, filenames in os.walk(sk_path):
+                                                for fname in filenames:
+                                                    abs_path = os.path.join(dirpath, fname)
+                                                    rel_in_sk = os.path.relpath(abs_path, sk_path)
+                                                    zip_path = os.path.join("skills", "_managed", sk["name"], rel_in_sk)
+                                                    zipf.write(abs_path, zip_path)
+                                managed_skills_added = True
+
+                        except Exception:
+                            continue
         
         zip_buffer.seek(0)
         
@@ -2498,6 +2557,7 @@ def upload_team_snapshot():
     
     import zipfile
     import tempfile
+    import shutil
     
     try:
         # Save uploaded file to temp location
@@ -2513,9 +2573,11 @@ def upload_team_snapshot():
                 # Skip directories and absolute paths
                 if filename.endswith('/') or filename.startswith('/'):
                     continue
-                # Only allow json and yaml files
-                if not (filename.endswith(('.json', '.yaml', '.yml'))):
-                    return jsonify({"error": f"Invalid file type in zip: {filename}"}), 400
+                # Allow files inside skills/ directory (any file type)
+                # For other files, only allow json and yaml
+                if not filename.startswith('skills/'):
+                    if not (filename.endswith(('.json', '.yaml', '.yml'))):
+                        return jsonify({"error": f"Invalid file type in zip: {filename}"}), 400
                 # Preserve relative directory structure from zip
                 target_path = os.path.join(team_dir, filename)
                 os.makedirs(os.path.dirname(target_path), exist_ok=True)
@@ -2574,6 +2636,10 @@ def upload_team_snapshot():
         openclaw_restored = 0
         openclaw_errors = []
         
+        # Paths for extracted skill folders
+        extracted_skills_dir = os.path.join(team_dir, "skills")
+        managed_skills_src = os.path.join(extracted_skills_dir, "_managed")
+
         if os.path.exists(openclaw_agents_path):
             try:
                 with open(openclaw_agents_path, "r", encoding="utf-8") as f:
@@ -2595,6 +2661,36 @@ def upload_team_snapshot():
                             result = r.json()
                             if result.get("ok"):
                                 openclaw_restored += 1
+                                # --- Restore skill folders into agent workspace ---
+                                workspace = result.get("workspace", "")
+                                if workspace:
+                                    ws_skills_target = os.path.join(os.path.expanduser(workspace), "skills")
+                                    agent_skills_src = os.path.join(extracted_skills_dir, short_name)
+
+                                    # Clear existing skills folder and rebuild
+                                    if os.path.isdir(ws_skills_target):
+                                        shutil.rmtree(ws_skills_target)
+                                    os.makedirs(ws_skills_target, exist_ok=True)
+
+                                    # Copy workspace skills from snapshot
+                                    if os.path.isdir(agent_skills_src):
+                                        for item in os.listdir(agent_skills_src):
+                                            src_item = os.path.join(agent_skills_src, item)
+                                            dst_item = os.path.join(ws_skills_target, item)
+                                            if os.path.isdir(src_item):
+                                                shutil.copytree(src_item, dst_item, dirs_exist_ok=True)
+                                            else:
+                                                shutil.copy2(src_item, dst_item)
+
+                                    # Merge managed skills into the same workspace skills folder
+                                    if os.path.isdir(managed_skills_src):
+                                        for item in os.listdir(managed_skills_src):
+                                            src_item = os.path.join(managed_skills_src, item)
+                                            dst_item = os.path.join(ws_skills_target, item)
+                                            if os.path.isdir(src_item) and not os.path.exists(dst_item):
+                                                shutil.copytree(src_item, dst_item)
+                                            elif os.path.isdir(src_item):
+                                                shutil.copytree(src_item, dst_item, dirs_exist_ok=True)
                             else:
                                 openclaw_errors.append(
                                     f"{target_name}: {result.get('errors', result.get('error', 'failed'))}"
@@ -2603,6 +2699,10 @@ def upload_team_snapshot():
                             openclaw_errors.append(f"{target_name}: {e}")
             except Exception as e:
                 openclaw_errors.append(f"Failed to read openclaw_agents.json: {e}")
+
+        # Clean up extracted skills directory from team folder (it was only temporary)
+        if os.path.isdir(extracted_skills_dir):
+            shutil.rmtree(extracted_skills_dir, ignore_errors=True)
         
         msg_parts = [f"Team '{team}' snapshot uploaded"]
         msg_parts.append(f"{len(agents_data)} internal agents restored")
