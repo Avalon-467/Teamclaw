@@ -496,6 +496,8 @@ def proxy_openclaw_agent_detail():
         )
         return jsonify(r.json()), r.status_code
     except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 502
+
 @app.route("/proxy_openclaw_skills", methods=["GET"])
 def proxy_openclaw_skills():
     """Get OpenClaw skills by combining three sources: workspace skills, managed skills, and bundled skills."""
