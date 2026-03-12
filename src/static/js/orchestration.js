@@ -970,8 +970,22 @@ async function orchShowAgentConfigModal(agentName, initialTab) {
         </div>
     `;
     document.body.appendChild(overlay);
-    overlay.querySelector('#orch-ucfg-close').addEventListener('click', () => overlay.remove());
-    overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.remove(); });
+
+    // Close handler: sync team openclaw snapshot if on team page
+    function closeConfigModal() {
+        overlay.remove();
+        // If on team page (currentGroupId exists), sync all openclaw agents
+        if (typeof currentGroupId !== 'undefined' && currentGroupId) {
+            fetch('/team_openclaw_snapshot/sync_all', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ team: currentGroupId }),
+            }).catch(e => console.warn('sync_all on close:', e));
+        }
+    }
+
+    overlay.querySelector('#orch-ucfg-close').addEventListener('click', closeConfigModal);
+    overlay.addEventListener('click', (e) => { if (e.target === overlay) closeConfigModal(); });
 
     // Tab switching
     let activeTab = initialTab || 'config';

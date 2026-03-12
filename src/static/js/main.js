@@ -4523,6 +4523,17 @@ async function deleteTeamMember(type, session, name) {
         
         alert(`成员 "${name}" 已删除`);
         loadTeamMembers(); // Reload the list
+
+        // Sync openclaw agents snapshot after deletion
+        if (type === 'openclaw') {
+            try {
+                await fetch('/team_openclaw_snapshot/sync_all', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ team: currentGroupId }),
+                });
+            } catch(e) { console.warn('Failed to sync after delete:', e); }
+        }
     } catch (e) {
         console.error('Failed to delete team member:', e);
         alert('删除失败: ' + e.message);
@@ -5311,6 +5322,16 @@ async function addOpenClawMember() {
             alert('🦞 OpenClaw Agent创建成功！');
             overlay.remove();
             loadTeamMembers();
+
+            // Sync all openclaw agents info into team's openclaw_agents.json
+            try {
+                await fetch('/team_openclaw_snapshot/sync_all', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ team: currentGroupId }),
+                });
+            } catch(e) { console.warn('Failed to sync openclaw agents snapshot:', e); }
+
             // Auto-open the full config modal (files/tools/channels) for the new agent
             setTimeout(() => orchShowAgentConfigModal(name), 500);
         } else {

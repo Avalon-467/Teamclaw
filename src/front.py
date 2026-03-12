@@ -684,6 +684,90 @@ def team_openclaw_snapshot_export():
     })
 
 
+@app.route("/team_openclaw_snapshot/sync_all", methods=["POST"])
+def team_openclaw_snapshot_sync_all():
+    """Sync ALL OpenClaw agents belonging to a team into openclaw_agents.json.
+
+    Reads all OpenClaw agents whose name starts with '{team}_', fetches each
+    agent's snapshot (config + workspace md files), strips channel info,
+    and writes everything into the team's openclaw_agents.json keyed by
+    short_name (name without team prefix).
+
+    Body: { "team": "team_name" }
+    Returns: { ok, synced: int, agents: { short_name: { config, workspace_files }, ... } }
+    """
+    user_id = session.get("user_id")
+    if not user_id:
+        return jsonify({"error": "未登录"}), 401
+
+    body = request.get_json(force=True)
+    team = body.get("team", "")
+    if not team:
+        return jsonify({"ok": False, "error": "team is required"}), 400
+
+    team_dir = os.path.join(root_dir, "data", "user_files", user_id, "teams", team)
+    if not os.path.exists(team_dir):
+        return jsonify({"ok": False, "error": "Team not found"}), 404
+
+    prefix = team + "_"
+
+    # Step 1: List all OpenClaw agents from oasis server
+    try:
+        r = requests.get(
+            f"{OASIS_BASE_URL}/sessions/openclaw",
+            params={"filter": ""},
+            timeout=15,
+        )
+        if not r.ok:
+            return jsonify({"ok": False, "error": "Failed to list OpenClaw agents"}), 502
+        all_agents = r.json().get("agents", [])
+    except Exception as e:
+        return jsonify({"ok": False, "error": f"Failed to list agents: {e}"}), 500
+
+    # Filter to agents belonging to this team
+    team_agents = [a for a in all_agents if a.get("name", "").startswith(prefix)]
+
+    if not team_agents:
+        # No agents in team — write empty snapshot
+        _team_openclaw_agents_save(user_id, team, {})
+        return jsonify({"ok": True, "synced": 0, "agents": {}})
+
+    # Step 2: Fetch snapshot for each agent
+    result = {}
+    errors = []
+    for agent in team_agents:
+        agent_name = agent.get("name", "")
+        short_name = agent_name[len(prefix):] if agent_name.startswith(prefix) else agent_name
+        try:
+            sr = requests.get(
+                f"{OASIS_BASE_URL}/sessions/openclaw/agent-snapshot",
+                params={"name": agent_name},
+                timeout=30,
+            )
+            snap = sr.json()
+            if snap.get("ok"):
+                config = snap.get("config", {})
+                # Remove channel-related keys if present (user requested no channel info)
+                config.pop("channels", None)
+                config.pop("bindings", None)
+                result[short_name] = {
+                    "config": config,
+                    "workspace_files": snap.get("workspace_files", {}),
+                }
+            else:
+                errors.append(f"{agent_name}: {snap.get('error', 'unknown')}")
+        except Exception as e:
+            errors.append(f"{agent_name}: {e}")
+
+    # Step 3: Write to openclaw_agents.json
+    _team_openclaw_agents_save(user_id, team, result)
+
+    resp = {"ok": True, "synced": len(result), "agents": result}
+    if errors:
+        resp["warnings"] = errors
+    return jsonify(resp)
+
+
 @app.route("/team_openclaw_snapshot/restore", methods=["POST"])
 def team_openclaw_snapshot_restore():
     """Restore an OpenClaw agent from the team snapshot.
