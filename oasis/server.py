@@ -187,17 +187,24 @@ async def create_topic(req: CreateTopicRequest):
     discussions[topic_id] = forum
     forum.save()
 
-    engine = DiscussionEngine(
-        forum=forum,
-        schedule_yaml=req.schedule_yaml,
-        schedule_file=req.schedule_file,
-        bot_enabled_tools=req.bot_enabled_tools,
-        bot_timeout=req.bot_timeout,
-        user_id=req.user_id,
-        early_stop=req.early_stop,
-        discussion=req.discussion,
-        team=req.team or "",
-    )
+    try:
+        engine = DiscussionEngine(
+            forum=forum,
+            schedule_yaml=req.schedule_yaml,
+            schedule_file=req.schedule_file,
+            bot_enabled_tools=req.bot_enabled_tools,
+            bot_timeout=req.bot_timeout,
+            user_id=req.user_id,
+            early_stop=req.early_stop,
+            discussion=req.discussion,
+            team=req.team or "",
+        )
+    except Exception as e:
+        forum.status = "error"
+        forum.conclusion = f"引擎初始化失败: {str(e)}"
+        forum.save()
+        raise HTTPException(500, f"Engine init failed: {e}")
+
     engine.callback_url = req.callback_url
     engine.callback_session_id = req.callback_session_id
     engines[topic_id] = engine

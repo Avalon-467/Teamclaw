@@ -80,25 +80,64 @@ _PROJECT_ROOT = os.path.dirname(os.path.dirname(__file__))
 def _load_internal_agents(user_id: str, team: str = "") -> list[dict]:
     """Load the internal-agent JSON list for a user.
 
+    Reads two files and merges them:
+      - oasis_agents.json: {"agents": [{"name": ..., "tag": ...}]}
+      - oasis_sessions.json: {"agent_name": "session_id", ...}
+
     If team is specified, load from the team-scoped path:
-      data/user_files/{user_id}/teams/{team}/oasis_agents.json
+      data/user_files/{user_id}/teams/{team}/oasis_*.json
     Otherwise load from:
-      data/user_files/internalagent/oasis_agents.json
+      data/user_files/internalagent/oasis_*.json
 
     Returns list of {"session": "<id>", "meta": {"name": ..., "tag": ...}} entries.
     Returns [] if file missing or unreadable.
     """
     if team:
-        p = os.path.join(_PROJECT_ROOT, "data", "user_files", user_id, "teams", team, "oasis_agents.json")
+        base_dir = os.path.join(_PROJECT_ROOT, "data", "user_files", user_id, "teams", team)
     else:
-        p = os.path.join(_INTERNAL_AGENT_DIR, "oasis_agents.json")
-    if not os.path.isfile(p):
-        return []
-    try:
-        with open(p, "r", encoding="utf-8") as f:
-            return json.load(f)
-    except Exception:
-        return []
+        base_dir = _INTERNAL_AGENT_DIR
+
+    agents_path = os.path.join(base_dir, "oasis_agents.json")
+    sessions_path = os.path.join(base_dir, "oasis_sessions.json")
+
+    # Load agent metadata from oasis_agents.json
+    agents_list: list[dict] = []
+    if os.path.isfile(agents_path):
+        try:
+            with open(agents_path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            if isinstance(data, dict) and "agents" in data and isinstance(data["agents"], list):
+                agents_list = data["agents"]
+            elif isinstance(data, list):
+                agents_list = data
+        except Exception:
+            pass
+
+    # Build name -> meta mapping
+    name_to_meta: dict[str, dict] = {}
+    for a in agents_list:
+        if isinstance(a, dict) and "name" in a:
+            name_to_meta[a["name"]] = a
+
+    # Load name -> session_id mapping from oasis_sessions.json
+    name_to_session: dict[str, str] = {}
+    if os.path.isfile(sessions_path):
+        try:
+            with open(sessions_path, "r", encoding="utf-8") as f:
+                name_to_session = json.load(f)
+        except Exception:
+            pass
+
+    # Merge: build [{"session": "sid", "meta": {"name": ..., "tag": ...}}, ...]
+    result: list[dict] = []
+    for name, sid in name_to_session.items():
+        meta = name_to_meta.get(name, {})
+        if "name" not in meta:
+            meta = dict(meta)
+            meta["name"] = name
+        result.append({"session": sid, "meta": meta})
+
+    return result
 
 
 def _resolve_session_by_name(agents: list[dict], name: str) -> str | None:
