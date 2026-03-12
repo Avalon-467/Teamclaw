@@ -1313,11 +1313,11 @@ async def list_openclaw_skills(name: str = Query("", description="Agent name to 
                         "missing": bundled_skill.get("missing", {})
                     })
 
-        # --- Filter by agent skill config ---
-        if agent_skills_cfg is not None:
-            # Agent has an explicit allowlist — keep only listed skills
-            allowed = set(agent_skills_cfg)
-            skills = [s for s in skills if s["name"] in allowed]
+        # NOTE: Do NOT filter skills by agent allowlist here.
+        # The frontend config UI needs the full list to render checkboxes
+        # (so users can toggle skills on/off). The frontend uses agent.skills
+        # + agent.skills_all from the agent-detail endpoint to determine
+        # which checkboxes are checked.
 
         # Sort by name
         skills.sort(key=lambda x: x["name"])
