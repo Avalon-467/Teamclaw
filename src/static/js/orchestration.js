@@ -71,6 +71,7 @@ function orchTeamSelectChanged() {
     orch.teamName = val || '';
     orch.teamEnabled = !!orch.teamName;
     orchShowTeamButtons(!!orch.teamName);
+    orchLoadExperts();
     orchLoadSessionAgents();
     orchLoadOpenClawSessions();
 }
@@ -110,6 +111,7 @@ async function orchCreateTeamByName(teamName) {
             const sel = document.getElementById('orch-team-select');
             sel.value = teamName;
             orchShowTeamButtons(true);
+            orchLoadExperts();
             orchLoadSessionAgents();
             orchLoadOpenClawSessions();
         } else {
@@ -133,6 +135,7 @@ async function orchDeleteTeam() {
             sel.value = '';
             orch.teamName = '';
             orchShowTeamButtons(false);
+            orchLoadExperts();
             orchLoadSessionAgents();
             orchLoadOpenClawSessions();
         } else {
