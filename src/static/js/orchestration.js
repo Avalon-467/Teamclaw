@@ -466,7 +466,8 @@ function _orchCreateExpertCard(exp, isCustom) {
             ev.stopPropagation();
             if (!confirm(t('orch_confirm_del_expert', {name: exp.name}))) return;
             try {
-                await fetch('/proxy_visual/experts/custom/' + encodeURIComponent(exp.tag), { method: 'DELETE' });
+                const _delTeamQ = orch.teamName ? '?team=' + encodeURIComponent(orch.teamName) : '';
+                await fetch('/proxy_visual/experts/custom/' + encodeURIComponent(exp.tag) + _delTeamQ, { method: 'DELETE' });
                 orchToast(t('orch_toast_expert_deleted', {name: exp.name}));
                 orchLoadExperts();
             } catch(e) { orchToast(t('orch_toast_expert_del_fail')); }
@@ -508,10 +509,10 @@ function orchShowAddInternalAgentModal() {
                     <input id="orch-ia-name" type="text" placeholder="my_agent" style="width:100%;padding:6px 8px;border:1px solid #d1d5db;border-radius:6px;font-size:12px;margin-top:2px;">
                 </label>
                 <label style="font-size:11px;font-weight:600;color:#374151;">${t('orch_ia_tag')}
-                    <select id="orch-ia-tag" style="width:100%;padding:6px 8px;border:1px solid #d1d5db;border-radius:6px;font-size:12px;margin-top:2px;background:white;">
-                        <option value="">${t('orch_ia_tag_placeholder')}</option>
-                        ${[...new Set(orch.experts.map(e => e.tag).filter(Boolean))].map(tag => `<option value="${escapeHtml(tag)}">${escapeHtml(tag)}</option>`).join('')}
-                    </select>
+                    <input id="orch-ia-tag" type="text" list="orch-ia-tag-list" placeholder="${t('orch_ia_tag_placeholder')}" style="width:100%;padding:6px 8px;border:1px solid #d1d5db;border-radius:6px;font-size:12px;margin-top:2px;">
+                    <datalist id="orch-ia-tag-list">
+                        ${[...new Set(orch.experts.map(e => e.tag).filter(Boolean))].map(tag => `<option value="${escapeHtml(tag)}"></option>`).join('')}
+                    </datalist>
                 </label>
                 <div id="orch-ia-drop-zone" style="border:2px dashed #d1d5db;border-radius:8px;padding:12px;text-align:center;font-size:11px;color:#9ca3af;cursor:default;transition:all .15s;">
                     📦 ${t('orch_ia_tag_placeholder')}
@@ -829,10 +830,10 @@ function orchShowAddExpertModal() {
             <div style="display:flex;flex-direction:column;gap:8px;margin:10px 0;">
                 <label style="font-size:11px;font-weight:600;color:#374151;">${t('orch_label_name')} <input id="orch-ce-name" type="text" placeholder="${t('orch_ph_name')}" style="width:100%;padding:6px 8px;border:1px solid #d1d5db;border-radius:6px;font-size:12px;margin-top:2px;"></label>
                 <label style="font-size:11px;font-weight:600;color:#374151;">${t('orch_label_tag')}
-                    <select id="orch-ce-tag" style="width:100%;padding:6px 8px;border:1px solid #d1d5db;border-radius:6px;font-size:12px;margin-top:2px;background:white;">
-                        <option value="">${t('orch_ph_tag')}</option>
-                        ${[...new Set(orch.experts.map(e => e.tag).filter(Boolean))].map(tag => `<option value="${escapeHtml(tag)}">${escapeHtml(tag)}</option>`).join('')}
-                    </select>
+                    <input id="orch-ce-tag" type="text" list="orch-ce-tag-list" placeholder="${t('orch_ph_tag')}" style="width:100%;padding:6px 8px;border:1px solid #d1d5db;border-radius:6px;font-size:12px;margin-top:2px;">
+                    <datalist id="orch-ce-tag-list">
+                        ${[...new Set(orch.experts.map(e => e.tag).filter(Boolean))].map(tag => `<option value="${escapeHtml(tag)}"></option>`).join('')}
+                    </datalist>
                 </label>
                 <label style="font-size:11px;font-weight:600;color:#374151;">${t('orch_label_temp')} <input id="orch-ce-temp" type="number" value="0.7" min="0" max="2" step="0.1" style="width:80px;padding:6px 8px;border:1px solid #d1d5db;border-radius:6px;font-size:12px;margin-top:2px;"></label>
                 <label style="font-size:11px;font-weight:600;color:#374151;">${t('orch_label_persona')}
@@ -855,7 +856,8 @@ function orchShowAddExpertModal() {
         const persona = document.getElementById('orch-ce-persona').value.trim();
         if (!name || !tag || !persona) { orchToast(t('orch_toast_fill_info')); return; }
         try {
-            const r = await fetch('/proxy_visual/experts/custom', {
+            const teamName = orch.teamName || '';
+            const r = await fetch('/proxy_visual/experts/custom' + (teamName ? '?team=' + encodeURIComponent(teamName) : ''), {
                 method: 'POST', headers: {'Content-Type':'application/json'},
                 body: JSON.stringify({name, tag, temperature, persona}),
             });
@@ -3020,6 +3022,8 @@ async function orchDoGenerateAgentYaml() {
     const data = orchGetLayoutData();
     // Attach the user-selected target session_id
     data.target_session_id = orchTargetSessionId || null;
+    // Attach team for team-scoped workflow saving
+    data.team = orch.teamName || '';
 
     const statusEl = document.getElementById('orch-agent-status');
     const promptEl = document.getElementById('orch-prompt-content');
@@ -3173,6 +3177,7 @@ async function orchSaveLayout() {
     if (!name) return;
     const data = orchGetLayoutData();
     data.name = name;
+    data.team = orch.teamName || '';
     try {
         await fetch('/proxy_visual/save-layout', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(data) });
         orchToast(t('orch_toast_saved', {name}));
@@ -3181,7 +3186,7 @@ async function orchSaveLayout() {
 
 async function orchLoadLayout() {
     try {
-        const r = await fetch('/proxy_visual/load-layouts');
+        const r = await fetch('/proxy_visual/load-layouts' + _orchTeamQuery());
         const layouts = await r.json();
         if (!layouts.length) { orchToast(t('orch_toast_no_layouts')); return; }
 
@@ -3225,7 +3230,7 @@ async function orchLoadLayout() {
         overlay.querySelector('#orch-layout-del-btn').addEventListener('click', async () => {
             if (!selectedName || !confirm(t('orch_confirm_del_layout', {name: selectedName}))) return;
             try {
-                await fetch('/proxy_visual/delete-layout/' + encodeURIComponent(selectedName), { method: 'DELETE' });
+                await fetch('/proxy_visual/delete-layout/' + encodeURIComponent(selectedName) + _orchTeamQuery(), { method: 'DELETE' });
                 orchToast(t('orch_toast_deleted', {name: selectedName}));
                 overlay.remove();
                 orchLoadLayout();
@@ -3242,7 +3247,7 @@ async function orchLoadLayout() {
 
 async function orchDoLoadLayout(name) {
     try {
-        const r2 = await fetch('/proxy_visual/load-layout/' + encodeURIComponent(name));
+        const r2 = await fetch('/proxy_visual/load-layout/' + encodeURIComponent(name) + _orchTeamQuery());
         const data = await r2.json();
         if (data.error) { orchToast(data.error); return; }
         orchClearCanvas();
@@ -3372,7 +3377,7 @@ async function orchImportYamlFile(file) {
         const r = await fetch('/proxy_visual/upload-yaml', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ filename: fname, content: text }),
+            body: JSON.stringify({ filename: fname, content: text, team: orch.teamName || '' }),
         });
         const res = await r.json();
         if (res.error) { orchToast(t('orch_toast_yaml_upload_fail') + ': ' + res.error); return; }

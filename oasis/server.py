@@ -566,11 +566,19 @@ class WorkflowSaveRequest(BaseModel):
     schedule_yaml: str
     description: str = ""
     save_layout: bool = False  # deprecated, layout is now generated on-the-fly from YAML
+    team: str = ""  # Team name for scoped workflow storage
+
+
+def _workflow_yaml_dir(user_id: str, team: str = "") -> str:
+    """Return the YAML workflow directory path (team-scoped when team is provided)."""
+    if team:
+        return os.path.join(_project_root, "data", "user_files", user_id, "teams", team, "oasis", "yaml")
+    return os.path.join(_project_root, "data", "user_files", user_id, "oasis", "yaml")
 
 
 @app.post("/workflows")
 async def save_workflow(req: WorkflowSaveRequest):
-    """Save a YAML workflow under data/user_files/{user}/oasis/yaml/."""
+    """Save a YAML workflow under data/user_files/{user}/[teams/{team}/]oasis/yaml/."""
     user = req.user_id
     name = req.name
     if not name.endswith((".yaml", ".yml")):
@@ -584,7 +592,7 @@ async def save_workflow(req: WorkflowSaveRequest):
     except Exception as e:
         raise HTTPException(400, f"YAML 解析失败: {e}")
 
-    yaml_dir = os.path.join(_project_root, "data", "user_files", user, "oasis", "yaml")
+    yaml_dir = _workflow_yaml_dir(user, req.team)
     os.makedirs(yaml_dir, exist_ok=True)
     filepath = os.path.join(yaml_dir, name)
     content = (f"# {req.description}\n" if req.description else "") + req.schedule_yaml
@@ -598,8 +606,8 @@ async def save_workflow(req: WorkflowSaveRequest):
 
 
 @app.get("/workflows")
-async def list_workflows(user_id: str = Query(...)):
-    yaml_dir = os.path.join(_project_root, "data", "user_files", user_id, "oasis", "yaml")
+async def list_workflows(user_id: str = Query(...), team: str = Query("")):
+    yaml_dir = _workflow_yaml_dir(user_id, team)
     if not os.path.isdir(yaml_dir):
         return {"workflows": []}
     files = sorted(f for f in os.listdir(yaml_dir) if f.endswith((".yaml", ".yml")))
@@ -622,6 +630,7 @@ class LayoutFromYamlRequest(BaseModel):
     user_id: str
     yaml_source: str
     layout_name: str = ""
+    team: str = ""  # Team name for scoped workflow lookup
 
 
 @app.post("/layouts/from-yaml")
@@ -632,7 +641,7 @@ async def layouts_from_yaml(req: LayoutFromYamlRequest):
     yaml_content = ""
     source_name = ""
     if "\n" not in yaml_src and yaml_src.strip().endswith(('.yaml', '.yml')):
-        yaml_dir = os.path.join(_project_root, "data", "user_files", user, "oasis", "yaml")
+        yaml_dir = _workflow_yaml_dir(user, req.team)
         fpath = os.path.join(yaml_dir, yaml_src.strip())
         if not os.path.isfile(fpath):
             raise HTTPException(404, f"YAML 文件不存在: {yaml_src}")
@@ -662,13 +671,17 @@ class UserExpertRequest(BaseModel):
     tag: str = ""
     persona: str = ""
     temperature: float = 0.7
+    team: str = ""  # Team name for scoped expert storage
 
 
 @app.post("/experts/user")
 async def add_user_expert_route(req: UserExpertRequest):
-    from oasis.experts import add_user_expert
+    from oasis.experts import add_user_expert, add_team_expert
     try:
-        expert = add_user_expert(req.user_id, req.model_dump())
+        if req.team:
+            expert = add_team_expert(req.user_id, req.team, req.model_dump())
+        else:
+            expert = add_user_expert(req.user_id, req.model_dump())
         return {"status": "ok", "expert": expert}
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -676,19 +689,25 @@ async def add_user_expert_route(req: UserExpertRequest):
 
 @app.put("/experts/user/{tag}")
 async def update_user_expert_route(tag: str, req: UserExpertRequest):
-    from oasis.experts import update_user_expert
+    from oasis.experts import update_user_expert, update_team_expert
     try:
-        expert = update_user_expert(req.user_id, tag, req.model_dump())
+        if req.team:
+            expert = update_team_expert(req.user_id, req.team, tag, req.model_dump())
+        else:
+            expert = update_user_expert(req.user_id, tag, req.model_dump())
         return {"status": "ok", "expert": expert}
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
 
 @app.delete("/experts/user/{tag}")
-async def delete_user_expert_route(tag: str, user_id: str = Query(...)):
-    from oasis.experts import delete_user_expert
+async def delete_user_expert_route(tag: str, user_id: str = Query(...), team: str = Query("")):
+    from oasis.experts import delete_user_expert, delete_team_expert
     try:
-        deleted = delete_user_expert(user_id, tag)
+        if team:
+            deleted = delete_team_expert(user_id, team, tag)
+        else:
+            deleted = delete_user_expert(user_id, tag)
         return {"status": "ok", "deleted": deleted}
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))

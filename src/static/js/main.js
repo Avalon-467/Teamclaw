@@ -3043,19 +3043,40 @@ function removeWorkflow(idx) {
 
 async function showWorkflowPopup() {
     try {
-        const r = await fetch('/proxy_visual/load-layouts', {
-            headers: { 'Authorization': 'Bearer ' + getAuthToken() }
-        });
-        const layouts = await r.json();
-        if (!layouts.length) { alert(t('wf_no_workflows')); return; }
+        // Load team list and global workflows in parallel
+        const [teamsResp, globalResp] = await Promise.all([
+            fetch('/teams', { headers: { 'Authorization': 'Bearer ' + getAuthToken() } }),
+            fetch('/proxy_visual/load-layouts', { headers: { 'Authorization': 'Bearer ' + getAuthToken() } }),
+        ]);
+        const teamsData = await teamsResp.json();
+        const globalLayouts = await globalResp.json();
+        const teams = teamsData.teams || [];
+
+        // Load team workflows in parallel
+        const teamResults = await Promise.all(teams.map(async (teamName) => {
+            try {
+                const r = await fetch('/proxy_visual/load-layouts?team=' + encodeURIComponent(teamName), {
+                    headers: { 'Authorization': 'Bearer ' + getAuthToken() }
+                });
+                const layouts = await r.json();
+                return { team: teamName, layouts: layouts || [] };
+            } catch { return { team: teamName, layouts: [] }; }
+        }));
+
+        // Build grouped data: [{group, team, layouts}]
+        const groups = [];
+        if (globalLayouts.length) groups.push({ group: '(公共)', team: '', layouts: globalLayouts });
+        teamResults.forEach(tr => { if (tr.layouts.length) groups.push({ group: tr.team, team: tr.team, layouts: tr.layouts }); });
+
+        if (!groups.length) { alert(t('wf_no_workflows')); return; }
 
         const overlay = document.createElement('div');
         overlay.className = 'orch-modal-overlay';
         overlay.id = 'wf-popup-overlay';
         overlay.innerHTML = `
-            <div class="orch-modal" style="min-width:320px;max-width:420px;">
+            <div class="orch-modal" style="min-width:360px;max-width:460px;">
                 <h3>${t('wf_popup_title')}</h3>
-                <div id="wf-select-list" style="max-height:300px;overflow-y:auto;"></div>
+                <div id="wf-select-list" style="max-height:360px;overflow-y:auto;"></div>
                 <div class="orch-modal-btns">
                     <button id="wf-cancel-btn" style="padding:6px 14px;border-radius:6px;border:1px solid #d1d5db;background:white;color:#374151;cursor:pointer;font-size:12px;">${t('wf_cancel')}</button>
                     <button id="wf-confirm-btn" disabled style="padding:6px 14px;border-radius:6px;border:none;background:#7c3aed;color:white;cursor:pointer;font-size:12px;opacity:0.5;">${t('wf_confirm')}</button>
@@ -3065,38 +3086,50 @@ async function showWorkflowPopup() {
         document.body.appendChild(overlay);
 
         let selectedName = null;
+        let selectedTeam = '';
         overlay.querySelector('#wf-cancel-btn').addEventListener('click', () => overlay.remove());
         overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.remove(); });
 
         const listEl = overlay.querySelector('#wf-select-list');
-        for (const name of layouts) {
-            const item = document.createElement('div');
-            item.className = 'orch-session-item';
-            item.style.cssText = 'padding:10px 12px;border-radius:8px;cursor:pointer;border:1px solid transparent;margin-bottom:4px;display:flex;align-items:center;gap:8px;transition:all 0.15s;';
-            item.innerHTML = `<span style="font-size:16px;">📋</span><span style="flex:1;font-size:13px;color:#374151;">${escapeHtml(name)}</span>`;
-            item.addEventListener('click', () => {
-                listEl.querySelectorAll('.orch-session-item').forEach(el => {
-                    el.style.background = '';
-                    el.style.borderColor = 'transparent';
+        for (const grp of groups) {
+            // Group header
+            const header = document.createElement('div');
+            header.style.cssText = 'padding:6px 8px;font-size:12px;font-weight:600;color:#6b7280;border-bottom:1px solid #e5e7eb;margin-top:6px;display:flex;align-items:center;gap:4px;';
+            header.innerHTML = `<span style="font-size:14px;">${grp.team ? '👥' : '🌐'}</span>${escapeHtml(grp.group)}`;
+            listEl.appendChild(header);
+
+            for (const name of grp.layouts) {
+                const item = document.createElement('div');
+                item.className = 'orch-session-item';
+                item.style.cssText = 'padding:8px 12px 8px 24px;border-radius:8px;cursor:pointer;border:1px solid transparent;margin-bottom:2px;display:flex;align-items:center;gap:8px;transition:all 0.15s;';
+                item.innerHTML = `<span style="font-size:14px;">📋</span><span style="flex:1;font-size:13px;color:#374151;">${escapeHtml(name)}</span>`;
+                const teamVal = grp.team;
+                item.addEventListener('click', () => {
+                    listEl.querySelectorAll('.orch-session-item').forEach(el => {
+                        el.style.background = '';
+                        el.style.borderColor = 'transparent';
+                    });
+                    item.style.background = '#f5f3ff';
+                    item.style.borderColor = '#c4b5fd';
+                    selectedName = name;
+                    selectedTeam = teamVal;
+                    const btn = overlay.querySelector('#wf-confirm-btn');
+                    btn.disabled = false;
+                    btn.style.opacity = '1';
                 });
-                item.style.background = '#f5f3ff';
-                item.style.borderColor = '#c4b5fd';
-                selectedName = name;
-                const btn = overlay.querySelector('#wf-confirm-btn');
-                btn.disabled = false;
-                btn.style.opacity = '1';
-            });
-            item.addEventListener('dblclick', async () => {
-                selectedName = name;
-                await addWorkflowToContext(selectedName);
-                overlay.remove();
-            });
-            listEl.appendChild(item);
+                item.addEventListener('dblclick', async () => {
+                    selectedName = name;
+                    selectedTeam = teamVal;
+                    await addWorkflowToContext(selectedName, selectedTeam);
+                    overlay.remove();
+                });
+                listEl.appendChild(item);
+            }
         }
 
         overlay.querySelector('#wf-confirm-btn').addEventListener('click', async () => {
             if (selectedName) {
-                await addWorkflowToContext(selectedName);
+                await addWorkflowToContext(selectedName, selectedTeam);
                 overlay.remove();
             }
         });
@@ -3105,14 +3138,17 @@ async function showWorkflowPopup() {
     }
 }
 
-async function addWorkflowToContext(name) {
+async function addWorkflowToContext(name, team) {
+    team = team || '';
+    const displayName = team ? `${team}/${name}` : name;
     // Avoid duplicate
-    if (pendingWorkflows.some(w => w.name === name)) return;
+    if (pendingWorkflows.some(w => w.name === displayName)) return;
 
-    // Load raw YAML content for this workflow
+    // Load raw YAML content for this workflow (team-scoped)
     let yamlText = '';
     try {
-        const r = await fetch(`/proxy_visual/load-yaml-raw/${encodeURIComponent(name)}`, {
+        const teamQ = team ? '?team=' + encodeURIComponent(team) : '';
+        const r = await fetch(`/proxy_visual/load-yaml-raw/${encodeURIComponent(name)}${teamQ}`, {
             headers: { 'Authorization': 'Bearer ' + getAuthToken() }
         });
         const data = await r.json();
@@ -3121,7 +3157,7 @@ async function addWorkflowToContext(name) {
         console.warn('Failed to load workflow YAML:', e);
     }
 
-    pendingWorkflows.push({ name, yaml: yamlText });
+    pendingWorkflows.push({ name: displayName, yaml: yamlText });
     renderWorkflowPreviews();
     inputField.focus();
 }

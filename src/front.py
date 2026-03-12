@@ -1310,6 +1310,13 @@ except Exception:
     _vis_yaml_to_layout = None
 
 
+def _yaml_dir(user_id: str, team: str = "") -> str:
+    """Return the YAML workflow directory path for a user (team-scoped when team is provided)."""
+    if team:
+        return os.path.join(root_dir, "data", "user_files", user_id, "teams", team, "oasis", "yaml")
+    return os.path.join(root_dir, "data", "user_files", user_id, "oasis", "yaml")
+
+
 @app.route("/proxy_visual/experts", methods=["GET"])
 def proxy_visual_experts():
     """Return available expert pool for orchestration canvas (public + user custom + team)."""
@@ -1355,17 +1362,18 @@ def proxy_visual_experts():
 
 @app.route("/proxy_visual/experts/custom", methods=["POST"])
 def proxy_visual_add_custom_expert():
-    """Add a custom expert via OASIS server."""
+    """Add a custom expert via OASIS server (team-scoped when team param provided)."""
     user_id = session.get("user_id")
     if not user_id:
         return jsonify({"error": "未登录"}), 401
     data = request.get_json()
     if not data:
         return jsonify({"error": "No data"}), 400
+    team = request.args.get("team", "") or data.get("team", "")
     try:
         r = requests.post(
             f"{OASIS_BASE_URL}/experts/user",
-            json={"user_id": user_id, **data},
+            json={"user_id": user_id, "team": team, **data},
             timeout=10,
         )
         return jsonify(r.json()), r.status_code
@@ -1375,14 +1383,18 @@ def proxy_visual_add_custom_expert():
 
 @app.route("/proxy_visual/experts/custom/<tag>", methods=["DELETE"])
 def proxy_visual_delete_custom_expert(tag):
-    """Delete a custom expert via OASIS server."""
+    """Delete a custom expert via OASIS server (team-scoped when team param provided)."""
     user_id = session.get("user_id")
     if not user_id:
         return jsonify({"error": "未登录"}), 401
+    team = request.args.get("team", "")
     try:
+        params = {"user_id": user_id}
+        if team:
+            params["team"] = team
         r = requests.delete(
             f"{OASIS_BASE_URL}/experts/user/{tag}",
-            params={"user_id": user_id},
+            params=params,
             timeout=10,
         )
         return jsonify(r.json()), r.status_code
@@ -1451,17 +1463,18 @@ def proxy_visual_agent_generate_yaml():
         agent_yaml = _vis_extract_yaml(agent_reply) if _vis_extract_yaml else agent_reply
         validation = _vis_validate_yaml(agent_yaml) if _vis_validate_yaml else {"valid": False, "error": "validator unavailable"}
 
-        # Auto-save valid YAML to user's oasis/yaml directory
+        # Auto-save valid YAML to user's oasis/yaml directory (team-scoped)
         saved_path = None
         if validation.get("valid"):
             try:
                 import time as _time
-                yaml_dir = os.path.join(root_dir, "data", "user_files", user_id, "oasis", "yaml")
-                os.makedirs(yaml_dir, exist_ok=True)
+                team = data.get("team", "")
+                yd = _yaml_dir(user_id, team)
+                os.makedirs(yd, exist_ok=True)
                 fname = data.get("save_name") or f"orch_{_time.strftime('%Y%m%d_%H%M%S')}"
                 if not fname.endswith((".yaml", ".yml")):
                     fname += ".yaml"
-                fpath = os.path.join(yaml_dir, fname)
+                fpath = os.path.join(yd, fname)
                 with open(fpath, "w", encoding="utf-8") as _yf:
                     _yf.write(f"# Auto-generated from visual orchestrator\n{agent_yaml}")
                 saved_path = fname
@@ -1497,9 +1510,10 @@ def proxy_visual_save_layout():
         yaml_out = _vis_layout_to_yaml(data)
     except Exception as e:
         return jsonify({"error": f"YAML conversion failed: {e}"}), 500
-    yaml_dir = os.path.join(root_dir, "data", "user_files", user_id, "oasis", "yaml")
-    os.makedirs(yaml_dir, exist_ok=True)
-    fpath = os.path.join(yaml_dir, f"{safe}.yaml")
+    team = data.get("team", "")
+    yd = _yaml_dir(user_id, team)
+    os.makedirs(yd, exist_ok=True)
+    fpath = os.path.join(yd, f"{safe}.yaml")
     with open(fpath, "w", encoding="utf-8") as f:
         f.write(f"# Saved from visual orchestrator\n{yaml_out}")
     return jsonify({"saved": True})
@@ -1507,14 +1521,15 @@ def proxy_visual_save_layout():
 
 @app.route("/proxy_visual/load-layouts", methods=["GET"])
 def proxy_visual_load_layouts():
-    """List saved YAML workflows as available layouts."""
+    """List saved YAML workflows as available layouts (team-scoped)."""
     user_id = session.get("user_id")
     if not user_id:
         return jsonify([])
-    yaml_dir = os.path.join(root_dir, "data", "user_files", user_id, "oasis", "yaml")
-    if not os.path.isdir(yaml_dir):
+    team = request.args.get("team", "")
+    yd = _yaml_dir(user_id, team)
+    if not os.path.isdir(yd):
         return jsonify([])
-    return jsonify([f.replace('.yaml', '').replace('.yml', '') for f in sorted(os.listdir(yaml_dir)) if f.endswith((".yaml", ".yml"))])
+    return jsonify([f.replace('.yaml', '').replace('.yml', '') for f in sorted(os.listdir(yd)) if f.endswith((".yaml", ".yml"))])
 
 
 @app.route("/proxy_visual/load-layout/<name>", methods=["GET"])
@@ -1526,11 +1541,12 @@ def proxy_visual_load_layout(name):
     if not _vis_yaml_to_layout:
         return jsonify({"error": "YAML-to-layout converter unavailable"}), 500
     safe = "".join(c for c in name if c.isalnum() or c in "-_ ").strip()
-    yaml_dir = os.path.join(root_dir, "data", "user_files", user_id, "oasis", "yaml")
+    team = request.args.get("team", "")
+    yd = _yaml_dir(user_id, team)
     # Try .yaml then .yml
-    fpath = os.path.join(yaml_dir, f"{safe}.yaml")
+    fpath = os.path.join(yd, f"{safe}.yaml")
     if not os.path.isfile(fpath):
-        fpath = os.path.join(yaml_dir, f"{safe}.yml")
+        fpath = os.path.join(yd, f"{safe}.yml")
     if not os.path.isfile(fpath):
         return jsonify({"error": "Not found"}), 404
     with open(fpath, "r", encoding="utf-8") as f:
@@ -1550,10 +1566,11 @@ def proxy_visual_load_yaml_raw(name):
     if not user_id:
         return jsonify({"error": "Not logged in"}), 401
     safe = "".join(c for c in name if c.isalnum() or c in "-_ ").strip()
-    yaml_dir = os.path.join(root_dir, "data", "user_files", user_id, "oasis", "yaml")
-    fpath = os.path.join(yaml_dir, f"{safe}.yaml")
+    team = request.args.get("team", "")
+    yd = _yaml_dir(user_id, team)
+    fpath = os.path.join(yd, f"{safe}.yaml")
     if not os.path.isfile(fpath):
-        fpath = os.path.join(yaml_dir, f"{safe}.yml")
+        fpath = os.path.join(yd, f"{safe}.yml")
     if not os.path.isfile(fpath):
         return jsonify({"error": "Not found"}), 404
     with open(fpath, "r", encoding="utf-8") as f:
@@ -1567,10 +1584,11 @@ def proxy_visual_delete_layout(name):
     if not user_id:
         return jsonify({"error": "Not logged in"}), 401
     safe = "".join(c for c in name if c.isalnum() or c in "-_ ").strip()
-    yaml_dir = os.path.join(root_dir, "data", "user_files", user_id, "oasis", "yaml")
-    fpath = os.path.join(yaml_dir, f"{safe}.yaml")
+    team = request.args.get("team", "")
+    yd = _yaml_dir(user_id, team)
+    fpath = os.path.join(yd, f"{safe}.yaml")
     if not os.path.isfile(fpath):
-        fpath = os.path.join(yaml_dir, f"{safe}.yml")
+        fpath = os.path.join(yd, f"{safe}.yml")
     if os.path.isfile(fpath):
         os.remove(fpath)
         return jsonify({"deleted": True})
@@ -1596,11 +1614,12 @@ def proxy_visual_upload_yaml():
     except Exception as e:
         return jsonify({"error": f"Invalid YAML: {e}"}), 400
 
-    # Save the file
+    # Save the file (team-scoped)
     safe = "".join(c for c in os.path.splitext(filename)[0] if c.isalnum() or c in "-_ ").strip() or "upload"
-    yaml_dir = os.path.join(root_dir, "data", "user_files", user_id, "oasis", "yaml")
-    os.makedirs(yaml_dir, exist_ok=True)
-    fpath = os.path.join(yaml_dir, f"{safe}.yaml")
+    team = data.get("team", "")
+    yd = _yaml_dir(user_id, team)
+    os.makedirs(yd, exist_ok=True)
+    fpath = os.path.join(yd, f"{safe}.yaml")
     with open(fpath, "w", encoding="utf-8") as f:
         f.write(content)
 

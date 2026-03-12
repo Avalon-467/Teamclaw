@@ -457,10 +457,16 @@ async def post_to_oasis(
                 if not schedule_file.endswith((".yaml", ".yml")):
                     schedule_file += ".yaml"
                 if not os.path.isabs(schedule_file):
-                    yaml_dir = os.path.join(
-                        os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-                        "data", "user_files", effective_user, "oasis", "yaml",
-                    )
+                    _proj = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+                    if team:
+                        yaml_dir = os.path.join(
+                            _proj, "data", "user_files", effective_user,
+                            "teams", team, "oasis", "yaml",
+                        )
+                    else:
+                        yaml_dir = os.path.join(
+                            _proj, "data", "user_files", effective_user, "oasis", "yaml",
+                        )
                     schedule_file = os.path.join(yaml_dir, schedule_file)
                 body["schedule_file"] = schedule_file
                 # Do NOT send schedule_yaml when file is provided
@@ -648,11 +654,12 @@ async def set_oasis_workflow(
     schedule_yaml: str = "",
     description: str = "",
     save_layout: bool = True,
+    team: str = "",
 ) -> str:
     """
     Save a YAML workflow so it can be reused later via post_to_oasis(schedule_file="name.yaml").
 
-    Workflows are stored under data/user_files/{user}/oasis/yaml/.
+    Workflows are stored under data/user_files/{user}/oasis/yaml/ (or teams/{team}/oasis/yaml/ when team is set).
     Use list_oasis_workflows to see saved workflows.
 
     By default, also generates and saves a visual layout for the orchestrator UI.
@@ -663,6 +670,7 @@ async def set_oasis_workflow(
         schedule_yaml: The full YAML content to save
         description: Optional one-line description (saved as comment at top of file)
         save_layout: Whether to also generate and save a visual layout (default True)
+        team: Team name. When provided, workflow is saved under the team directory.
 
     Returns:
         Confirmation with the saved file path
@@ -677,6 +685,7 @@ async def set_oasis_workflow(
                 "schedule_yaml": schedule_yaml,
                 "description": description,
                 "save_layout": save_layout,
+                "team": team,
             }
             resp = await client.post(f"{OASIS_BASE_URL}/workflows", json=payload)
             if resp.status_code != 200:
@@ -698,12 +707,13 @@ async def set_oasis_workflow(
 
 
 @mcp.tool()
-async def list_oasis_workflows(username: str = "") -> str:
+async def list_oasis_workflows(username: str = "", team: str = "") -> str:
     """
     List all saved YAML workflows for the current user.
 
     Args:
         username: (auto-injected) current user identity; do NOT set manually
+        team: Team name. When provided, lists workflows from the team directory.
 
     Returns:
         List of saved workflow files with preview
@@ -711,7 +721,10 @@ async def list_oasis_workflows(username: str = "") -> str:
     effective_user = username or _FALLBACK_USER
     try:
         async with httpx.AsyncClient(timeout=30) as client:
-            resp = await client.get(f"{OASIS_BASE_URL}/workflows", params={"user_id": effective_user})
+            params = {"user_id": effective_user}
+            if team:
+                params["team"] = team
+            resp = await client.get(f"{OASIS_BASE_URL}/workflows", params=params)
             if resp.status_code != 200:
                 return f"❌ 查询失败: {resp.text}"
             data = resp.json()

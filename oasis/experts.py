@@ -226,6 +226,49 @@ def load_team_experts(user_id: str, team: str) -> list[dict]:
         return []
 
 
+def _save_team_experts(user_id: str, team: str, experts: list[dict]) -> None:
+    """Save team-specific custom experts to {user}/teams/{team}/oasis_experts.json."""
+    dir_path = os.path.join(_data_dir, "user_files", user_id, "teams", team)
+    os.makedirs(dir_path, exist_ok=True)
+    path = os.path.join(dir_path, "oasis_experts.json")
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(experts, f, ensure_ascii=False, indent=2)
+
+
+def add_team_expert(user_id: str, team: str, data: dict) -> dict:
+    """Add a custom expert under a specific team. Returns the normalized expert dict."""
+    expert = _validate_expert(data)
+    experts = load_team_experts(user_id, team)
+    if any(e["tag"] == expert["tag"] for e in experts):
+        raise ValueError(f"Team '{team}' 已有 tag=\"{expert['tag']}\" 的专家，请换一个 tag 或使用更新功能")
+    experts.append(expert)
+    _save_team_experts(user_id, team, experts)
+    return expert
+
+
+def update_team_expert(user_id: str, team: str, tag: str, data: dict) -> dict:
+    """Update an existing team expert by tag. Returns the updated dict."""
+    experts = load_team_experts(user_id, team)
+    for i, e in enumerate(experts):
+        if e["tag"] == tag:
+            updated = _validate_expert({**e, **data, "tag": tag})
+            experts[i] = updated
+            _save_team_experts(user_id, team, experts)
+            return updated
+    raise ValueError(f"未找到 Team '{team}' 自定义专家 tag=\"{tag}\"")
+
+
+def delete_team_expert(user_id: str, team: str, tag: str) -> dict:
+    """Delete a team expert by tag. Returns the deleted dict."""
+    experts = load_team_experts(user_id, team)
+    for i, e in enumerate(experts):
+        if e["tag"] == tag:
+            deleted = experts.pop(i)
+            _save_team_experts(user_id, team, experts)
+            return deleted
+    raise ValueError(f"未找到 Team '{team}' 自定义专家 tag=\"{tag}\"")
+
+
 def get_all_experts(user_id: str | None = None, team: str = "") -> list[dict]:
     """Return public experts + agency experts + user's custom experts + team experts.
 
