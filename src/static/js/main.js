@@ -5482,7 +5482,7 @@ async function loadTeamWorkflows() {
                     <td class="font-medium text-gray-800">📂 ${safeName}</td>
                     <td class="font-mono text-xs text-gray-500">${safeName}.yaml</td>
                     <td style="text-align:right;white-space:nowrap;">
-                        <button onclick="viewTeamWorkflowYaml('${safeName}')" class="text-blue-500 hover:text-blue-700 text-xs px-2 py-1 rounded hover:bg-blue-50" title="查看 YAML">👁️ 查看</button>
+<button onclick="viewTeamWorkflowYaml('${safeName}')" class="text-blue-500 hover:text-blue-700 text-xs px-2 py-1 rounded hover:bg-blue-50" title="在画布中查看">👁️ 查看</button>
                         <button onclick="deleteTeamWorkflow('${safeName}')" class="text-red-500 hover:text-red-700 text-xs px-2 py-1 rounded hover:bg-red-50" title="删除">🗑️</button>
                     </td>
                 </tr>`;
@@ -5493,29 +5493,27 @@ async function loadTeamWorkflows() {
     }
 }
 
-// ── View Team Workflow YAML ──
+// ── View Team Workflow on Canvas ──
 async function viewTeamWorkflowYaml(name) {
     if (!currentGroupId) return;
     try {
-        const resp = await fetch(`/proxy_visual/load-yaml-raw/${encodeURIComponent(name)}?team=${encodeURIComponent(currentGroupId)}`);
-        if (!resp.ok) { alert('加载失败'); return; }
-        const data = await resp.json();
-        const yamlContent = data.yaml || '(empty)';
-
-        const overlay = document.createElement('div');
-        overlay.className = 'orch-modal-overlay';
-        overlay.innerHTML = `
-            <div class="orch-modal" style="min-width:500px;max-width:700px;width:85vw;max-height:80vh;display:flex;flex-direction:column;">
-                <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
-                    <h3 style="margin:0;font-size:14px;">📄 ${escapeHtml(name)}.yaml</h3>
-                    <button id="wf-yaml-close" style="background:none;border:none;font-size:18px;cursor:pointer;padding:2px 6px;color:#6b7280;">✕</button>
-                </div>
-                <pre style="flex:1;overflow:auto;background:#f8fafc;border:1px solid #e5e7eb;border-radius:8px;padding:12px;font-size:11px;font-family:monospace;white-space:pre-wrap;word-break:break-all;margin:0;">${escapeHtml(yamlContent)}</pre>
-            </div>
-        `;
-        document.body.appendChild(overlay);
-        overlay.querySelector('#wf-yaml-close').addEventListener('click', () => overlay.remove());
-        overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.remove(); });
+        // Switch to orchestrate page
+        switchPage('orchestrate');
+        // Ensure orchestration is initialized
+        if (!window._orchInitialized) { orchInit(); window._orchInitialized = true; }
+        // Load team list and set team context
+        await orchLoadTeamList();
+        orch.teamName = currentGroupId;
+        orch.teamEnabled = true;
+        orchShowTeamButtons(true);
+        const sel = document.getElementById('orch-team-select');
+        if (sel) sel.value = currentGroupId;
+        // Refresh sidebar agents/experts for the team
+        orchLoadExperts();
+        orchLoadSessionAgents();
+        orchLoadOpenClawSessions();
+        // Load the workflow onto the canvas
+        await orchDoLoadLayout(name);
     } catch (err) {
         alert('加载失败: ' + err.message);
     }
