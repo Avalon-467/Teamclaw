@@ -1978,10 +1978,10 @@ def get_team_members(team_name):
             )
             if r.ok:
                 data = r.json()
-                openclaw_sessions = data.get("sessions", [])
-                for oc_session in openclaw_sessions:
+                openclaw_agents = data.get("agents", [])
+                for agent in openclaw_agents:
                     # Filter agents that belong to this team (name starts with team_name_)
-                    agent_name = oc_session.get("name", "")
+                    agent_name = agent.get("name", "")
                     if agent_name.startswith(f"{team_name}_"):
                         members.append({
                             "name": agent_name,
