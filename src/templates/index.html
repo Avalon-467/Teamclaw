@@ -272,7 +272,10 @@
                             <div id="team-members-overlay" class="team-members-overlay" style="display:none;">
                                 <div class="team-members-header">
                                     <h3 class="font-bold text-gray-800">👥 团队成员</h3>
-                                    <button onclick="toggleTeamMembersView()" class="text-gray-400 hover:text-gray-600 text-sm">&times;</button>
+                                    <div style="display:flex;gap:8px;align-items:center;">
+                                        <button onclick="showAddTeamMemberModal()" class="text-xs bg-blue-50 text-blue-600 hover:bg-blue-100 px-3 py-1 rounded border border-blue-200" title="添加成员">➕ 添加</button>
+                                        <button onclick="toggleTeamMembersView()" class="text-gray-400 hover:text-gray-600 text-sm">&times;</button>
+                                    </div>
                                 </div>
                                 <div class="team-members-table-container">
                                     <table class="team-members-table">
@@ -282,11 +285,12 @@
                                                 <th class="text-left">类型</th>
                                                 <th class="text-left">标签</th>
                                                 <th class="text-left">会话</th>
+                                                <th class="text-right">操作</th>
                                             </tr>
                                         </thead>
                                         <tbody id="team-members-table-body">
                                             <tr>
-                                                <td colspan="4" class="text-center text-gray-400 py-8">加载中...</td>
+                                                <td colspan="5" class="text-center text-gray-400 py-8">加载中...</td>
                                             </tr>
                                         </tbody>
                                     </table>

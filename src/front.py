@@ -1973,6 +1973,115 @@ def get_team_members(team_name):
         return jsonify({"error": str(e)}), 500
 
 
+@app.route("/teams/<team_name>/members/external", methods=["POST"])
+def add_external_member(team_name):
+    """Add an external agent to the team's openclaw_agents.json."""
+    user_id = session.get("user_id")
+    if not user_id:
+        return jsonify({"error": "未登录"}), 401
+    
+    # Validate team name
+    if "/" in team_name or "\\" in team_name or team_name.startswith("."):
+        return jsonify({"error": "Invalid team name"}), 400
+    
+    team_dir = os.path.join(root_dir, "data", "user_files", user_id, "teams", team_name)
+    
+    if not os.path.exists(team_dir):
+        return jsonify({"error": "Team not found"}), 404
+    
+    body = request.get_json(force=True)
+    name = body.get("name", "")
+    tag = body.get("tag", "")
+    session = body.get("session", "")
+    
+    if not name or not session:
+        return jsonify({"error": "name and session are required"}), 400
+    
+    try:
+        openclaw_path = os.path.join(team_dir, "openclaw_agents.json")
+        
+        # Load existing data
+        agents = []
+        if os.path.isfile(openclaw_path):
+            with open(openclaw_path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+                if isinstance(data, list):
+                    agents = data
+        
+        # Check for duplicate session
+        if any(a.get("session") == session for a in agents):
+            return jsonify({"error": "Session already exists"}), 409
+        
+        # Add new agent
+        agents.append({
+            "name": name,
+            "tag": tag,
+            "session": session
+        })
+        
+        # Save back
+        with open(openclaw_path, "w", encoding="utf-8") as f:
+            json.dump(agents, f, ensure_ascii=False, indent=2)
+        
+        return jsonify({"status": "success", "agent": {"name": name, "tag": tag, "session": session}})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/teams/<team_name>/members/external", methods=["DELETE"])
+def delete_external_member(team_name):
+    """Delete an external agent from the team's openclaw_agents.json."""
+    user_id = session.get("user_id")
+    if not user_id:
+        return jsonify({"error": "未登录"}), 401
+    
+    # Validate team name
+    if "/" in team_name or "\\" in team_name or team_name.startswith("."):
+        return jsonify({"error": "Invalid team name"}), 400
+    
+    team_dir = os.path.join(root_dir, "data", "user_files", user_id, "teams", team_name)
+    
+    if not os.path.exists(team_dir):
+        return jsonify({"error": "Team not found"}), 404
+    
+    body = request.get_json(force=True)
+    session = body.get("session", "")
+    
+    if not session:
+        return jsonify({"error": "session is required"}), 400
+    
+    try:
+        openclaw_path = os.path.join(team_dir, "openclaw_agents.json")
+        
+        # Load existing data
+        agents = []
+        if os.path.isfile(openclaw_path):
+            with open(openclaw_path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+                if isinstance(data, list):
+                    agents = data
+        
+        # Find and remove the agent
+        deleted = None
+        new_agents = []
+        for a in agents:
+            if a.get("session") == session:
+                deleted = a
+            else:
+                new_agents.append(a)
+        
+        if not deleted:
+            return jsonify({"error": "Session not found"}), 404
+        
+        # Save back
+        with open(openclaw_path, "w", encoding="utf-8") as f:
+            json.dump(new_agents, f, ensure_ascii=False, indent=2)
+        
+        return jsonify({"status": "success", "deleted": deleted})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
 @app.route("/teams/snapshot/download", methods=["POST"])
 def download_team_snapshot():
     """Download a compressed snapshot of the team's data.

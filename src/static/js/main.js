@@ -4047,7 +4047,10 @@ async function openGroup(teamName) {
         '<div id="team-members-overlay" class="team-members-overlay" style="display:none;">' +
         '<div class="team-members-header">' +
         '<h3 class="font-bold text-gray-800">👥 团队成员</h3>' +
+        '<div style="display:flex;gap:8px;align-items:center;">' +
+        '<button onclick="showAddTeamMemberModal()" class="text-gray-400 hover:text-gray-600 hover:bg-gray-100 px-2 py-1 rounded transition-colors" title="添加成员">➕</button>' +
         '<button onclick="toggleTeamMembersView()" class="text-gray-400 hover:text-gray-600 text-sm">&times;</button>' +
+        '</div>' +
         '</div>' +
         '<div class="team-members-table-container">' +
         '<table class="team-members-table">' +
@@ -4057,6 +4060,7 @@ async function openGroup(teamName) {
         '<th class="text-left">类型</th>' +
         '<th class="text-left">标签</th>' +
         '<th class="text-left">会话</th>' +
+        '<th class="text-right">操作</th>' +
         '</tr>' +
         '</thead>' +
         '<tbody id="team-members-table-body">' +
@@ -4367,12 +4371,12 @@ async function loadTeamMembers() {
     if (!currentGroupId) return;
     
     const tbody = document.getElementById('team-members-table-body');
-    tbody.innerHTML = '<tr><td colspan="4" class="text-center text-gray-400 py-8">加载中...</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="5" class="text-center text-gray-400 py-8">加载中...</td></tr>';
     
     try {
         const resp = await fetch(`/teams/${encodeURIComponent(currentGroupId)}/members`);
         if (!resp.ok) {
-            tbody.innerHTML = '<tr><td colspan="4" class="text-center text-red-400 py-8">加载失败</td></tr>';
+            tbody.innerHTML = '<tr><td colspan="5" class="text-center text-red-400 py-8">加载失败</td></tr>';
             return;
         }
         
@@ -4380,7 +4384,7 @@ async function loadTeamMembers() {
         const members = data.members || [];
         
         if (members.length === 0) {
-            tbody.innerHTML = '<tr><td colspan="4" class="text-center text-gray-400 py-8">暂无成员</td></tr>';
+            tbody.innerHTML = '<tr><td colspan="5" class="text-center text-gray-400 py-8">暂无成员</td></tr>';
             return;
         }
         
@@ -4394,14 +4398,16 @@ async function loadTeamMembers() {
                     <td>${typeBadge}</td>
                     <td>${escapeHtml(m.tag || '-')}</td>
                     <td class="font-mono text-xs text-gray-500">${escapeHtml(m.session || '-')}</td>
+                    <td style="text-align:right;">
+                        <button onclick="deleteTeamMember('${m.type}', '${escapeHtml(m.session)}', '${escapeHtml(m.name)}')" class="text-red-500 hover:text-red-700 text-xs px-2 py-1 rounded hover:bg-red-50" title="删除成员">🗑️ 删除</button>
+                    </td>
                 </tr>`;
         }).join('');
     } catch (e) {
         console.error('Failed to load team members:', e);
-        tbody.innerHTML = '<tr><td colspan="4" class="text-center text-red-400 py-8">加载失败: ' + e.message + '</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="5" class="text-center text-red-400 py-8">加载失败: ' + e.message + '</td></tr>';
     }
 }
-
 async function deleteGroup(groupId) {    if (!currentGroupId) return;
     try {
         const resp = await fetch('/teams/snapshot/download', {
@@ -4459,8 +4465,194 @@ async function uploadTeam(input) {
     input.value = '';
 }
 
-async function deleteGroup(groupId) {
-    if (!confirm(t('group_delete_confirm'))) return;
+async function deleteTeamMember(type, session, name) {
+    if (!currentGroupId) return;
+    
+    if (!confirm(`确定要删除成员 "${name}"？`)) {
+        return;
+    }
+    
+    try {
+        if (type === 'oasis') {
+            const url = `/internal_agents/${encodeURIComponent(session)}?team=${encodeURIComponent(currentGroupId)}`;
+            const resp = await fetch(url, { method: 'DELETE' });
+            if (!resp.ok) {
+                const err = await resp.json();
+                throw new Error(err.error || '删除失败');
+            }
+        } else {
+            // External agent: need to remove from openclaw_agents.json
+            const resp = await fetch(`/teams/${encodeURIComponent(currentGroupId)}/members/external`, {
+                method: 'DELETE',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ session: session })
+            });
+            if (!resp.ok) {
+                const err = await resp.json();
+                throw new Error(err.error || '删除失败');
+            }
+        }
+        
+        alert(`成员 "${name}" 已删除`);
+        loadTeamMembers(); // Reload the list
+    } catch (e) {
+        console.error('Failed to delete team member:', e);
+        alert('删除失败: ' + e.message);
+    }
+}
+
+function showAddTeamMemberModal() {
+    if (!currentGroupId) {
+        alert('请先选择一个团队');
+        return;
+    }
+    
+    const overlay = document.createElement('div');
+    overlay.className = 'team-members-modal-overlay';
+    overlay.id = 'add-team-member-overlay';
+    overlay.innerHTML = `
+        <div class="team-members-modal">
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;">
+                <h3 style="margin:0;font-size:16px;font-weight:600;">➕ 添加成员</h3>
+                <button onclick="document.getElementById('add-team-member-overlay').remove()" style="background:none;border:none;font-size:20px;cursor:pointer;color:#6b7280;">✕</button>
+            </div>
+            
+            <div style="display:flex;gap:8px;margin-bottom:16px;">
+                <button id="tab-oasis" onclick="switchAddMemberTab('oasis')" style="flex:1;padding:8px;border:1px solid #d1d5db;border-radius:6px;background:#3b82f6;color:white;font-size:13px;cursor:pointer;">Oasis Agent</button>
+                <button id="tab-external" onclick="switchAddMemberTab('external')" style="flex:1;padding:8px;border:1px solid #d1d5db;border-radius:6px;background:#f9fafb;color:#374151;font-size:13px;cursor:pointer;">External Agent</button>
+            </div>
+            
+            <!-- Oasis Agent Form -->
+            <div id="form-oasis">
+                <div style="margin-bottom:12px;">
+                    <label style="display:block;font-size:13px;font-weight:600;color:#374151;margin-bottom:6px;">会话ID (Session ID)</label>
+                    <input type="text" id="add-oasis-session" placeholder="输入会话ID" style="width:100%;padding:10px;border:1px solid #d1d5db;border-radius:6px;font-size:13px;">
+                </div>
+                <div style="margin-bottom:16px;">
+                    <label style="display:block;font-size:13px;font-weight:600;color:#374151;margin-bottom:6px;">名称</label>
+                    <input type="text" id="add-oasis-name" placeholder="输入Agent名称" style="width:100%;padding:10px;border:1px solid #d1d5db;border-radius:6px;font-size:13px;">
+                </div>
+                <div style="margin-bottom:16px;">
+                    <label style="display:block;font-size:13px;font-weight:600;color:#374151;margin-bottom:6px;">标签 (Tag)</label>
+                    <input type="text" id="add-oasis-tag" placeholder="如: finance" style="width:100%;padding:10px;border:1px solid #d1d5db;border-radius:6px;font-size:13px;">
+                </div>
+                <button onclick="addOasisMember()" style="width:100%;padding:10px;background:#3b82f6;color:white;border:none;border-radius:6px;font-size:13px;font-weight:600;cursor:pointer;">添加 Oasis Agent</button>
+            </div>
+            
+            <!-- External Agent Form -->
+            <div id="form-external" style="display:none;">
+                <div style="margin-bottom:12px;">
+                    <label style="display:block;font-size:13px;font-weight:600;color:#374151;margin-bottom:6px;">名称</label>
+                    <input type="text" id="add-ext-name" placeholder="输入Agent名称" style="width:100%;padding:10px;border:1px solid #d1d5db;border-radius:6px;font-size:13px;">
+                </div>
+                <div style="margin-bottom:16px;">
+                    <label style="display:block;font-size:13px;font-weight:600;color:#374151;margin-bottom:6px;">标签 (Tag)</label>
+                    <input type="text" id="add-ext-tag" placeholder="如: openclaw" style="width:100%;padding:10px;border:1px solid #d1d5db;border-radius:6px;font-size:13px;">
+                </div>
+                <div style="margin-bottom:16px;">
+                    <label style="display:block;font-size:13px;font-weight:600;color:#374151;margin-bottom:6px;">会话ID (Session ID)</label>
+                    <input type="text" id="add-ext-session" placeholder="输入会话ID" style="width:100%;padding:10px;border:1px solid #d1d5db;border-radius:6px;font-size:13px;">
+                </div>
+                <button onclick="addExternalMember()" style="width:100%;padding:10px;background:#10b981;color:white;border:none;border-radius:6px;font-size:13px;font-weight:600;cursor:pointer;">添加 External Agent</button>
+            </div>
+        </div>
+    `;
+    
+    document.body.appendChild(overlay);
+    
+    // Click outside to close
+    overlay.addEventListener('click', (e) => {
+        if (e.target === overlay) {
+            overlay.remove();
+        }
+    });
+}
+
+function switchAddMemberTab(tab) {
+    document.getElementById('form-oasis').style.display = tab === 'oasis' ? 'block' : 'none';
+    document.getElementById('form-external').style.display = tab === 'external' ? 'block' : 'none';
+    
+    document.getElementById('tab-oasis').style.background = tab === 'oasis' ? '#3b82f6' : '#f9fafb';
+    document.getElementById('tab-oasis').style.color = tab === 'oasis' ? 'white' : '#374151';
+    document.getElementById('tab-external').style.background = tab === 'external' ? '#10b981' : '#f9fafb';
+    document.getElementById('tab-external').style.color = tab === 'external' ? 'white' : '#374151';
+}
+
+async function addOasisMember() {
+    const session = document.getElementById('add-oasis-session').value.trim();
+    const name = document.getElementById('add-oasis-name').value.trim();
+    const tag = document.getElementById('add-oasis-tag').value.trim();
+    
+    if (!session) {
+        alert('请输入会话ID');
+        return;
+    }
+    
+    try {
+        const url = `/internal_agents?team=${encodeURIComponent(currentGroupId)}`;
+        const resp = await fetch(url, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                session: session,
+                meta: {
+                    name: name || session,
+                    tag: tag || ''
+                }
+            })
+        });
+        
+        if (!resp.ok) {
+            const err = await resp.json();
+            throw new Error(err.error || '添加失败');
+        }
+        
+        alert('成员添加成功');
+        document.getElementById('add-team-member-overlay').remove();
+        loadTeamMembers();
+    } catch (e) {
+        console.error('Failed to add team member:', e);
+        alert('添加失败: ' + e.message);
+    }
+}
+
+async function addExternalMember() {
+    const name = document.getElementById('add-ext-name').value.trim();
+    const tag = document.getElementById('add-ext-tag').value.trim();
+    const session = document.getElementById('add-ext-session').value.trim();
+    
+    if (!name || !session) {
+        alert('请输入名称和会话ID');
+        return;
+    }
+    
+    try {
+        const url = `/teams/${encodeURIComponent(currentGroupId)}/members/external`;
+        const resp = await fetch(url, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                name: name,
+                tag: tag || '',
+                session: session
+            })
+        });
+        
+        if (!resp.ok) {
+            const err = await resp.json();
+            throw new Error(err.error || '添加失败');
+        }
+        
+        alert('成员添加成功');
+        document.getElementById('add-team-member-overlay').remove();
+        loadTeamMembers();
+    } catch (e) {
+        console.error('Failed to add external team member:', e);
+        alert('添加失败: ' + e.message);
+    }
+}
+
+async function deleteGroup(groupId) {    if (!confirm(t('group_delete_confirm'))) return;
     try {
         await fetch(`/proxy_groups/${groupId}`, {
             method: 'DELETE',
