@@ -572,7 +572,15 @@ def _build_llm_prompt(data: dict) -> str:
     groups = data.get("groups", [])
     settings = data.get("settings", {})
 
+    team = data.get("team", "")
+
     node_map = {n["id"]: n for n in nodes}
+
+    # ── Describe team scope ──
+    if team:
+        team_scope_str = f"Team: **{team}** — This workflow belongs to team '{team}'. All generated YAML and saved workflows are scoped to this team."
+    else:
+        team_scope_str = "Scope: **Public / Global** — This is a public workflow, not tied to any specific team."
 
     # ── Describe the experts involved ──
     expert_nodes = [n for n in nodes if n.get("type") not in ("manual",)]
@@ -780,6 +788,9 @@ plan:
 Use `__end__` as an edge target to terminate the workflow. It is not a plan node.
 
 ## Current Canvas State
+
+### Workflow Scope:
+{team_scope_str}
 
 ### Experts on canvas ({len(expert_nodes)} total):
 {expert_list_str}
