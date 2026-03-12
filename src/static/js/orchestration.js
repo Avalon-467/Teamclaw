@@ -1381,9 +1381,8 @@ async function orchShowImportExpertPicker(onSelect) {
 async function loadConfigTab(agentName, contentEl, overlay) {
     contentEl.innerHTML = '<div style="text-align:center;color:#9ca3af;padding:20px;font-size:11px;">⏳ ' + t('loading') + '</div>';
     try {
-        const [detailRes, skillsRes, toolsRes] = await Promise.all([
+        const [detailRes, toolsRes] = await Promise.all([
             fetch('/proxy_openclaw_agent_detail?name=' + encodeURIComponent(agentName)).then(r => r.json()),
-            fetch('/proxy_openclaw_skills?agent=' + encodeURIComponent(agentName)).then(r => r.json()),
             fetch('/proxy_openclaw_tool_groups').then(r => r.json()),
         ]);
 
@@ -1393,7 +1392,7 @@ async function loadConfigTab(agentName, contentEl, overlay) {
         }
 
         const agent = detailRes.agent;
-        const allSkills = (skillsRes.ok ? skillsRes.skills : []) || [];
+        const allSkills = detailRes.skills || [];
         const toolGroups = (toolsRes.ok ? toolsRes.groups : {}) || {};
         const toolProfiles = (toolsRes.ok ? toolsRes.profiles : {}) || {};
         const agentSkills = new Set(agent.skills || []);

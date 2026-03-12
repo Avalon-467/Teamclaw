@@ -1188,57 +1188,85 @@ def _build_agent_detail(agent_cfg: dict, defaults: dict) -> dict:
 
 @app.get("/sessions/openclaw/agent-detail")
 async def get_openclaw_agent_detail(name: str = Query(...)):
-    """Return detailed config for a single OpenClaw agent (skills, tools, profile)."""
+    """Return detailed config for a single OpenClaw agent AND all available skills.
+
+    This is the single endpoint the frontend calls — it returns:
+      - agent detail (workspace, tools, skills config, etc.)
+      - all available skills from 3 sources (workspace / managed / bundled)
+    """
     config = _fetch_openclaw_full_config()
 
     defaults = config.get("defaults", {}) if config else {}
     agent_list = config.get("list", []) if config else []
 
-    # Helper: get CLI data for an agent to fill in missing fields
-    def _cli_data_for(agent_name: str) -> dict:
-        cli_agents = _fetch_openclaw_agents_via_cli()
-        if cli_agents:
-            for ca in cli_agents:
-                if ca.get("name") == agent_name or ca.get("id") == agent_name:
-                    return ca
-        return {}
+    detail = None
 
     # Try to find in full config first
     for a in agent_list:
         if a.get("id") == name or a.get("name") == name:
             detail = _build_agent_detail(a, defaults)
-            # If workspace is empty, supplement from CLI data
-            if not detail.get("workspace"):
-                cli = _cli_data_for(name)
-                if cli.get("workspace"):
-                    detail["workspace"] = cli["workspace"]
-                if cli.get("agentDir") and not detail.get("agentDir"):
-                    detail["agentDir"] = cli["agentDir"]
-                if cli.get("isDefault") and not detail.get("is_default"):
-                    detail["is_default"] = True
-            return {"ok": True, "agent": detail}
+            break
 
     # Fallback: when config has no explicit agents list (e.g. fresh install),
-    # try openclaw agents list --json which can still find the implicit default agent
-    cli_agents = _fetch_openclaw_agents_via_cli()
-    if cli_agents:
-        for a in cli_agents:
-            if a.get("name") == name or a.get("id") == name:
-                # Build a minimal detail from CLI data
-                detail = {
-                    "id": a.get("id", a.get("name", name)),
-                    "name": a.get("name", name),
-                    "workspace": a.get("workspace", defaults.get("workspace", "")),
-                    "agentDir": a.get("agentDir", ""),
-                    "is_default": a.get("isDefault", a.get("is_default", False)),
-                    "model": {},
-                    "tools": {"profile": "", "alsoAllow": [], "deny": []},
-                    "skills": [],
-                    "skills_all": True,
-                }
-                return {"ok": True, "agent": detail}
+    # try openclaw agents list --json
+    if detail is None:
+        cli_agents = _fetch_openclaw_agents_via_cli()
+        if cli_agents:
+            for a in cli_agents:
+                if a.get("name") == name or a.get("id") == name:
+                    detail = {
+                        "id": a.get("id", a.get("name", name)),
+                        "name": a.get("name", name),
+                        "workspace": a.get("workspace", defaults.get("workspace", "")),
+                        "agentDir": a.get("agentDir", ""),
+                        "is_default": a.get("isDefault", a.get("is_default", False)),
+                        "model": {},
+                        "tools": {"profile": "", "alsoAllow": [], "deny": []},
+                        "skills": [],
+                        "skills_all": True,
+                    }
+                    break
 
-    return JSONResponse({"ok": False, "error": f"Agent '{name}' not found"}, status_code=404)
+    if detail is None:
+        return JSONResponse({"ok": False, "error": f"Agent '{name}' not found"}, status_code=404)
+
+    # --- Collect all available skills (3 sources) ---
+    all_skills = []
+    workspace_path = detail.get("workspace") or _get_openclaw_workspace_path()
+
+    # 1. Workspace skills
+    if workspace_path:
+        skills_dir = os.path.join(workspace_path, "skills")
+        if os.path.isdir(skills_dir):
+            for item in os.listdir(skills_dir):
+                item_path = os.path.join(skills_dir, item)
+                if os.path.isdir(item_path):
+                    all_skills.append({"name": item, "eligible": True, "source": "workspace", "path": item_path})
+
+    # 2. Managed skills
+    if _openclaw_managed_skills_dir and os.path.isdir(_openclaw_managed_skills_dir):
+        existing = {s["name"] for s in all_skills}
+        for item in os.listdir(_openclaw_managed_skills_dir):
+            if item not in existing:
+                item_path = os.path.join(_openclaw_managed_skills_dir, item)
+                if os.path.isdir(item_path):
+                    all_skills.append({"name": item, "eligible": True, "source": "managed", "path": item_path})
+
+    # 3. Bundled skills
+    existing = {s["name"] for s in all_skills}
+    for bs in _openclaw_bundled_skills:
+        skill_name = bs.get("name", "")
+        if skill_name and skill_name not in existing:
+            all_skills.append({
+                "name": skill_name, "eligible": bs.get("eligible", False),
+                "source": "bundled", "description": bs.get("description", ""),
+                "emoji": bs.get("emoji", ""), "disabled": bs.get("disabled", False),
+                "missing": bs.get("missing", {}),
+            })
+
+    all_skills.sort(key=lambda x: x["name"])
+
+    return {"ok": True, "agent": detail, "skills": all_skills}
 
 
 @app.get("/sessions/openclaw/skills")
