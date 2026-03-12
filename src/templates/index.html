@@ -335,28 +335,22 @@
             <div class="orch-layout">
                 <!-- Left: Expert Pool -->
                 <div class="orch-sidebar" style="overflow-y:auto;">
-                    <div class="orch-sidebar-header" style="display:flex;align-items:center;justify-content:space-between;cursor:pointer;user-select:none;" onclick="toggleOrchExpertList()">
+                    <div class="orch-sidebar-header" style="display:flex;align-items:center;justify-content:space-between;user-select:none;">
                         <span class="text-sm font-bold text-gray-700">🧑‍💼 <span data-i18n="orch_expert_pool_text">专家池</span></span>
-                        <span id="orch-expert-toggle-icon" style="font-size:12px;transition:transform 0.2s;margin-right:4px;">▼</span>
-                        <!-- Start / Manual / End / Conditional injection cards -->
-                        <div style="display:flex;gap:3px;align-items:center;">
-                            <span style="font-size:10px;color:#888;white-space:nowrap;margin-right:2px;" data-i18n="orch_control_nodes">控制节点</span>
-                            <div class="orch-manual-card orch-start-card" draggable="true" id="orch-start-card" style="margin:0;padding:4px 6px;font-size:11px;">
-                                <span style="font-size:14px;">🚀</span>
-                                <div><span class="text-xs font-semibold text-gray-700" data-i18n="orch_start_node">开始</span></div>
-                            </div>
-                            <div class="orch-manual-card" draggable="true" id="orch-manual-card" style="margin:0;padding:4px 6px;font-size:11px;">
-                                <span style="font-size:14px;">📝</span>
-                                <div><span class="text-xs font-semibold text-gray-700" data-i18n="orch_manual_inject">手动注入</span></div>
-                            </div>
-                            <div class="orch-manual-card orch-end-card" draggable="true" id="orch-end-card" style="margin:0;padding:4px 6px;font-size:11px;">
-                                <span style="font-size:14px;">🏁</span>
-                                <div><span class="text-xs font-semibold text-gray-700" data-i18n="orch_end_node">结束</span></div>
-                            </div>
-                            <div class="orch-manual-card orch-cond-card" draggable="true" id="orch-cond-card" style="margin:0;padding:4px 6px;font-size:11px;">
-                                <span style="font-size:14px;">🎯</span>
-                                <div><span class="text-xs font-semibold text-gray-700" data-i18n="orch_cond_node">选择器</span></div>
-                            </div>
+                    </div>
+                    <!-- Control nodes bar: uniform size, visually distinct -->
+                    <div class="orch-control-nodes-bar">
+                        <div class="orch-control-node-card orch-start-card" draggable="true" id="orch-start-card">
+                            <span class="orch-control-node-text" data-i18n="orch_start_node">开始节点</span>
+                        </div>
+                        <div class="orch-control-node-card" draggable="true" id="orch-manual-card">
+                            <span class="orch-control-node-text" data-i18n="orch_manual_inject">手动注入节点</span>
+                        </div>
+                        <div class="orch-control-node-card orch-end-card" draggable="true" id="orch-end-card">
+                            <span class="orch-control-node-text" data-i18n="orch_end_node">结束节点</span>
+                        </div>
+                        <div class="orch-control-node-card orch-cond-card" draggable="true" id="orch-cond-card">
+                            <span class="orch-control-node-text" data-i18n="orch_cond_node">选择器节点</span>
                         </div>
                     </div>
                     <div class="orch-sidebar-grid">
@@ -606,21 +600,8 @@
 
 
     <script>
-    // Toggle orchestration expert list expand/collapse
-    function toggleOrchExpertList() {
-        const grid = document.querySelector('.orch-sidebar-grid');
-        const shortcuts = grid ? grid.nextElementSibling : null;
-        const icon = document.getElementById('orch-expert-toggle-icon');
-        if (grid.style.display === 'none') {
-            grid.style.display = '';
-            if (shortcuts) shortcuts.style.display = '';
-            icon.style.transform = 'rotate(0deg)';
-        } else {
-            grid.style.display = 'none';
-            if (shortcuts) shortcuts.style.display = 'none';
-            icon.style.transform = 'rotate(-90deg)';
-        }
-    }
+    // Toggle orchestration expert list (no-op: collapse removed)
+    function toggleOrchExpertList() { }
 
     // Toggle orchestration focus mode (collapse both sidebar and right panel)
     function toggleOrchFocusMode() {

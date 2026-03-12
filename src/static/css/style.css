@@ -687,6 +687,26 @@ header {
 .orch-cond-card { background: #fffbeb !important; border-color: #f59e0b !important; }
 .orch-cond-card:hover { background: #fef3c7 !important; }
 
+/* ── Control Nodes Bar (uniform size, visually distinct) ── */
+.orch-control-nodes-bar {
+    display: flex; align-items: center; gap: 4px; padding: 6px 10px;
+    border-bottom: 1px solid #e5e7eb; background: #f8fafc; flex-shrink: 0;
+}
+.orch-control-node-card {
+    display: flex; align-items: center; justify-content: center; padding: 6px 10px;
+    border-radius: 8px; background: #faf5ff; border: 2px dashed #a855f7;
+    cursor: grab; flex: 1; min-width: 0;
+    transition: all 0.15s;
+}
+.orch-control-node-card:hover { background: #f3e8ff; transform: translateY(-1px); box-shadow: 0 2px 6px rgba(0,0,0,0.1); }
+.orch-control-node-card.orch-start-card { background: #ecfdf5; border-color: #10b981; }
+.orch-control-node-card.orch-start-card:hover { background: #d1fae5; }
+.orch-control-node-card.orch-end-card { background: #fef2f2; border-color: #ef4444; }
+.orch-control-node-card.orch-end-card:hover { background: #fee2e2; }
+.orch-control-node-card.orch-cond-card { background: #fffbeb; border-color: #f59e0b; }
+.orch-control-node-card.orch-cond-card:hover { background: #fef3c7; }
+.orch-control-node-text { font-size: 12px; font-weight: 700; color: #374151; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; letter-spacing: 0.5px; }
+
 .orch-canvas-wrapper { flex: 1; display: flex; flex-direction: column; min-width: 0; }
 .orch-toolbar {
     display: flex; gap: 4px; padding: 6px 10px; background: #f9fafb; border-bottom: 1px solid #e5e7eb; flex-shrink: 0; flex-wrap: wrap;
@@ -933,16 +953,19 @@ header {
         gap: 6px !important;
     }
     /* 移动端专家卡片：点击即添加，不需要拖拽 */
-    .orch-expert-card, .orch-manual-card {
+    .orch-expert-card, .orch-manual-card, .orch-control-node-card {
         cursor: pointer !important;
         -webkit-user-drag: none;
         -webkit-touch-callout: none;
     }
-    .orch-expert-card:active, .orch-manual-card:active {
+    .orch-expert-card:active, .orch-manual-card:active, .orch-control-node-card:active {
         background: #dbeafe !important;
         border-color: #2563eb !important;
         transform: scale(0.97);
     }
+    .orch-control-nodes-bar { padding: 4px 6px; gap: 3px; flex-wrap: wrap; }
+    .orch-control-node-card { padding: 4px 6px; }
+    .orch-control-node-text { font-size: 10px; }
     /* 工具栏更紧凑 */
     .orch-toolbar { padding: 4px 6px; gap: 2px; }
     .orch-btn { padding: 3px 6px; font-size: 10px; }

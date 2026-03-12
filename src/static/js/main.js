@@ -4086,6 +4086,7 @@ async function openGroup(teamName) {
         '<div style="display:flex;align-items:center;gap:8px;">' +
         '<button id="team-tab-members" onclick="switchTeamTab(\'members\')" style="padding:4px 12px;border-radius:6px;font-size:12px;font-weight:600;cursor:pointer;border:1px solid #2563eb;background:#2563eb;color:white;">👥 成员</button>' +
         '<button id="team-tab-experts" onclick="switchTeamTab(\'experts\')" style="padding:4px 12px;border-radius:6px;font-size:12px;font-weight:600;cursor:pointer;border:1px solid #d1d5db;background:#f9fafb;color:#374151;">🧑‍💼 专家池</button>' +
+        '<button id="team-tab-workflows" onclick="switchTeamTab(\'workflows\')" style="padding:4px 12px;border-radius:6px;font-size:12px;font-weight:600;cursor:pointer;border:1px solid #d1d5db;background:#f9fafb;color:#374151;">📂 工作流</button>' +
         '</div>' +
         '<div style="display:flex;gap:8px;align-items:center;">' +
         '<span id="team-tab-actions-members">' +
@@ -4095,6 +4096,9 @@ async function openGroup(teamName) {
         '<span id="team-tab-actions-experts" style="display:none;">' +
         '<button onclick="loadTeamExperts()" class="text-gray-400 hover:text-gray-600 hover:bg-gray-100 px-2 py-1 rounded transition-colors" title="刷新专家列表">🔄</button>' +
         '<button onclick="showAddTeamExpertModal()" class="text-gray-400 hover:text-gray-600 hover:bg-gray-100 px-2 py-1 rounded transition-colors" title="添加专家">➕</button>' +
+        '</span>' +
+        '<span id="team-tab-actions-workflows" style="display:none;">' +
+        '<button onclick="loadTeamWorkflows()" class="text-gray-400 hover:text-gray-600 hover:bg-gray-100 px-2 py-1 rounded transition-colors" title="刷新工作流列表">🔄</button>' +
         '</span>' +
         '<button onclick="toggleTeamMembersView()" class="text-gray-400 hover:text-gray-600 text-sm">&times;</button>' +
         '</div>' +
@@ -4126,6 +4130,19 @@ async function openGroup(teamName) {
         '</tr>' +
         '</thead>' +
         '<tbody id="team-experts-table-body">' +
+        '</tbody>' +
+        '</table>' +
+        '</div>' +
+        '<div id="team-panel-workflows" class="team-members-table-container" style="display:none;">' +
+        '<table class="team-members-table">' +
+        '<thead>' +
+        '<tr>' +
+        '<th class="text-left">工作流名称</th>' +
+        '<th class="text-left">文件</th>' +
+        '<th class="text-right">操作</th>' +
+        '</tr>' +
+        '</thead>' +
+        '<tbody id="team-workflows-table-body">' +
         '</tbody>' +
         '</table>' +
         '</div>' +
@@ -5026,12 +5043,7 @@ function orchCloseMobilePanels() {
 }
 
 function toggleOrchExpertList() {
-    const grid = document.querySelector('.orch-sidebar-grid');
-    const icon = document.getElementById('orch-expert-toggle-icon');
-    if (!grid) return;
-    const collapsed = grid.style.display === 'none';
-    grid.style.display = collapsed ? '' : 'none';
-    if (icon) icon.style.transform = collapsed ? '' : 'rotate(-90deg)';
+    // No-op: collapse feature removed
 }
 
 function toggleOrchFocusMode() {
@@ -5325,31 +5337,45 @@ async function showExpertPickerForTeam(onSelect) {
     setTimeout(() => searchInput.focus(), 100);
 }
 
-// ── Team Tab Switching (Members / Experts) ──
+// ── Team Tab Switching (Members / Experts / Workflows) ──
 function switchTeamTab(tab) {
     const btnMembers = document.getElementById('team-tab-members');
     const btnExperts = document.getElementById('team-tab-experts');
+    const btnWorkflows = document.getElementById('team-tab-workflows');
     const panelMembers = document.getElementById('team-panel-members');
     const panelExperts = document.getElementById('team-panel-experts');
+    const panelWorkflows = document.getElementById('team-panel-workflows');
     const actionsMembers = document.getElementById('team-tab-actions-members');
     const actionsExperts = document.getElementById('team-tab-actions-experts');
+    const actionsWorkflows = document.getElementById('team-tab-actions-workflows');
     if (!btnMembers || !btnExperts) return;
+
+    // Reset all tabs to inactive
+    const inactiveStyle = {background: '#f9fafb', color: '#374151', borderColor: '#d1d5db'};
+    [btnMembers, btnExperts, btnWorkflows].forEach(btn => {
+        if (btn) { btn.style.background = inactiveStyle.background; btn.style.color = inactiveStyle.color; btn.style.borderColor = inactiveStyle.borderColor; }
+    });
+    if (panelMembers) panelMembers.style.display = 'none';
+    if (panelExperts) panelExperts.style.display = 'none';
+    if (panelWorkflows) panelWorkflows.style.display = 'none';
+    if (actionsMembers) actionsMembers.style.display = 'none';
+    if (actionsExperts) actionsExperts.style.display = 'none';
+    if (actionsWorkflows) actionsWorkflows.style.display = 'none';
 
     if (tab === 'experts') {
         btnExperts.style.background = '#7c3aed'; btnExperts.style.color = 'white'; btnExperts.style.borderColor = '#7c3aed';
-        btnMembers.style.background = '#f9fafb'; btnMembers.style.color = '#374151'; btnMembers.style.borderColor = '#d1d5db';
-        if (panelMembers) panelMembers.style.display = 'none';
         if (panelExperts) panelExperts.style.display = '';
-        if (actionsMembers) actionsMembers.style.display = 'none';
         if (actionsExperts) actionsExperts.style.display = '';
         loadTeamExperts();
+    } else if (tab === 'workflows') {
+        if (btnWorkflows) { btnWorkflows.style.background = '#059669'; btnWorkflows.style.color = 'white'; btnWorkflows.style.borderColor = '#059669'; }
+        if (panelWorkflows) panelWorkflows.style.display = '';
+        if (actionsWorkflows) actionsWorkflows.style.display = '';
+        loadTeamWorkflows();
     } else {
         btnMembers.style.background = '#2563eb'; btnMembers.style.color = 'white'; btnMembers.style.borderColor = '#2563eb';
-        btnExperts.style.background = '#f9fafb'; btnExperts.style.color = '#374151'; btnExperts.style.borderColor = '#d1d5db';
         if (panelMembers) panelMembers.style.display = '';
-        if (panelExperts) panelExperts.style.display = 'none';
         if (actionsMembers) actionsMembers.style.display = '';
-        if (actionsExperts) actionsExperts.style.display = 'none';
         loadTeamMembers();
     }
 }
@@ -5390,6 +5416,86 @@ async function loadTeamExperts() {
     } catch (err) {
         console.error('Failed to load team experts:', err);
         tbody.innerHTML = '<tr><td colspan="5" class="text-center text-red-400 py-8">加载失败: ' + err.message + '</td></tr>';
+    }
+}
+
+// ── Load Team Workflows ──
+async function loadTeamWorkflows() {
+    if (!currentGroupId) return;
+    const tbody = document.getElementById('team-workflows-table-body');
+    if (!tbody) return;
+    tbody.innerHTML = '<tr><td colspan="3" class="text-center text-gray-400 py-8">加载中...</td></tr>';
+
+    try {
+        const resp = await fetch(`/proxy_visual/load-layouts?team=${encodeURIComponent(currentGroupId)}`);
+        if (!resp.ok) {
+            tbody.innerHTML = '<tr><td colspan="3" class="text-center text-red-400 py-8">加载失败</td></tr>';
+            return;
+        }
+        const workflows = await resp.json();
+        if (!workflows || workflows.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="3" class="text-center text-gray-400 py-8">暂无工作流（在编排页面保存后会出现在这里）</td></tr>';
+            return;
+        }
+        tbody.innerHTML = workflows.map(name => {
+            const safeName = escapeHtml(name);
+            return `
+                <tr>
+                    <td class="font-medium text-gray-800">📂 ${safeName}</td>
+                    <td class="font-mono text-xs text-gray-500">${safeName}.yaml</td>
+                    <td style="text-align:right;white-space:nowrap;">
+                        <button onclick="viewTeamWorkflowYaml('${safeName}')" class="text-blue-500 hover:text-blue-700 text-xs px-2 py-1 rounded hover:bg-blue-50" title="查看 YAML">👁️ 查看</button>
+                        <button onclick="deleteTeamWorkflow('${safeName}')" class="text-red-500 hover:text-red-700 text-xs px-2 py-1 rounded hover:bg-red-50" title="删除">🗑️</button>
+                    </td>
+                </tr>`;
+        }).join('');
+    } catch (err) {
+        console.error('Failed to load team workflows:', err);
+        tbody.innerHTML = '<tr><td colspan="3" class="text-center text-red-400 py-8">加载失败: ' + err.message + '</td></tr>';
+    }
+}
+
+// ── View Team Workflow YAML ──
+async function viewTeamWorkflowYaml(name) {
+    if (!currentGroupId) return;
+    try {
+        const resp = await fetch(`/proxy_visual/load-yaml-raw/${encodeURIComponent(name)}?team=${encodeURIComponent(currentGroupId)}`);
+        if (!resp.ok) { alert('加载失败'); return; }
+        const data = await resp.json();
+        const yamlContent = data.yaml || '(empty)';
+
+        const overlay = document.createElement('div');
+        overlay.className = 'orch-modal-overlay';
+        overlay.innerHTML = `
+            <div class="orch-modal" style="min-width:500px;max-width:700px;width:85vw;max-height:80vh;display:flex;flex-direction:column;">
+                <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+                    <h3 style="margin:0;font-size:14px;">📄 ${escapeHtml(name)}.yaml</h3>
+                    <button id="wf-yaml-close" style="background:none;border:none;font-size:18px;cursor:pointer;padding:2px 6px;color:#6b7280;">✕</button>
+                </div>
+                <pre style="flex:1;overflow:auto;background:#f8fafc;border:1px solid #e5e7eb;border-radius:8px;padding:12px;font-size:11px;font-family:monospace;white-space:pre-wrap;word-break:break-all;margin:0;">${escapeHtml(yamlContent)}</pre>
+            </div>
+        `;
+        document.body.appendChild(overlay);
+        overlay.querySelector('#wf-yaml-close').addEventListener('click', () => overlay.remove());
+        overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.remove(); });
+    } catch (err) {
+        alert('加载失败: ' + err.message);
+    }
+}
+
+// ── Delete Team Workflow ──
+async function deleteTeamWorkflow(name) {
+    if (!currentGroupId) return;
+    if (!confirm(`确定删除工作流 "${name}" 吗？此操作不可撤销。`)) return;
+    try {
+        const resp = await fetch(`/proxy_visual/delete-layout/${encodeURIComponent(name)}?team=${encodeURIComponent(currentGroupId)}`, { method: 'DELETE' });
+        if (resp.ok) {
+            loadTeamWorkflows();
+        } else {
+            alert('删除失败');
+        }
+    } catch (err) {
+        alert('删除失败: ' + err.message);
     }
 }
 
