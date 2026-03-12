@@ -4533,6 +4533,44 @@ async function deleteGroup(groupId) {    if (!currentGroupId) return;
     }
 }
 
+async function downloadTeam() {
+    if (!currentGroupId) {
+        alert('请先选择一个团队');
+        return;
+    }
+    const btn = document.getElementById('team-download-btn');
+    if (btn) btn.disabled = true;
+    try {
+        const resp = await fetch('/teams/snapshot/download', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ team: currentGroupId })
+        });
+        if (!resp.ok) {
+            const err = await resp.json();
+            alert('导出失败: ' + (err.error || '未知错误'));
+            return;
+        }
+        const blob = await resp.blob();
+        const disposition = resp.headers.get('Content-Disposition') || '';
+        let filename = `team_${currentGroupId}_snapshot.zip`;
+        const match = disposition.match(/filename="?([^"]+)"?/);
+        if (match) filename = match[1];
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+    } catch (e) {
+        alert('导出失败: ' + e.message);
+    } finally {
+        if (btn) btn.disabled = false;
+    }
+}
+
 async function uploadTeam(input) {
     const file = input.files[0];
     if (!file) return;
