@@ -463,10 +463,10 @@ async def get_conclusion(topic_id: str, user_id: str = Query(...), timeout: int 
 # ------------------------------------------------------------------
 
 @app.get("/experts")
-async def list_experts(user_id: str = ""):
-    """List all available expert agents (public + agency + user custom)."""
+async def list_experts(user_id: str = "", team: str = ""):
+    """List all available expert agents (public + agency + user custom + team)."""
     from oasis.experts import get_all_experts
-    configs = get_all_experts(user_id or None)
+    configs = get_all_experts(user_id or None, team=team)
     result = []
     for c in configs:
         persona_raw = c["persona"]

@@ -364,7 +364,8 @@ function orchInit() {
 // ── Load experts (public + custom) ──
 async function orchLoadExperts() {
     try {
-        const r = await fetch('/proxy_visual/experts');
+        const teamQ = orch.teamName ? '?team=' + encodeURIComponent(orch.teamName) : '';
+        const r = await fetch('/proxy_visual/experts' + teamQ);
         orch.experts = await r.json();
     } catch(e) { console.error('Load experts failed:', e); }
     orchRenderExpertSidebar();
@@ -395,7 +396,7 @@ function orchRenderExpertSidebar() {
     const expertsByCategory = {};
 
     orch.experts.forEach(exp => {
-        const isCustom = exp.source === 'custom';
+        const isCustom = exp.source === 'custom' || exp.source === 'team';
         if (isCustom) {
             const card = _orchCreateExpertCard(exp, true);
             custList.appendChild(card);

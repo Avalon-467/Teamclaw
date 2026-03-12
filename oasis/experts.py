@@ -208,11 +208,41 @@ def delete_user_expert(user_id: str, tag: str) -> dict:
     raise ValueError(f"未找到用户自定义专家 tag=\"{tag}\"")
 
 
-def get_all_experts(user_id: str | None = None) -> list[dict]:
-    """Return public experts + agency experts + user's custom experts (marked with source)."""
-    result = [
+def load_team_experts(user_id: str, team: str) -> list[dict]:
+    """Load team-specific custom experts from {user}/teams/{team}/oasis_experts.json.
+
+    Returns [] if file missing or unreadable.
+    """
+    if not user_id or not team:
+        return []
+    path = os.path.join(_data_dir, "user_files", user_id, "teams", team, "oasis_experts.json")
+    if not os.path.isfile(path):
+        return []
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        return data if isinstance(data, list) else []
+    except (json.JSONDecodeError, OSError):
+        return []
+
+
+def get_all_experts(user_id: str | None = None, team: str = "") -> list[dict]:
+    """Return public experts + agency experts + user's custom experts + team experts.
+
+    When *team* is provided, team-specific experts are appended last with
+    source="team".  Because _lookup_by_tag iterates in order and returns the
+    first match, team experts effectively **override** public/agency/custom
+    experts with the same tag — so we prepend them instead.
+    """
+    result: list[dict] = []
+    # Team experts first (highest priority for tag lookup)
+    if user_id and team:
+        result.extend(
+            {**c, "source": "team"} for c in load_team_experts(user_id, team)
+        )
+    result.extend(
         {**c, "source": "public"} for c in EXPERT_CONFIGS
-    ]
+    )
     result.extend(
         {**c, "source": "agency"} for c in AGENCY_EXPERT_CONFIGS
     )

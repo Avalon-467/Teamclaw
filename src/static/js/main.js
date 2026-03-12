@@ -4046,14 +4046,23 @@ async function openGroup(teamName) {
     box.innerHTML = '<div style="text-align:center;color:#9ca3af;padding:40px 0;font-size:13px;">暂无消息</div>' +
         '<div id="team-members-overlay" class="team-members-overlay" style="display:none;">' +
         '<div class="team-members-header">' +
-        '<h3 class="font-bold text-gray-800">👥 团队成员</h3>' +
+        '<div style="display:flex;align-items:center;gap:8px;">' +
+        '<button id="team-tab-members" onclick="switchTeamTab(\'members\')" style="padding:4px 12px;border-radius:6px;font-size:12px;font-weight:600;cursor:pointer;border:1px solid #2563eb;background:#2563eb;color:white;">👥 成员</button>' +
+        '<button id="team-tab-experts" onclick="switchTeamTab(\'experts\')" style="padding:4px 12px;border-radius:6px;font-size:12px;font-weight:600;cursor:pointer;border:1px solid #d1d5db;background:#f9fafb;color:#374151;">🧑‍💼 专家池</button>' +
+        '</div>' +
         '<div style="display:flex;gap:8px;align-items:center;">' +
+        '<span id="team-tab-actions-members">' +
         '<button onclick="loadTeamMembers()" class="text-gray-400 hover:text-gray-600 hover:bg-gray-100 px-2 py-1 rounded transition-colors" title="刷新成员列表">🔄</button>' +
         '<button onclick="showAddTeamMemberModal()" class="text-gray-400 hover:text-gray-600 hover:bg-gray-100 px-2 py-1 rounded transition-colors" title="添加成员">➕</button>' +
+        '</span>' +
+        '<span id="team-tab-actions-experts" style="display:none;">' +
+        '<button onclick="loadTeamExperts()" class="text-gray-400 hover:text-gray-600 hover:bg-gray-100 px-2 py-1 rounded transition-colors" title="刷新专家列表">🔄</button>' +
+        '<button onclick="showAddTeamExpertModal()" class="text-gray-400 hover:text-gray-600 hover:bg-gray-100 px-2 py-1 rounded transition-colors" title="添加专家">➕</button>' +
+        '</span>' +
         '<button onclick="toggleTeamMembersView()" class="text-gray-400 hover:text-gray-600 text-sm">&times;</button>' +
         '</div>' +
         '</div>' +
-        '<div class="team-members-table-container">' +
+        '<div id="team-panel-members" class="team-members-table-container">' +
         '<table class="team-members-table">' +
         '<thead>' +
         '<tr>' +
@@ -4065,6 +4074,21 @@ async function openGroup(teamName) {
         '</tr>' +
         '</thead>' +
         '<tbody id="team-members-table-body">' +
+        '</tbody>' +
+        '</table>' +
+        '</div>' +
+        '<div id="team-panel-experts" class="team-members-table-container" style="display:none;">' +
+        '<table class="team-members-table">' +
+        '<thead>' +
+        '<tr>' +
+        '<th class="text-left">名称</th>' +
+        '<th class="text-left">标签 (Tag)</th>' +
+        '<th class="text-left" style="max-width:300px;">人设 (Persona)</th>' +
+        '<th class="text-center">温度</th>' +
+        '<th class="text-right">操作</th>' +
+        '</tr>' +
+        '</thead>' +
+        '<tbody id="team-experts-table-body">' +
         '</tbody>' +
         '</table>' +
         '</div>' +
@@ -5259,6 +5283,200 @@ async function showExpertPickerForTeam(onSelect) {
     renderList('');
     searchInput.addEventListener('input', () => renderList(searchInput.value));
     setTimeout(() => searchInput.focus(), 100);
+}
+
+// ── Team Tab Switching (Members / Experts) ──
+function switchTeamTab(tab) {
+    const btnMembers = document.getElementById('team-tab-members');
+    const btnExperts = document.getElementById('team-tab-experts');
+    const panelMembers = document.getElementById('team-panel-members');
+    const panelExperts = document.getElementById('team-panel-experts');
+    const actionsMembers = document.getElementById('team-tab-actions-members');
+    const actionsExperts = document.getElementById('team-tab-actions-experts');
+    if (!btnMembers || !btnExperts) return;
+
+    if (tab === 'experts') {
+        btnExperts.style.background = '#7c3aed'; btnExperts.style.color = 'white'; btnExperts.style.borderColor = '#7c3aed';
+        btnMembers.style.background = '#f9fafb'; btnMembers.style.color = '#374151'; btnMembers.style.borderColor = '#d1d5db';
+        if (panelMembers) panelMembers.style.display = 'none';
+        if (panelExperts) panelExperts.style.display = '';
+        if (actionsMembers) actionsMembers.style.display = 'none';
+        if (actionsExperts) actionsExperts.style.display = '';
+        loadTeamExperts();
+    } else {
+        btnMembers.style.background = '#2563eb'; btnMembers.style.color = 'white'; btnMembers.style.borderColor = '#2563eb';
+        btnExperts.style.background = '#f9fafb'; btnExperts.style.color = '#374151'; btnExperts.style.borderColor = '#d1d5db';
+        if (panelMembers) panelMembers.style.display = '';
+        if (panelExperts) panelExperts.style.display = 'none';
+        if (actionsMembers) actionsMembers.style.display = '';
+        if (actionsExperts) actionsExperts.style.display = 'none';
+        loadTeamMembers();
+    }
+}
+
+// ── Load Team Experts ──
+async function loadTeamExperts() {
+    if (!currentGroupId) return;
+    const tbody = document.getElementById('team-experts-table-body');
+    if (!tbody) return;
+    tbody.innerHTML = '<tr><td colspan="5" class="text-center text-gray-400 py-8">加载中...</td></tr>';
+
+    try {
+        const resp = await fetch(`/teams/${encodeURIComponent(currentGroupId)}/experts`);
+        if (!resp.ok) {
+            tbody.innerHTML = '<tr><td colspan="5" class="text-center text-red-400 py-8">加载失败</td></tr>';
+            return;
+        }
+        const data = await resp.json();
+        const experts = data.experts || [];
+        if (experts.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="5" class="text-center text-gray-400 py-8">暂无专家，点击 ➕ 添加</td></tr>';
+            return;
+        }
+        tbody.innerHTML = experts.map(e => {
+            const personaPreview = (e.persona || '').length > 80 ? (e.persona.slice(0, 80) + '…') : (e.persona || '-');
+            return `
+                <tr>
+                    <td class="font-medium text-gray-800">${escapeHtml(e.name)}</td>
+                    <td class="font-mono text-xs text-gray-500">${escapeHtml(e.tag)}</td>
+                    <td style="max-width:300px;white-space:pre-wrap;word-break:break-all;font-size:11px;color:#6b7280;">${escapeHtml(personaPreview)}</td>
+                    <td class="text-center text-xs text-gray-500">${e.temperature ?? 0.7}</td>
+                    <td style="text-align:right;white-space:nowrap;">
+                        <button onclick="editTeamExpert('${escapeHtml(e.tag)}')" class="text-blue-500 hover:text-blue-700 text-xs px-2 py-1 rounded hover:bg-blue-50" title="编辑">✏️</button>
+                        <button onclick="deleteTeamExpert('${escapeHtml(e.tag)}', '${escapeHtml(e.name)}')" class="text-red-500 hover:text-red-700 text-xs px-2 py-1 rounded hover:bg-red-50" title="删除">🗑️</button>
+                    </td>
+                </tr>`;
+        }).join('');
+    } catch (err) {
+        console.error('Failed to load team experts:', err);
+        tbody.innerHTML = '<tr><td colspan="5" class="text-center text-red-400 py-8">加载失败: ' + err.message + '</td></tr>';
+    }
+}
+
+// ── Show Add/Edit Team Expert Modal ──
+function showAddTeamExpertModal(editData) {
+    if (!currentGroupId) { alert('请先选择一个团队'); return; }
+    const isEdit = !!editData;
+    const title = isEdit ? '✏️ 编辑团队专家' : '➕ 添加团队专家';
+    const btnLabel = isEdit ? '保存' : '添加';
+    const btnColor = isEdit ? '#2563eb' : '#7c3aed';
+
+    const overlay = document.createElement('div');
+    overlay.className = 'orch-modal-overlay';
+    overlay.id = 'team-expert-modal-overlay';
+    overlay.innerHTML = `
+        <div class="orch-modal" style="min-width:400px;max-width:520px;width:85vw;">
+            <h3 style="margin:0 0 12px;font-size:14px;">${title}</h3>
+            <div style="display:flex;flex-direction:column;gap:8px;">
+                <label style="font-size:11px;font-weight:600;color:#374151;">名称
+                    <input id="te-name" type="text" placeholder="专家名称" value="${escapeHtml((editData && editData.name) || '')}" style="width:100%;padding:6px 8px;border:1px solid #d1d5db;border-radius:6px;font-size:12px;margin-top:2px;">
+                </label>
+                <label style="font-size:11px;font-weight:600;color:#374151;">标签 (Tag)
+                    <input id="te-tag" type="text" placeholder="唯一标识符，如 creative, analyst" value="${escapeHtml((editData && editData.tag) || '')}" ${isEdit ? 'disabled style="width:100%;padding:6px 8px;border:1px solid #d1d5db;border-radius:6px;font-size:12px;margin-top:2px;background:#f3f4f6;color:#6b7280;"' : 'style="width:100%;padding:6px 8px;border:1px solid #d1d5db;border-radius:6px;font-size:12px;margin-top:2px;"'}>
+                </label>
+                <label style="font-size:11px;font-weight:600;color:#374151;">人设 (Persona)
+                    <textarea id="te-persona" placeholder="描述这个专家的角色、性格和专长..." style="width:100%;min-height:120px;padding:6px 8px;border:1px solid #d1d5db;border-radius:6px;font-size:12px;margin-top:2px;resize:vertical;font-family:inherit;line-height:1.5;">${escapeHtml((editData && editData.persona) || '')}</textarea>
+                </label>
+                <label style="font-size:11px;font-weight:600;color:#374151;">温度 (Temperature)
+                    <input id="te-temperature" type="number" min="0" max="2" step="0.1" value="${(editData && editData.temperature) ?? 0.7}" style="width:100%;padding:6px 8px;border:1px solid #d1d5db;border-radius:6px;font-size:12px;margin-top:2px;">
+                </label>
+                ${!isEdit ? '<div style="border:1px dashed #c4b5fd;border-radius:8px;padding:10px;background:#faf5ff;"><div style="display:flex;align-items:center;justify-content:space-between;"><span style="font-size:11px;font-weight:600;color:#7c3aed;">📥 从全局专家库导入 (可选)</span><button id="te-import-btn" type="button" style="padding:3px 10px;border-radius:4px;border:1px solid #8b5cf6;background:#f5f3ff;color:#7c3aed;cursor:pointer;font-size:10px;font-weight:500;">选择专家</button></div><div id="te-import-preview" style="display:none;margin-top:8px;padding:6px 8px;background:white;border-radius:6px;border:1px solid #e5e7eb;font-size:11px;color:#374151;"></div></div>' : ''}
+            </div>
+            <div class="orch-modal-btns" style="margin-top:12px;">
+                <button onclick="document.getElementById('team-expert-modal-overlay').remove()" style="padding:6px 14px;border-radius:6px;border:1px solid #d1d5db;background:white;color:#374151;cursor:pointer;font-size:12px;">取消</button>
+                <button id="te-submit-btn" style="padding:6px 14px;border-radius:6px;border:none;background:${btnColor};color:white;cursor:pointer;font-size:12px;">${btnLabel}</button>
+            </div>
+        </div>
+    `;
+    document.body.appendChild(overlay);
+    overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.remove(); });
+
+    // Import from global expert pool (only for add mode)
+    if (!isEdit) {
+        const importBtn = overlay.querySelector('#te-import-btn');
+        if (importBtn) {
+            importBtn.addEventListener('click', () => {
+                showExpertPickerForTeam((expert) => {
+                    document.getElementById('te-name').value = expert.name || '';
+                    document.getElementById('te-tag').value = expert.tag || '';
+                    document.getElementById('te-persona').value = expert.persona || '';
+                    document.getElementById('te-temperature').value = expert.temperature ?? 0.7;
+                    const preview = overlay.querySelector('#te-import-preview');
+                    if (preview) {
+                        preview.style.display = 'block';
+                        preview.innerHTML = '✅ 已导入: <b>' + escapeHtml(expert.name) + '</b> (' + escapeHtml(expert.tag) + ')';
+                    }
+                });
+            });
+        }
+    }
+
+    // Submit handler
+    overlay.querySelector('#te-submit-btn').addEventListener('click', async () => {
+        const name = document.getElementById('te-name').value.trim();
+        const tag = document.getElementById('te-tag').value.trim();
+        const persona = document.getElementById('te-persona').value.trim();
+        const temperature = parseFloat(document.getElementById('te-temperature').value) || 0.7;
+
+        if (!name || !tag || !persona) {
+            alert('名称、标签和人设都不能为空');
+            return;
+        }
+
+        try {
+            const url = isEdit
+                ? `/teams/${encodeURIComponent(currentGroupId)}/experts/${encodeURIComponent(tag)}`
+                : `/teams/${encodeURIComponent(currentGroupId)}/experts`;
+            const method = isEdit ? 'PUT' : 'POST';
+            const resp = await fetch(url, {
+                method,
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ name, tag, persona, temperature })
+            });
+            const result = await resp.json();
+            if (!resp.ok) {
+                alert(result.error || '操作失败');
+                return;
+            }
+            overlay.remove();
+            loadTeamExperts();
+        } catch (err) {
+            alert('网络错误: ' + err.message);
+        }
+    });
+}
+
+// ── Edit Team Expert ──
+async function editTeamExpert(tag) {
+    if (!currentGroupId) return;
+    try {
+        const resp = await fetch(`/teams/${encodeURIComponent(currentGroupId)}/experts`);
+        if (!resp.ok) { alert('加载失败'); return; }
+        const data = await resp.json();
+        const expert = (data.experts || []).find(e => e.tag === tag);
+        if (!expert) { alert('未找到专家 tag=' + tag); return; }
+        showAddTeamExpertModal(expert);
+    } catch (err) {
+        alert('网络错误: ' + err.message);
+    }
+}
+
+// ── Delete Team Expert ──
+async function deleteTeamExpert(tag, name) {
+    if (!confirm(`删除团队专家 "${name}" (${tag})？`)) return;
+    try {
+        const resp = await fetch(`/teams/${encodeURIComponent(currentGroupId)}/experts/${encodeURIComponent(tag)}`, {
+            method: 'DELETE'
+        });
+        const result = await resp.json();
+        if (!resp.ok) {
+            alert(result.error || '删除失败');
+            return;
+        }
+        loadTeamExperts();
+    } catch (err) {
+        alert('网络错误: ' + err.message);
+    }
 }
 
 // ── Add OpenClaw Member Function ──

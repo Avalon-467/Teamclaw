@@ -419,6 +419,9 @@ async def post_to_oasis(
         discussion: If False (default), execute mode — agents just run tasks without discussion format.
             If True, forum discussion mode with JSON reply/vote.
             Can also be set in YAML via "discussion: true". When False (default), YAML setting is respected.
+        team: Team name for scoped agent/expert storage. When provided, internal agents are loaded
+            from the team directory, and team-specific custom experts (defined in the team page)
+            take priority over public/agency experts for tag→persona resolution.
 
     Returns:
         The topic_id for later retrieval via check_oasis_discussion()

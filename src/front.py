@@ -1312,12 +1312,16 @@ except Exception:
 
 @app.route("/proxy_visual/experts", methods=["GET"])
 def proxy_visual_experts():
-    """Return available expert pool for orchestration canvas (public + user custom)."""
+    """Return available expert pool for orchestration canvas (public + user custom + team)."""
     user_id = session.get("user_id", "")
-    # Fetch full expert list from OASIS server (public + user custom)
+    team = request.args.get("team", "")
+    # Fetch full expert list from OASIS server (public + user custom + team)
     all_experts = []
     try:
-        r = requests.get(f"{OASIS_BASE_URL}/experts", params={"user_id": user_id}, timeout=5)
+        params = {"user_id": user_id}
+        if team:
+            params["team"] = team
+        r = requests.get(f"{OASIS_BASE_URL}/experts", params=params, timeout=5)
         if r.ok:
             all_experts = r.json().get("experts", [])
     except Exception:
@@ -1343,6 +1347,8 @@ def proxy_visual_experts():
             emoji = _AGENCY_CAT_EMOJI.get(e.get("category", ""), "⭐")
         if e.get("source") == "custom":
             emoji = "🛠️"
+        if e.get("source") == "team":
+            emoji = "👥"
         result.append({**e, "emoji": emoji})
     return jsonify(result)
 
@@ -2218,6 +2224,146 @@ def delete_external_member(team_name):
         return jsonify({"status": "success", "deleted": deleted})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+
+
+# ------------------------------------------------------------------
+# Team-specific expert CRUD  (stored in {team_dir}/oasis_experts.json)
+# ------------------------------------------------------------------
+
+def _team_experts_path(user_id: str, team_name: str) -> str:
+    """Return the oasis_experts.json path for a team."""
+    return os.path.join(root_dir, "data", "user_files", user_id, "teams", team_name, "oasis_experts.json")
+
+
+def _team_experts_load(user_id: str, team_name: str) -> list:
+    """Load team-specific experts list."""
+    path = _team_experts_path(user_id, team_name)
+    if not os.path.isfile(path):
+        return []
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        return data if isinstance(data, list) else []
+    except (json.JSONDecodeError, OSError):
+        return []
+
+
+def _team_experts_save(user_id: str, team_name: str, experts: list) -> None:
+    """Save team-specific experts list."""
+    path = _team_experts_path(user_id, team_name)
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(experts, f, ensure_ascii=False, indent=2)
+
+
+@app.route("/teams/<team_name>/experts", methods=["GET"])
+def get_team_experts(team_name):
+    """List all custom experts defined for this team."""
+    user_id = session.get("user_id")
+    if not user_id:
+        return jsonify({"error": "未登录"}), 401
+    if "/" in team_name or "\\" in team_name or team_name.startswith("."):
+        return jsonify({"error": "Invalid team name"}), 400
+    team_dir = os.path.join(root_dir, "data", "user_files", user_id, "teams", team_name)
+    if not os.path.exists(team_dir):
+        return jsonify({"error": "Team not found"}), 404
+    experts = _team_experts_load(user_id, team_name)
+    return jsonify({"status": "success", "team": team_name, "experts": experts})
+
+
+@app.route("/teams/<team_name>/experts", methods=["POST"])
+def add_team_expert(team_name):
+    """Add a custom expert to this team's expert pool."""
+    user_id = session.get("user_id")
+    if not user_id:
+        return jsonify({"error": "未登录"}), 401
+    if "/" in team_name or "\\" in team_name or team_name.startswith("."):
+        return jsonify({"error": "Invalid team name"}), 400
+    team_dir = os.path.join(root_dir, "data", "user_files", user_id, "teams", team_name)
+    if not os.path.exists(team_dir):
+        return jsonify({"error": "Team not found"}), 404
+
+    body = request.get_json(force=True)
+    name = (body.get("name") or "").strip()
+    tag = (body.get("tag") or "").strip()
+    persona = (body.get("persona") or "").strip()
+    if not name or not tag or not persona:
+        return jsonify({"error": "name, tag, and persona are required"}), 400
+
+    expert = {
+        "name": name,
+        "tag": tag,
+        "persona": persona,
+        "temperature": float(body.get("temperature", 0.7)),
+    }
+    # Preserve optional fields
+    for key in ("name_en", "category", "description"):
+        if body.get(key):
+            expert[key] = body[key]
+
+    experts = _team_experts_load(user_id, team_name)
+    if any(e["tag"] == tag for e in experts):
+        return jsonify({"error": f"Tag \"{tag}\" already exists in this team"}), 409
+    experts.append(expert)
+    _team_experts_save(user_id, team_name, experts)
+    return jsonify({"status": "success", "expert": expert})
+
+
+@app.route("/teams/<team_name>/experts/<tag>", methods=["PUT"])
+def update_team_expert(team_name, tag):
+    """Update an existing team expert by tag."""
+    user_id = session.get("user_id")
+    if not user_id:
+        return jsonify({"error": "未登录"}), 401
+    if "/" in team_name or "\\" in team_name or team_name.startswith("."):
+        return jsonify({"error": "Invalid team name"}), 400
+    team_dir = os.path.join(root_dir, "data", "user_files", user_id, "teams", team_name)
+    if not os.path.exists(team_dir):
+        return jsonify({"error": "Team not found"}), 404
+
+    body = request.get_json(force=True)
+    experts = _team_experts_load(user_id, team_name)
+    for i, e in enumerate(experts):
+        if e["tag"] == tag:
+            name = (body.get("name") or e["name"]).strip()
+            persona = (body.get("persona") or e["persona"]).strip()
+            if not name or not persona:
+                return jsonify({"error": "name and persona cannot be empty"}), 400
+            updated = {
+                "name": name,
+                "tag": tag,
+                "persona": persona,
+                "temperature": float(body.get("temperature", e.get("temperature", 0.7))),
+            }
+            for key in ("name_en", "category", "description"):
+                val = body.get(key, e.get(key))
+                if val:
+                    updated[key] = val
+            experts[i] = updated
+            _team_experts_save(user_id, team_name, experts)
+            return jsonify({"status": "success", "expert": updated})
+    return jsonify({"error": f"Expert tag \"{tag}\" not found"}), 404
+
+
+@app.route("/teams/<team_name>/experts/<tag>", methods=["DELETE"])
+def delete_team_expert(team_name, tag):
+    """Delete a team expert by tag."""
+    user_id = session.get("user_id")
+    if not user_id:
+        return jsonify({"error": "未登录"}), 401
+    if "/" in team_name or "\\" in team_name or team_name.startswith("."):
+        return jsonify({"error": "Invalid team name"}), 400
+    team_dir = os.path.join(root_dir, "data", "user_files", user_id, "teams", team_name)
+    if not os.path.exists(team_dir):
+        return jsonify({"error": "Team not found"}), 404
+
+    experts = _team_experts_load(user_id, team_name)
+    for i, e in enumerate(experts):
+        if e["tag"] == tag:
+            deleted = experts.pop(i)
+            _team_experts_save(user_id, team_name, experts)
+            return jsonify({"status": "success", "deleted": deleted})
+    return jsonify({"error": f"Expert tag \"{tag}\" not found"}), 404
 
 
 @app.route("/teams/snapshot/download", methods=["POST"])

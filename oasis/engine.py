@@ -242,7 +242,7 @@ class DiscussionEngine:
                 # OpenClaw agents can work via CLI without api_url
                 api_url = cfg.get("api_url", "") or ""
                 model_str = cfg.get("model", "gpt-3.5-turbo")
-                config = self._lookup_by_tag(first, user_id)
+                config = self._lookup_by_tag(first, user_id, self._team)
                 expert_name = config["name"] if config else first
                 persona = config.get("persona", "") if config else ""
                 expert = ExternalExpert(
@@ -263,7 +263,7 @@ class DiscussionEngine:
                     print(f"  [OASIS] 🌐 External expert: {expert.name} → {api_url}")
             elif sid.startswith("temp#"):
                 # e.g. "creative#temp#1" → ExpertAgent with explicit temp_id
-                config = self._lookup_by_tag(first, user_id)
+                config = self._lookup_by_tag(first, user_id, self._team)
                 expert_name = config["name"] if config else first
                 persona = config.get("persona", "") if config else ""
                 temp_num = sid.split("#", 1)[1]
@@ -303,7 +303,7 @@ class DiscussionEngine:
                 expert_name = agent_name
                 ia_tag = ""
                 if tag_for_lookup:
-                    config = self._lookup_by_tag(tag_for_lookup, user_id)
+                    config = self._lookup_by_tag(tag_for_lookup, user_id, self._team)
                     if config:
                         expert_name = config.get("name", agent_name)
                         persona = config.get("persona", "")
@@ -312,7 +312,7 @@ class DiscussionEngine:
                     # No explicit tag in YAML, try to find tag from internal agent JSON
                     ia_tag = _find_tag_in_internal_agents(internal_agents, resolved_sid)
                     if ia_tag:
-                        config = self._lookup_by_tag(ia_tag, user_id)
+                        config = self._lookup_by_tag(ia_tag, user_id, self._team)
                         if config:
                             persona = config.get("persona", "")
                             print(f"  [OASIS] 🏷️ Auto-detected tag '{ia_tag}' → persona for '{expert_name}'")
@@ -360,9 +360,13 @@ class DiscussionEngine:
         self.summarizer = _get_summarizer()
 
     @staticmethod
-    def _lookup_by_tag(tag: str, user_id: str) -> dict | None:
-        """Find expert config by tag. Returns {"name", "persona", ...} or None."""
-        for c in get_all_experts(user_id):
+    def _lookup_by_tag(tag: str, user_id: str, team: str = "") -> dict | None:
+        """Find expert config by tag. Returns {"name", "persona", ...} or None.
+
+        When *team* is provided, team-specific experts take priority (they
+        appear first in the list returned by get_all_experts).
+        """
+        for c in get_all_experts(user_id, team=team):
             if c["tag"] == tag:
                 return c
         return None
