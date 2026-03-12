@@ -2561,9 +2561,50 @@ def upload_team_snapshot():
         if agents_data:
             _ia_save(user_id, agents_data, team)
         
+        # After internal agents, also restore OpenClaw agents from openclaw_agents.json
+        openclaw_agents_path = os.path.join(team_dir, "openclaw_agents.json")
+        openclaw_restored = 0
+        openclaw_errors = []
+        
+        if os.path.exists(openclaw_agents_path):
+            try:
+                with open(openclaw_agents_path, "r", encoding="utf-8") as f:
+                    openclaw_data = json.load(f)
+                
+                if isinstance(openclaw_data, dict) and openclaw_data:
+                    for short_name, agent_snapshot in openclaw_data.items():
+                        target_name = team + "_" + short_name
+                        try:
+                            r = requests.post(
+                                f"{OASIS_BASE_URL}/sessions/openclaw/agent-restore",
+                                json={
+                                    "agent_name": target_name,
+                                    "config": agent_snapshot.get("config", {}),
+                                    "workspace_files": agent_snapshot.get("workspace_files", {}),
+                                },
+                                timeout=60,
+                            )
+                            result = r.json()
+                            if result.get("ok"):
+                                openclaw_restored += 1
+                            else:
+                                openclaw_errors.append(
+                                    f"{target_name}: {result.get('errors', result.get('error', 'failed'))}"
+                                )
+                        except Exception as e:
+                            openclaw_errors.append(f"{target_name}: {e}")
+            except Exception as e:
+                openclaw_errors.append(f"Failed to read openclaw_agents.json: {e}")
+        
+        msg_parts = [f"Team '{team}' snapshot uploaded"]
+        msg_parts.append(f"{len(agents_data)} internal agents restored")
+        if openclaw_restored > 0 or openclaw_errors:
+            msg_parts.append(f"{openclaw_restored} OpenClaw agents restored")
+        
         return jsonify({
             "success": True,
-            "message": f"Team '{team}' snapshot uploaded and {len(agents_data)} agents restored"
+            "message": ", ".join(msg_parts),
+            "openclaw_errors": openclaw_errors if openclaw_errors else None,
         })
     except zipfile.BadZipFile:
         return jsonify({"error": "Invalid zip file"}), 400
