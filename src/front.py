@@ -18,6 +18,11 @@ app.config['MAX_CONTENT_LENGTH'] = 50 * 1024 * 1024  # 50MB for image uploads
 # --- 配置区 ---
 from datetime import timedelta
 app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(hours=8)
+app.config['SESSION_COOKIE_HTTPONLY'] = True      # 防止 XSS 读取 Session Cookie
+app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'     # 防止 CSRF 跨站请求携带 Cookie
+# 如果配置了公网域名（HTTPS），自动启用 Secure Cookie
+if os.getenv('PUBLIC_DOMAIN', ''):
+    app.config['SESSION_COOKIE_SECURE'] = True
 
 PORT_AGENT = int(os.getenv("PORT_AGENT", "51200"))
 # [已弃用] 旧端点 URL，已被 /v1/chat/completions 替代
@@ -49,28 +54,45 @@ _PUBLIC_ROUTES = frozenset({
 })
 
 
-def _is_loopback_request():
-    """Check if the request originates from 127.0.0.1 / ::1 (localhost)."""
+def _is_direct_local_request():
+    """判断是否为本机直连（非经过任何反向代理）。
+
+    只有同时满足两个条件才算本地直连：
+    1. remote_addr 是 127.0.0.1 / ::1
+    2. 没有任何常见反向代理注入的头（说明不是被代理转发过来的）
+
+    兼容：Cloudflare Tunnel、Nginx、Caddy、Traefik、HAProxy、Apache 等。
+    """
     remote = request.remote_addr or ''
-    return remote in ('127.0.0.1', '::1')
+    if remote not in ('127.0.0.1', '::1'):
+        return False
+    # 任何反向代理都会注入至少一个这类头
+    _PROXY_HEADERS = (
+        'X-Forwarded-For',      # Nginx / Caddy / Traefik / HAProxy / 通用
+        'X-Forwarded-Proto',    # Nginx / Caddy / 通用
+        'X-Forwarded-Host',     # Nginx / Traefik
+        'X-Real-Ip',            # Nginx
+        'Cf-Connecting-Ip',     # Cloudflare Tunnel
+        'Cf-Ray',               # Cloudflare Tunnel
+        'True-Client-Ip',       # Cloudflare / Akamai
+        'Forwarded',            # RFC 7239 标准头
+        'Via',                  # HTTP 标准代理头
+    )
+    return not any(request.headers.get(h) for h in _PROXY_HEADERS)
 
 
 @app.before_request
 def _unified_auth_check():
-    """Unified authentication gate for all routes.
+    """鉴权入口，规则极简：
 
-    Rules:
-    1. Public routes (login, static, OpenAI compat) → skip.
-    2. Requests from 127.0.0.1 → trusted, skip auth.
-    3. All other routes → require session['user_id'].
+    1. 公开路由 → 放行
+    2. 本机直连（127.0.0.1 且无代理头）→ 放行
+    3. 其余一律要登录（包括所有反向代理转发的请求）
     """
-    # 1. Public routes
     if request.endpoint in _PUBLIC_ROUTES:
         return None
-    # 2. Loopback trust
-    if _is_loopback_request():
+    if _is_direct_local_request():
         return None
-    # 3. Must be logged in
     if not session.get('user_id'):
         return jsonify({'error': '未登录'}), 401
     return None
