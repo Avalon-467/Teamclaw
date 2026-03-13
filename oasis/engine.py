@@ -7,7 +7,7 @@ Manages the full lifecycle of a discussion:
 Three expert backends:
   1. ExpertAgent  — direct LLM (stateless, name="tag#temp#N")
   2. SessionExpert — internal session agent (stateful, name="tag#oasis#name" or "#oasis#name")
-     - name is resolved to session_id via internal agent JSON (oasis_agents.json)
+     - name is resolved to session_id via internal agent JSON (internal_agents.json)
      - tag (if present) enables persona injection from presets
   3. ExternalExpert — external OpenAI-compatible API (name="tag#ext#id")
      - Directly calls external endpoints (DeepSeek, GPT-4, Ollama, etc)
@@ -37,7 +37,7 @@ Expert pool sourcing (YAML-only, schedule_file or schedule_yaml required):
       - all_experts: true
 
 No separate expert-session storage: session_ids are resolved from agent names
-via internal agent JSON (oasis_agents.json), then used to access the
+via internal agent JSON (internal_agents.json), then used to access the
 Agent checkpoint DB.
 
 Execution modes:
@@ -111,14 +111,13 @@ def _find_external_agent_global_name(external_agents: list[dict], name: str) -> 
 def _load_internal_agents(user_id: str, team: str = "") -> list[dict]:
     """Load the internal-agent JSON list for a user.
 
-    Reads two files and merges them:
-      - oasis_agents.json: {"agents": [{"name": ..., "tag": ...}]}
-      - oasis_sessions.json: {"agent_name": "session_id", ...}
+    Reads internal_agents.json:
+      [{"name": ..., "tag": ..., "session": "sid"}, ...]
 
     If team is specified, load from the team-scoped path:
-      data/user_files/{user_id}/teams/{team}/oasis_*.json
+      data/user_files/{user_id}/teams/{team}/internal_agents.json
     Otherwise load from:
-      data/user_files/internalagent/oasis_*.json
+      data/user_files/internalagent/internal_agents.json
 
     Returns list of {"session": "<id>", "meta": {"name": ..., "tag": ...}} entries.
     Returns [] if file missing or unreadable.
@@ -128,46 +127,25 @@ def _load_internal_agents(user_id: str, team: str = "") -> list[dict]:
     else:
         base_dir = _INTERNAL_AGENT_DIR
 
-    agents_path = os.path.join(base_dir, "oasis_agents.json")
-    sessions_path = os.path.join(base_dir, "oasis_sessions.json")
+    ia_path = os.path.join(base_dir, "internal_agents.json")
 
-    # Load agent metadata from oasis_agents.json
-    agents_list: list[dict] = []
-    if os.path.isfile(agents_path):
-        try:
-            with open(agents_path, "r", encoding="utf-8") as f:
-                data = json.load(f)
-            if isinstance(data, dict) and "agents" in data and isinstance(data["agents"], list):
-                agents_list = data["agents"]
-            elif isinstance(data, list):
-                agents_list = data
-        except Exception:
-            pass
+    if not os.path.isfile(ia_path):
+        return []
 
-    # Build name -> meta mapping
-    name_to_meta: dict[str, dict] = {}
-    for a in agents_list:
-        if isinstance(a, dict) and "name" in a:
-            name_to_meta[a["name"]] = a
+    try:
+        with open(ia_path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        agents_list = data if isinstance(data, list) else []
+    except Exception:
+        return []
 
-    # Load name -> session_id mapping from oasis_sessions.json
-    name_to_session: dict[str, str] = {}
-    if os.path.isfile(sessions_path):
-        try:
-            with open(sessions_path, "r", encoding="utf-8") as f:
-                name_to_session = json.load(f)
-        except Exception:
-            pass
-
-    # Merge: build [{"session": "sid", "meta": {"name": ..., "tag": ...}}, ...]
     result: list[dict] = []
-    for name, sid in name_to_session.items():
-        meta = name_to_meta.get(name, {})
-        if "name" not in meta:
-            meta = dict(meta)
-            meta["name"] = name
+    for a in agents_list:
+        if not isinstance(a, dict) or "name" not in a:
+            continue
+        sid = a.get("session", "")
+        meta = {k: v for k, v in a.items() if k != "session"}
         result.append({"session": sid, "meta": meta})
-
     return result
 
 

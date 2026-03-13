@@ -1799,12 +1799,12 @@ def proxy_tunnel_stop():
 
 # ------------------------------------------------------------------
 # Internal Agent CRUD  — per-user agent list stored as JSON
-# We maintain two files:
-#  1. oasis_agents.json: {"agents": [{"name": "...", "tag": "...", ...}]}
-#  2. oasis_sessions.json: {"agent_name": "session_id", ...}
+# Single file:
+#   internal_agents.json: [{"name": "...", "tag": "...", "session": "sid"}, ...]
+#   (session is a per-entry field, analogous to global_name in external_agents.json)
 # Paths:
-#   - Team mode: data/user_files/{user_id}/teams/{team}/oasis_*.json
-#   - Public mode: data/user_files/internalagent/oasis_*.json
+#   - Team mode: data/user_files/{user_id}/teams/{team}/internal_agents.json
+#   - Public mode: data/user_files/internalagent/internal_agents.json
 # Frontend expects: {"agents": [{"session": "sid", "meta": {...}}, ...]}
 # ------------------------------------------------------------------
 
@@ -1815,86 +1815,60 @@ def _ia_dir(user_id: str, team: str = "") -> str:
     return os.path.join(root_dir, "data", "user_files", "internalagent")
 
 
-def _ia_agents_path(user_id: str, team: str = "") -> str:
-    """Return the oasis_agents.json file path."""
-    return os.path.join(_ia_dir(user_id, team), "oasis_agents.json")
-
-
-def _ia_sessions_path(user_id: str, team: str = "") -> str:
-    """Return the oasis_sessions.json file path."""
-    return os.path.join(_ia_dir(user_id, team), "oasis_sessions.json")
+def _ia_path(user_id: str, team: str = "") -> str:
+    """Return the internal_agents.json file path."""
+    return os.path.join(_ia_dir(user_id, team), "internal_agents.json")
 
 
 def _ia_load(user_id: str, team: str = "") -> list:
-    """Load and merge internal agents from both files.
-    Returns: [{"session": "sid", "meta": {"name": "...", "tag": "...", ...}}, ...]
+    """Load internal agents from internal_agents.json.
+
+    The file stores a flat list:
+      [{"name": "...", "tag": "...", "session": "sid"}, ...]
+
+    Returns: [{"session": "sid", "meta": {"name": "...", "tag": "..."}}, ...]
     """
-    # Load agents from oasis_agents.json
-    agents_path = _ia_agents_path(user_id, team)
-    agents_list = []
-    name_to_meta = {}
-    if os.path.isfile(agents_path):
-        with open(agents_path, "r", encoding="utf-8") as f:
-            data = json.load(f)
-            if isinstance(data, dict) and "agents" in data and isinstance(data["agents"], list):
-                agents_list = data["agents"]
-            elif isinstance(data, list):
-                agents_list = data
-        # Build name -> meta mapping
-        for a in agents_list:
-            if isinstance(a, dict) and "name" in a:
-                name_to_meta[a["name"]] = a
-    
-    # Load name -> session_id mapping from oasis_sessions.json
-    sessions_path = _ia_sessions_path(user_id, team)
-    name_to_session = {}
-    if os.path.isfile(sessions_path):
-        with open(sessions_path, "r", encoding="utf-8") as f:
-            name_to_session = json.load(f)
-    
-    # Merge: build session -> meta list
+    ia_file = _ia_path(user_id, team)
+
+    if not os.path.isfile(ia_file):
+        return []
+
+    with open(ia_file, "r", encoding="utf-8") as f:
+        data = json.load(f)
+    agents_list = data if isinstance(data, list) else []
     result = []
-    for name, sid in name_to_session.items():
-        meta = name_to_meta.get(name, {})
-        # Ensure meta has at least the name field
-        if "name" not in meta:
-            meta = dict(meta)  # copy
-            meta["name"] = name
+    for a in agents_list:
+        if not isinstance(a, dict) or "name" not in a:
+            continue
+        sid = a.get("session", "")
+        meta = {k: v for k, v in a.items() if k != "session"}
         result.append({"session": sid, "meta": meta})
-    
     return result
 
 
 def _ia_save(user_id: str, data: list, team: str = ""):
-    """Save internal agents to both files.
+    """Save internal agents to internal_agents.json.
+
     data: [{"session": "sid", "meta": {"name": "...", "tag": "...", ...}}, ...]
+    Stored as: [{"name": "...", "tag": "...", "session": "sid"}, ...]
     """
-    agents_path = _ia_agents_path(user_id, team)
-    sessions_path = _ia_sessions_path(user_id, team)
+    ia_file = _ia_path(user_id, team)
     directory = _ia_dir(user_id, team)
-    
     os.makedirs(directory, exist_ok=True)
-    
-    # Save oasis_agents.json (meta only, extract name from meta)
+
     agents_list = []
     for item in data:
         meta = item.get("meta", {})
-        if isinstance(meta, dict):
-            agents_list.append(meta)
-    with open(agents_path, "w", encoding="utf-8") as f:
-        json.dump({"agents": agents_list}, f, ensure_ascii=False, indent=2)
-    
-    # Save oasis_sessions.json (name -> session_id mapping)
-    name_to_session = {}
-    for item in data:
-        meta = item.get("meta", {})
-        if isinstance(meta, dict):
-            name = meta.get("name")
-            sid = item.get("session")
-            if name and sid:
-                name_to_session[name] = sid
-    with open(sessions_path, "w", encoding="utf-8") as f:
-        json.dump(name_to_session, f, ensure_ascii=False, indent=2)
+        if not isinstance(meta, dict):
+            continue
+        entry = dict(meta)  # copy all meta fields (name, tag, ...)
+        sid = item.get("session", "")
+        if sid:
+            entry["session"] = sid
+        agents_list.append(entry)
+
+    with open(ia_file, "w", encoding="utf-8") as f:
+        json.dump(agents_list, f, ensure_ascii=False, indent=2)
 
 
 @app.route("/internal_agents", methods=["GET"])
@@ -2481,10 +2455,10 @@ def delete_team_expert(team_name, tag):
 @app.route("/teams/snapshot/download", methods=["POST"])
 def download_team_snapshot():
     """Download a compressed snapshot of the team's data.
-    Includes: oasis_agents.json, oasis_experts.json, 
+    Includes: internal_agents.json, oasis_experts.json, 
              external_agents.json, all .yaml files,
              and skill folders (workspace + managed) for each openclaw agent.
-    Note: oasis_sessions.json is excluded as it contains private session mappings.
+    Note: session fields inside internal_agents.json are excluded (private).
     """
     user_id = session.get("user_id")
     if not user_id:
@@ -2511,18 +2485,33 @@ def download_team_snapshot():
         zip_buffer = io.BytesIO()
         
         with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zipf:
-            # Add internal agent JSON files (excluding private session mappings)
+            # Add internal agent JSON files (session fields stripped for privacy)
             json_files = [
-                "oasis_agents.json",
+                "internal_agents.json",
                 "oasis_experts.json",
                 "external_agents.json"
             ]
-            # Note: oasis_sessions.json is NOT included as it contains private session mappings
             
             for json_file in json_files:
                 file_path = os.path.join(team_dir, json_file)
                 if os.path.exists(file_path):
-                    if json_file == "external_agents.json":
+                    if json_file == "internal_agents.json":
+                        # Strip session field before packing — it will be
+                        # regenerated on restore (like global_name in external_agents).
+                        try:
+                            with open(file_path, "r", encoding="utf-8") as _iaf:
+                                ia_list = json.load(_iaf)
+                            if isinstance(ia_list, list):
+                                cleaned = []
+                                for item in ia_list:
+                                    c = dict(item)
+                                    c.pop("session", None)
+                                    cleaned.append(c)
+                                ia_list = cleaned
+                            zipf.writestr(json_file, json.dumps(ia_list, ensure_ascii=False, indent=2))
+                        except Exception:
+                            zipf.write(file_path, json_file)
+                    elif json_file == "external_agents.json":
                         # Strip global_name field before packing — it will be
                         # regenerated from team+name on restore.
                         try:
@@ -2692,25 +2681,26 @@ def upload_team_snapshot():
         # Clean up temp file
         os.unlink(temp_path)
         
-        # After extraction, recreate agents from oasis_agents.json
-        # Read agent metadata and create new session_id for each agent
-        oasis_agents_path = os.path.join(team_dir, "oasis_agents.json")
-        
+        # After extraction, recreate agents from internal_agents.json
+        # The file is a flat list: [{"name": ..., "tag": ...}, ...]
+        # Session field was stripped during download; generate new ones.
+        internal_agents_path = os.path.join(team_dir, "internal_agents.json")
+
         agents_data = []  # Format: [{"session": "sid", "meta": {...}}, ...]
-        
-        if os.path.exists(oasis_agents_path):
-            with open(oasis_agents_path, "r", encoding="utf-8") as f:
-                data = json.load(f)
-                agents_list = data.get("agents", []) if isinstance(data, dict) else data
-            
+
+        if os.path.exists(internal_agents_path):
+            with open(internal_agents_path, "r", encoding="utf-8") as f:
+                agents_list = json.load(f)
+            if not isinstance(agents_list, list):
+                agents_list = []
+
             # Generate new session_id for each agent and build agents_data
             import time, random
             for agent_meta in agents_list:
                 if not isinstance(agent_meta, dict) or "name" not in agent_meta:
                     continue
-                
+
                 # Generate session_id (same format as frontend: base36 timestamp + random)
-                # Frontend: Date.now().toString(36) + Math.random().toString(36).substr(2, 4)
                 def to_base36(n):
                     """Convert number to base36 string (same as JavaScript's toString(36))"""
                     if n == 0:
@@ -2721,18 +2711,19 @@ def upload_team_snapshot():
                         result = digits[n % 36] + result
                         n //= 36
                     return result
-                
+
                 timestamp_ms = int(time.time() * 1000)
                 random_part = random.randint(0, 36**4 - 1)  # 4-digit base36 random
                 new_sid = to_base36(timestamp_ms) + to_base36(random_part).zfill(4)
-                
-                # Build entry for _ia_save
+
+                # Strip any leftover session from meta (shouldn't be there, but safe)
+                meta_clean = {k: v for k, v in agent_meta.items() if k != "session"}
                 agents_data.append({
                     "session": new_sid,
-                    "meta": agent_meta
+                    "meta": meta_clean
                 })
-        
-        # Save agents using _ia_save (this creates oasis_sessions.json properly)
+
+        # Save agents using _ia_save (writes unified internal_agents.json)
         if agents_data:
             _ia_save(user_id, agents_data, team)
         

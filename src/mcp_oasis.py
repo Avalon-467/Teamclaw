@@ -270,7 +270,7 @@ async def list_oasis_sessions(username: str = "") -> str:
     """
     List all oasis-managed expert sessions for the current user.
 
-    Internal session agents are configured in oasis_agents.json with
+    Internal session agents are configured in internal_agents.json with
     name→session_id mappings. In YAML, use "tag#oasis#name" or "#oasis#name"
     format — the engine resolves the name to the actual session_id.
     Append "#new" to force a brand-new session (resolved ID replaced with random UUID).
@@ -362,7 +362,7 @@ async def post_to_oasis(
 
       Type 2 — Internal Session Agent (stateful, has memory):
         "tag#oasis#name"        → SessionExpert. Resolves agent name to session_id via
-                                  internal agent JSON (oasis_agents.json). tag enables
+                                  internal agent JSON (internal_agents.json). tag enables
                                   persona injection from presets.
                                   Example: "test#oasis#test1", "creative#oasis#my_agent"
         "#oasis#name"           → SessionExpert (no tag). Same name→session lookup,
