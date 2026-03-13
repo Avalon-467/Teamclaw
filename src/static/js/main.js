@@ -4693,7 +4693,8 @@ function showAddTeamMemberModal() {
                 </div>
                 <div class="orch-modal-btns" style="margin-top:12px;">
                     <button onclick="document.getElementById('add-team-member-overlay').remove()" style="padding:6px 14px;border-radius:6px;border:1px solid #d1d5db;background:white;color:#374151;cursor:pointer;font-size:12px;">取消</button>
-                    <button onclick="addOasisMember()" style="padding:6px 14px;border-radius:6px;border:none;background:#2563eb;color:white;cursor:pointer;font-size:12px;">添加</button>
+                    <button onclick="showImportOasisModal()" style="padding:6px 14px;border-radius:6px;border:1px solid #2563eb;background:#eff6ff;color:#2563eb;cursor:pointer;font-size:12px;">📥 导入已有</button>
+                    <button onclick="addOasisMember()" style="padding:6px 14px;border-radius:6px;border:none;background:#2563eb;color:white;cursor:pointer;font-size:12px;">新建</button>
                 </div>
             </div>
             
@@ -4755,7 +4756,8 @@ function showAddTeamMemberModal() {
                 </div>
                 <div class="orch-modal-btns" style="margin-top:12px;">
                     <button onclick="document.getElementById('add-team-member-overlay').remove()" style="padding:6px 14px;border-radius:6px;border:1px solid #d1d5db;background:white;color:#374151;cursor:pointer;font-size:12px;">取消</button>
-                    <button onclick="addOpenClawMember()" style="padding:6px 14px;border-radius:6px;border:none;background:#7c3aed;color:white;cursor:pointer;font-size:12px;">🦞 创建</button>
+                    <button onclick="showImportOpenClawModal()" style="padding:6px 14px;border-radius:6px;border:1px solid #7c3aed;background:#faf5ff;color:#7c3aed;cursor:pointer;font-size:12px;">📥 导入已有</button>
+                    <button onclick="addOpenClawMember()" style="padding:6px 14px;border-radius:6px;border:none;background:#7c3aed;color:white;cursor:pointer;font-size:12px;">🦞 新建</button>
                 </div>
             </div>
         </div>
@@ -5748,11 +5750,225 @@ async function addOpenClawMember() {
                 alert('❌ ' + (res.error || '创建失败'));
             }
             btn.disabled = false;
-            btn.textContent = '🦞 创建';
+            btn.textContent = '🦞 新建';
         }
     } catch(e) {
         alert('❌ 网络错误');
         btn.disabled = false;
-        btn.textContent = '🦞 创建';
+        btn.textContent = '🦞 新建';
+    }
+}
+
+
+// ─── Import existing Internal Agent into team ───
+let _importSelectedOasis = null;
+
+function showImportOasisModal() {
+    // Close the add-member modal
+    const addOverlay = document.getElementById('add-team-member-overlay');
+    if (addOverlay) addOverlay.remove();
+
+    const overlay = document.createElement('div');
+    overlay.className = 'orch-modal-overlay';
+    overlay.id = 'import-oasis-overlay';
+    overlay.innerHTML = `
+        <div class="orch-modal" style="min-width:380px;max-width:500px;">
+            <h3>📥 导入 Internal Agent</h3>
+            <div style="font-size:11px;color:#6b7280;margin-bottom:8px;">从公共 Internal Agents 列表中选择，导入到当前团队：</div>
+            <div id="import-oasis-list" style="max-height:300px;overflow-y:auto;border:1px solid #e5e7eb;border-radius:8px;padding:4px;">
+                <div style="padding:12px;text-align:center;font-size:11px;color:#9ca3af;">⏳ 加载中...</div>
+            </div>
+            <div class="orch-modal-btns" style="margin-top:12px;">
+                <button onclick="document.getElementById('import-oasis-overlay').remove()" style="padding:6px 14px;border-radius:6px;border:1px solid #d1d5db;background:white;color:#374151;cursor:pointer;font-size:12px;">取消</button>
+                <button id="import-oasis-join-btn" onclick="_doImportOasis()" disabled style="padding:6px 14px;border-radius:6px;border:none;background:#2563eb;color:white;cursor:pointer;font-size:12px;opacity:0.5;">加入团队</button>
+            </div>
+        </div>
+    `;
+    document.body.appendChild(overlay);
+    overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.remove(); });
+
+    _importSelectedOasis = null;
+    _loadImportOasisList();
+}
+
+async function _loadImportOasisList() {
+    const listEl = document.getElementById('import-oasis-list');
+    if (!listEl) return;
+    try {
+        const resp = await fetch('/internal_agents');
+        const data = await resp.json();
+        const agents = data.agents || [];
+
+        if (agents.length === 0) {
+            listEl.innerHTML = '<div style="padding:12px;text-align:center;font-size:11px;color:#9ca3af;">没有可导入的 Internal Agent</div>';
+            return;
+        }
+
+        listEl.innerHTML = agents.map(a => {
+            const meta = a.meta || {};
+            const name = meta.name || '(unnamed)';
+            const tag = meta.tag || '';
+            const sid = a.session || '';
+            return `<div class="import-item" data-session="${escapeHtml(sid)}" data-name="${escapeHtml(name)}" data-tag="${escapeHtml(tag)}"
+                         onclick="_selectImportOasis(this)"
+                         style="padding:8px 10px;border-radius:6px;cursor:pointer;display:flex;align-items:center;gap:8px;transition:background .15s;border:2px solid transparent;">
+                <div style="width:32px;height:32px;border-radius:50%;background:#eff6ff;display:flex;align-items:center;justify-content:center;font-size:14px;">🤖</div>
+                <div style="flex:1;min-width:0;">
+                    <div style="font-size:12px;font-weight:600;color:#374151;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escapeHtml(name)}</div>
+                    <div style="font-size:10px;color:#9ca3af;font-family:monospace;">${escapeHtml(sid.slice(-12))}${tag ? ' \u00b7 ' + escapeHtml(tag) : ''}</div>
+                </div>
+            </div>`;
+        }).join('');
+    } catch(e) {
+        listEl.innerHTML = '<div style="padding:12px;text-align:center;font-size:11px;color:#ef4444;">加载失败: ' + e.message + '</div>';
+    }
+}
+
+function _selectImportOasis(el) {
+    el.parentElement.querySelectorAll('.import-item').forEach(item => {
+        item.style.borderColor = 'transparent';
+        item.style.background = '';
+    });
+    el.style.borderColor = '#2563eb';
+    el.style.background = '#eff6ff';
+    _importSelectedOasis = { session: el.dataset.session, name: el.dataset.name, tag: el.dataset.tag };
+    const btn = document.getElementById('import-oasis-join-btn');
+    if (btn) { btn.disabled = false; btn.style.opacity = '1'; }
+}
+
+async function _doImportOasis() {
+    if (!_importSelectedOasis) { alert('请先选择一个 Agent'); return; }
+    const { session, name, tag } = _importSelectedOasis;
+    try {
+        const url = `/internal_agents?team=${encodeURIComponent(currentGroupId)}`;
+        const resp = await fetch(url, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ session, meta: { name, tag: tag || '' } })
+        });
+        if (!resp.ok) {
+            const err = await resp.json();
+            throw new Error(err.error || '导入失败');
+        }
+        alert('✅ Internal Agent 已导入团队');
+        document.getElementById('import-oasis-overlay').remove();
+        loadTeamMembers();
+    } catch (e) {
+        console.error('Failed to import oasis agent:', e);
+        alert('导入失败: ' + e.message);
+    }
+}
+
+// ─── Import existing OpenClaw Agent into team ───
+let _importSelectedOC = null;
+
+function showImportOpenClawModal() {
+    // Close the add-member modal
+    const addOverlay = document.getElementById('add-team-member-overlay');
+    if (addOverlay) addOverlay.remove();
+
+    const overlay = document.createElement('div');
+    overlay.className = 'orch-modal-overlay';
+    overlay.id = 'import-oc-overlay';
+    overlay.innerHTML = `
+        <div class="orch-modal" style="min-width:380px;max-width:500px;">
+            <h3>📥 导入 OpenClaw Agent</h3>
+            <div style="font-size:11px;color:#6b7280;margin-bottom:8px;">从全局 OpenClaw Agents 列表中选择，导入到当前团队：</div>
+            <div id="import-oc-list" style="max-height:260px;overflow-y:auto;border:1px solid #e5e7eb;border-radius:8px;padding:4px;">
+                <div style="padding:12px;text-align:center;font-size:11px;color:#9ca3af;">⏳ 加载中...</div>
+            </div>
+            <label style="font-size:11px;font-weight:600;color:#374151;margin-top:8px;display:block;">
+                Team内名称 (可选，留空则使用原名)
+                <input id="import-oc-team-name" type="text" placeholder="留空使用原名"
+                       style="width:100%;padding:6px 8px;border:1px solid #d1d5db;border-radius:6px;font-size:12px;margin-top:2px;"
+                       pattern="[a-zA-Z0-9_-]+" title="仅支持字母、数字、下划线、短横线">
+            </label>
+            <div class="orch-modal-btns" style="margin-top:12px;">
+                <button onclick="document.getElementById('import-oc-overlay').remove()" style="padding:6px 14px;border-radius:6px;border:1px solid #d1d5db;background:white;color:#374151;cursor:pointer;font-size:12px;">取消</button>
+                <button id="import-oc-join-btn" onclick="_doImportOpenClaw()" disabled style="padding:6px 14px;border-radius:6px;border:none;background:#7c3aed;color:white;cursor:pointer;font-size:12px;opacity:0.5;">🦞 加入团队</button>
+            </div>
+        </div>
+    `;
+    document.body.appendChild(overlay);
+    overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.remove(); });
+
+    _importSelectedOC = null;
+    _loadImportOCList();
+}
+
+async function _loadImportOCList() {
+    const listEl = document.getElementById('import-oc-list');
+    if (!listEl) return;
+    try {
+        const resp = await fetch('/proxy_openclaw_sessions');
+        const data = await resp.json();
+
+        if (!data.available) {
+            listEl.innerHTML = '<div style="padding:12px;text-align:center;font-size:11px;color:#9ca3af;">🚫 OpenClaw 未配置</div>';
+            return;
+        }
+
+        const agents = data.agents || [];
+
+        if (agents.length === 0) {
+            listEl.innerHTML = '<div style="padding:12px;text-align:center;font-size:11px;color:#9ca3af;">没有可导入的 OpenClaw Agent</div>';
+            return;
+        }
+
+        listEl.innerHTML = agents.map(a => {
+            const name = a.name || '';
+            const model = a.model || '';
+            const workspace = a.workspace || '';
+            return `<div class="import-item" data-name="${escapeHtml(name)}" data-workspace="${escapeHtml(workspace)}"
+                         onclick="_selectImportOC(this)"
+                         style="padding:8px 10px;border-radius:6px;cursor:pointer;display:flex;align-items:center;gap:8px;transition:background .15s;border:2px solid transparent;">
+                <div style="width:32px;height:32px;border-radius:50%;background:#faf5ff;display:flex;align-items:center;justify-content:center;font-size:14px;">🦞</div>
+                <div style="flex:1;min-width:0;">
+                    <div style="font-size:12px;font-weight:600;color:#374151;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escapeHtml(name)}</div>
+                    <div style="font-size:10px;color:#9ca3af;font-family:monospace;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escapeHtml(model)}${workspace ? ' \u00b7 ' + escapeHtml(workspace) : ''}</div>
+                </div>
+            </div>`;
+        }).join('');
+    } catch(e) {
+        listEl.innerHTML = '<div style="padding:12px;text-align:center;font-size:11px;color:#ef4444;">加载失败: ' + e.message + '</div>';
+    }
+}
+
+function _selectImportOC(el) {
+    el.parentElement.querySelectorAll('.import-item').forEach(item => {
+        item.style.borderColor = 'transparent';
+        item.style.background = '';
+    });
+    el.style.borderColor = '#7c3aed';
+    el.style.background = '#faf5ff';
+    _importSelectedOC = { name: el.dataset.name, workspace: el.dataset.workspace };
+    const btn = document.getElementById('import-oc-join-btn');
+    if (btn) { btn.disabled = false; btn.style.opacity = '1'; }
+}
+
+async function _doImportOpenClaw() {
+    if (!_importSelectedOC) { alert('请先选择一个 OpenClaw Agent'); return; }
+
+    const ocGlobalName = _importSelectedOC.name;
+    const teamNameInput = document.getElementById('import-oc-team-name');
+    const shortName = (teamNameInput && teamNameInput.value.trim()) || ocGlobalName;
+
+    try {
+        // Save to external_agents.json (tag=openclaw, global_name=original openclaw agent name)
+        const resp = await fetch(`/teams/${encodeURIComponent(currentGroupId)}/members/external`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ name: shortName, tag: 'openclaw', global_name: ocGlobalName })
+        });
+        if (!resp.ok) {
+            const err = await resp.json();
+            throw new Error(err.error || '导入失败');
+        }
+        alert('🦞 OpenClaw Agent 已导入团队');
+        document.getElementById('import-oc-overlay').remove();
+        loadTeamMembers();
+    } catch (e) {
+        console.error('Failed to import openclaw agent:', e);
+        alert('导入失败: ' + e.message);
     }
 }
