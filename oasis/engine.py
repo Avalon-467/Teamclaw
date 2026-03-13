@@ -77,6 +77,37 @@ _INTERNAL_AGENT_DIR = os.path.join(
 _PROJECT_ROOT = os.path.dirname(os.path.dirname(__file__))
 
 
+def _load_external_agents(user_id: str, team: str = "") -> list[dict]:
+    """Load the team's external_agents.json list.
+
+    Returns list of {"name", "tag", "global_name", "config"?, ...} entries.
+    Returns [] if file missing, unreadable, or no team specified.
+    """
+    if not user_id or not team:
+        return []
+    path = os.path.join(_PROJECT_ROOT, "data", "user_files", user_id, "teams", team, "external_agents.json")
+    if not os.path.isfile(path):
+        return []
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+            return data if isinstance(data, list) else []
+    except Exception:
+        return []
+
+
+def _find_external_agent_global_name(external_agents: list[dict], name: str) -> str:
+    """Find the 'global_name' field from external_agents.json by agent name.
+
+    Returns the global_name string (the real OpenClaw agent name), or "" if not found.
+    """
+    name_lower = name.lower()
+    for a in external_agents:
+        if a.get("name", "").lower() == name_lower:
+            return a.get("global_name", "")
+    return ""
+
+
 def _load_internal_agents(user_id: str, team: str = "") -> list[dict]:
     """Load the internal-agent JSON list for a user.
 
@@ -248,6 +279,7 @@ class DiscussionEngine:
         yaml_names = extract_expert_names(self.schedule)
         ext_configs = collect_external_configs(self.schedule)
         internal_agents = _load_internal_agents(user_id, self._team)  # for name→session lookup
+        external_agents = _load_external_agents(user_id, self._team)  # for name→oc_agent_name lookup
         seen: set[str] = set()
         # Map YAML original names → expert (built during pool construction)
         yaml_to_expert: dict[str, ExpertAgent | SessionExpert | ExternalExpert] = {}
@@ -284,6 +316,8 @@ class DiscussionEngine:
                 config = self._lookup_by_tag(first, user_id, self._team)
                 expert_name = config["name"] if config else first
                 persona = config.get("persona", "") if config else ""
+                # Look up the real OpenClaw agent name from external_agents.json
+                oc_name = _find_external_agent_global_name(external_agents, expert_name)
                 expert = ExternalExpert(
                     name=expert_name,
                     ext_id=ext_id,
@@ -294,7 +328,7 @@ class DiscussionEngine:
                     timeout=bot_timeout,
                     tag=first,
                     extra_headers=cfg.get("headers"),
-                    team=self._team,
+                    oc_agent_name=oc_name,
                 )
                 if is_openclaw and not api_url:
                     print(f"  [OASIS] 🦞 OpenClaw agent: {expert.name} (CLI only, no api_url)")

@@ -798,142 +798,70 @@ async def delete_user_expert_route(tag: str, user_id: str = Query(...), team: st
 _OPENCLAW_BIN = shutil.which("openclaw")
 
 
-def _fetch_openclaw_agents_via_cli() -> list[dict] | None:
-    """Call ``openclaw agents list --json`` and return parsed agent list.
+def _get_agents_from_config() -> list[dict] | None:
+    """Get a normalised agent list from ``openclaw config get agents``.
 
-    Returns None if the CLI is unavailable or the command fails.
+    Each dict has keys: name, model, workspace, is_default.
+    Returns None if the config is unavailable.
     """
-    if not _OPENCLAW_BIN:
+    full_config = _fetch_openclaw_full_config()
+    if full_config is None:
         return None
-    try:
-        result = subprocess.run(
-            [_OPENCLAW_BIN, "agents", "list", "--json"],
-            capture_output=True, text=True, timeout=15,
-        )
-        if result.returncode != 0:
-            # --json may not be supported; fall back to text parsing
-            result_text = subprocess.run(
-                [_OPENCLAW_BIN, "agents", "list"],
-                capture_output=True, text=True, timeout=15,
-            )
-            if result_text.returncode != 0:
-                print(f"  [OASIS] ⚠️ openclaw agents list failed (rc={result_text.returncode}): "
-                      f"{result_text.stderr.strip()[:200]}")
-                return None
-            return _parse_agents_text(result_text.stdout)
-        data = json.loads(result.stdout)
-        # Expect {"agents": [...]} or a plain list
-        agents_raw: list[dict] = []
-        if isinstance(data, dict):
-            agents_raw = data.get("agents", [])
-        elif isinstance(data, list):
-            agents_raw = data
-        else:
-            return None
-        # Normalise: JSON uses "id" and "isDefault" (camelCase)
-        for a in agents_raw:
-            a["name"] = a.get("id", "")
-            a["is_default"] = a.get("isDefault", False)
-        return agents_raw
-    except subprocess.TimeoutExpired:
-        print("  [OASIS] ⚠️ openclaw agents list timed out")
-        return None
-    except (json.JSONDecodeError, Exception) as e:
-        # JSON parse failed — try text fallback
-        try:
-            result_text = subprocess.run(
-                [_OPENCLAW_BIN, "agents", "list"],
-                capture_output=True, text=True, timeout=15,
-            )
-            if result_text.returncode == 0:
-                return _parse_agents_text(result_text.stdout)
-        except Exception:
-            pass
-        print(f"  [OASIS] ⚠️ openclaw agents list parse error: {e}")
-        return None
-
-
-def _parse_agents_text(text: str) -> list[dict]:
-    """Parse the human-readable output of ``openclaw agents list``.
-
-    Example output::
-
-        Agents:
-        - main (default)
-          Workspace: ~/.openclaw/workspace
-          Agent dir: /projects/.openclaw/agents/main/agent
-          Model: gongfeng/auto
-          Routing rules: 0
-          Routing: default (no explicit rules)
-        - test1
-          Workspace: /projects/.openclaw/test1
-          Agent dir: /projects/.openclaw/agents/test1/agent
-          Model: gongfeng/auto
-          Routing rules: 0
-
-    Returns a list of dicts with keys: name, model, workspace, is_default.
-    """
-    agents: list[dict] = []
-    current: dict | None = None
-    for line in text.splitlines():
-        stripped = line.strip()
-        if stripped.startswith("- "):
-            # New agent entry
-            if current:
-                agents.append(current)
-            name_part = stripped[2:].strip()
-            is_default = "(default)" in name_part
-            name = name_part.replace("(default)", "").strip()
-            current = {"name": name, "is_default": is_default, "model": "", "workspace": ""}
-        elif current and stripped.startswith("Model:"):
-            current["model"] = stripped.split(":", 1)[1].strip()
-        elif current and stripped.startswith("Workspace:"):
-            current["workspace"] = stripped.split(":", 1)[1].strip()
-    if current:
-        agents.append(current)
+    defaults = full_config.get("defaults", {})
+    agents = []
+    for entry in full_config.get("list", []):
+        detail = _build_agent_detail(entry, defaults)
+        model_val = detail.get("model", "")
+        if isinstance(model_val, dict):
+            model_val = model_val.get("primary", "")
+        agents.append({
+            "name": detail.get("id", ""),
+            "model": model_val,
+            "workspace": detail.get("workspace", ""),
+            "is_default": detail.get("is_default", False),
+        })
     return agents
 
 
 @app.get("/sessions/openclaw")
 async def list_openclaw_agents(filter: str = Query("")):
-    """List OpenClaw agents via ``openclaw agents list`` enriched with config data.
+    """List OpenClaw agents via ``openclaw config get agents``.
 
     Returns agent-level entries (not individual sessions).
     Each agent card uses ``agent:<name>`` as the model identifier.
     """
-    agents = _fetch_openclaw_agents_via_cli()
-    if agents is None:
+    full_config = _fetch_openclaw_full_config()
+    if full_config is None:
         return {"agents": [], "available": False,
                 "message": "openclaw CLI not available or command failed"}
 
+    defaults = full_config.get("defaults", {})
+    agents = []
+    for entry in full_config.get("list", []):
+        detail = _build_agent_detail(entry, defaults)
+        agents.append(detail)
+
     # Keyword filter
     if filter:
-        agents = [a for a in agents if filter.lower() in a.get("name", "").lower()]
+        agents = [a for a in agents if filter.lower() in a.get("id", "").lower()]
 
     # Sort: default agent first, then alphabetical
-    agents.sort(key=lambda a: (not a.get("is_default", False), a.get("name", "")))
-
-    # Enrich with full config (skills/tools)
-    full_config = _fetch_openclaw_full_config()
-    config_map = {}
-    if full_config:
-        defaults = full_config.get("defaults", {})
-        for entry in full_config.get("list", []):
-            eid = entry.get("id", "")
-            config_map[eid] = _build_agent_detail(entry, defaults)
+    agents.sort(key=lambda a: (not a.get("is_default", False), a.get("id", "")))
 
     result = []
     for a in agents:
-        name = a.get("name", "")
-        detail = config_map.get(name, {})
+        # model from _build_agent_detail may be a dict like {"primary": "..."} or a string
+        model_val = a.get("model", "")
+        if isinstance(model_val, dict):
+            model_val = model_val.get("primary", "")
         result.append({
-            "name": name,
-            "model": a.get("model", ""),
+            "name": a.get("id", ""),
+            "model": model_val,
             "workspace": a.get("workspace", ""),
             "is_default": a.get("is_default", False),
-            "tools": detail.get("tools", {}),
-            "skills": detail.get("skills", []),
-            "skills_all": detail.get("skills_all", True),
+            "tools": a.get("tools", {}),
+            "skills": a.get("skills", []),
+            "skills_all": a.get("skills_all", True),
         })
 
     # Strip /v1/chat/completions suffix — .env stores the full URL,
@@ -1010,7 +938,7 @@ async def add_openclaw_agent(req: Request):
         new_workspace = os.path.join(parent_dir, f"workspace-{name}")
 
     # Check if agent already exists
-    existing = _fetch_openclaw_agents_via_cli() or []
+    existing = _get_agents_from_config() or []
     if any(a.get("name") == name for a in existing):
         return JSONResponse({"ok": False, "error": f"Agent '{name}' already exists"}, status_code=409)
 
@@ -1208,18 +1136,18 @@ async def get_openclaw_agent_detail(name: str = Query(...)):
             break
 
     # Fallback: when config has no explicit agents list (e.g. fresh install),
-    # try openclaw agents list --json
+    # try _get_agents_from_config
     if detail is None:
-        cli_agents = _fetch_openclaw_agents_via_cli()
-        if cli_agents:
-            for a in cli_agents:
-                if a.get("name") == name or a.get("id") == name:
+        config_agents = _get_agents_from_config()
+        if config_agents:
+            for a in config_agents:
+                if a.get("name") == name:
                     detail = {
-                        "id": a.get("id", a.get("name", name)),
+                        "id": a.get("name", name),
                         "name": a.get("name", name),
                         "workspace": a.get("workspace", defaults.get("workspace", "")),
-                        "agentDir": a.get("agentDir", ""),
-                        "is_default": a.get("isDefault", a.get("is_default", False)),
+                        "agentDir": "",
+                        "is_default": a.get("is_default", False),
                         "model": {},
                         "tools": {"profile": "", "alsoAllow": [], "deny": []},
                         "skills": [],
@@ -1480,13 +1408,13 @@ async def update_openclaw_agent_config(req: Request):
             break
 
     # Fallback: if agent not in config list (e.g. fresh install with implicit default),
-    # verify the agent exists via CLI and auto-create a config entry
+    # verify the agent exists via config and auto-create a config entry
     if agent_idx is None:
-        cli_agents = _fetch_openclaw_agents_via_cli()
+        config_agents = _get_agents_from_config()
         cli_match = None
-        if cli_agents:
-            for a in cli_agents:
-                if a.get("name") == agent_name or a.get("id") == agent_name:
+        if config_agents:
+            for a in config_agents:
+                if a.get("name") == agent_name:
                     cli_match = a
                     break
         if cli_match is None:
@@ -1773,11 +1701,11 @@ async def export_openclaw_agent_snapshot(name: str = Query(...)):
             break
 
     if not agent_detail:
-        # Fallback: try CLI
-        cli_agents = _fetch_openclaw_agents_via_cli()
-        if cli_agents:
-            for a in cli_agents:
-                if a.get("name") == name or a.get("id") == name:
+        # Fallback: try config
+        config_agents = _get_agents_from_config()
+        if config_agents:
+            for a in config_agents:
+                if a.get("name") == name:
                     agent_detail = {
                         "name": a.get("name", name),
                         "workspace": a.get("workspace", defaults.get("workspace", "")),
@@ -1844,7 +1772,7 @@ async def restore_openclaw_agent_snapshot(req: Request):
     errors = []
 
     # Step 1: Check if agent exists; create if not
-    existing = _fetch_openclaw_agents_via_cli() or []
+    existing = _get_agents_from_config() or []
     agent_exists = any(a.get("name") == agent_name for a in existing)
     workspace = ""
 

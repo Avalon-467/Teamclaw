@@ -4110,7 +4110,7 @@ async function openGroup(teamName) {
         '<th class="text-left">名称</th>' +
         '<th class="text-left">类型</th>' +
         '<th class="text-left">标签</th>' +
-        '<th class="text-left">会话</th>' +
+'<th class="text-left">Global Name</th>' +
         '<th class="text-right">操作</th>' +
         '</tr>' +
         '</thead>' +
@@ -4487,18 +4487,18 @@ async function loadTeamMembers() {
             
             // For openclaw type, use the full orchestration config modal (files/tools/channels)
             const configBtn = m.type === 'openclaw'
-                ? `<button onclick="orchShowAgentConfigModal('${escapeHtml(m.session)}')" class="text-purple-500 hover:text-purple-700 text-xs px-2 py-1 rounded hover:bg-purple-50" title="OpenClaw 配置 (Files / Tools / Channels)">🦞⚙️</button>`
-                : `<button onclick="showAgentConfigModal('${m.type}', '${escapeHtml(m.session)}', '${escapeHtml(m.name)}', '${escapeHtml(m.tag || '')}', '${escapeHtml(apiUrl)}', '${escapeHtml(apiKey)}', '${escapeHtml(model)}', '${escapeHtml(typeof headers === 'object' ? JSON.stringify(headers).replace(/"/g, '&quot;').replace(/'/g, "\\'") : headers)}')" class="text-blue-500 hover:text-blue-700 text-xs px-2 py-1 rounded hover:bg-blue-50" title="配置">⚙️</button>`;
+                ? `<button onclick="orchShowAgentConfigModal('${escapeHtml(m.global_name)}')" class="text-purple-500 hover:text-purple-700 text-xs px-2 py-1 rounded hover:bg-purple-50" title="OpenClaw 配置 (Files / Tools / Channels)">🦞⚙️</button>`
+                : `<button onclick="showAgentConfigModal('${m.type}', '${escapeHtml(m.global_name)}', '${escapeHtml(m.name)}', '${escapeHtml(m.tag || '')}', '${escapeHtml(apiUrl)}', '${escapeHtml(apiKey)}', '${escapeHtml(model)}', '${escapeHtml(typeof headers === 'object' ? JSON.stringify(headers).replace(/"/g, '&quot;').replace(/'/g, "\\'") : headers)}')" class="text-blue-500 hover:text-blue-700 text-xs px-2 py-1 rounded hover:bg-blue-50" title="配置">⚙️</button>`;
             
             return `
                 <tr>
                     <td class="font-medium text-gray-800">${escapeHtml(m.name)}</td>
                     <td>${typeBadge}</td>
                     <td>${escapeHtml(m.tag || '-')}</td>
-                    <td class="font-mono text-xs text-gray-500">${escapeHtml(m.session || '-')}</td>
+                    <td class="font-mono text-xs text-gray-500">${escapeHtml(m.global_name || '-')}</td>
                     <td style="text-align:right;">
                         ${configBtn}
-                        <button onclick="deleteTeamMember('${m.type}', '${escapeHtml(m.session)}', '${escapeHtml(m.name)}')" class="text-red-500 hover:text-red-700 text-xs px-2 py-1 rounded hover:bg-red-50" title="删除成员">🗑️</button>
+                        <button onclick="deleteTeamMember('${m.type}', '${escapeHtml(m.global_name)}', '${escapeHtml(m.name)}')" class="text-red-500 hover:text-red-700 text-xs px-2 py-1 rounded hover:bg-red-50" title="删除成员">🗑️</button>
                     </td>
                 </tr>`;
         }).join('');
@@ -4602,7 +4602,7 @@ async function uploadTeam(input) {
     input.value = '';
 }
 
-async function deleteTeamMember(type, session, name) {
+async function deleteTeamMember(type, globalName, name) {
     if (!currentGroupId) return;
     
     if (!confirm(`确定要删除成员 "${name}"？`)) {
@@ -4611,29 +4611,37 @@ async function deleteTeamMember(type, session, name) {
     
     try {
         if (type === 'oasis') {
-            const url = `/internal_agents/${encodeURIComponent(session)}?team=${encodeURIComponent(currentGroupId)}`;
+            const url = `/internal_agents/${encodeURIComponent(globalName)}?team=${encodeURIComponent(currentGroupId)}`;
             const resp = await fetch(url, { method: 'DELETE' });
             if (!resp.ok) {
                 const err = await resp.json();
                 throw new Error(err.error || '删除失败');
             }
         } else if (type === 'openclaw') {
-            // OpenClaw agent: call proxy_openclaw_remove
+            // OpenClaw agent: remove from OASIS server
             const resp = await fetch('/proxy_openclaw_remove', {
                 method: 'DELETE',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ name: session })
+                body: JSON.stringify({ name: globalName })
             });
             if (!resp.ok) {
                 const err = await resp.json();
                 throw new Error(err.error || '删除失败');
             }
+            // Also remove from external_agents.json
+            try {
+                await fetch(`/teams/${encodeURIComponent(currentGroupId)}/members/external`, {
+                    method: 'DELETE',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ global_name: globalName })
+                });
+            } catch(e) { console.warn('Failed to remove from external_agents.json:', e); }
         } else {
-            // External agent: need to remove from openclaw_agents.json
+            // External agent: remove from external_agents.json
             const resp = await fetch(`/teams/${encodeURIComponent(currentGroupId)}/members/external`, {
                 method: 'DELETE',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ session: session })
+                body: JSON.stringify({ global_name: globalName })
             });
             if (!resp.ok) {
                 const err = await resp.json();
@@ -4643,17 +4651,6 @@ async function deleteTeamMember(type, session, name) {
         
         alert(`成员 "${name}" 已删除`);
         loadTeamMembers(); // Reload the list
-
-        // Sync openclaw agents snapshot after deletion
-        if (type === 'openclaw') {
-            try {
-                await fetch('/team_openclaw_snapshot/sync_all', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ team: currentGroupId }),
-                });
-            } catch(e) { console.warn('Failed to sync after delete:', e); }
-        }
     } catch (e) {
         console.error('Failed to delete team member:', e);
         alert('删除失败: ' + e.message);
@@ -4706,8 +4703,8 @@ function showAddTeamMemberModal() {
                     <label style="font-size:11px;font-weight:600;color:#374151;">名称
                         <input id="add-ext-name" type="text" placeholder="输入Agent名称" style="width:100%;padding:6px 8px;border:1px solid #d1d5db;border-radius:6px;font-size:12px;margin-top:2px;">
                     </label>
-                    <label style="font-size:11px;font-weight:600;color:#374151;">会话ID (Session ID)
-                        <input id="add-ext-session" type="text" placeholder="输入会话ID" style="width:100%;padding:6px 8px;border:1px solid #d1d5db;border-radius:6px;font-size:12px;margin-top:2px;">
+                    <label style="font-size:11px;font-weight:600;color:#374151;">Global Name
+                        <input id="add-ext-global-name" type="text" placeholder="输入Global Name" style="width:100%;padding:6px 8px;border:1px solid #d1d5db;border-radius:6px;font-size:12px;margin-top:2px;">
                     </label>
                     <label style="font-size:11px;color:#9ca3af;margin-bottom:2px;margin-top:8px;display:block;">API URL *</label>
                     <input id="add-ext-url" type="text" placeholder="https://api.example.com/v1" style="font-family:monospace;font-size:12px;width:100%;padding:6px 8px;border:1px solid #d1d5db;border-radius:6px;">
@@ -4728,12 +4725,12 @@ function showAddTeamMemberModal() {
             <div id="form-openclaw" style="display:none;">
                 <div style="display:flex;flex-direction:column;gap:8px;">
                     <label style="font-size:11px;font-weight:600;color:#374151;">
-                        Agent名称
-                        <div style="display:flex;align-items:center;gap:0;margin-top:2px;">
-                            <span style="padding:6px 4px 6px 8px;border:1px solid #d1d5db;border-right:none;border-radius:6px 0 0 6px;font-size:12px;background:#f3f4f6;color:#6b7280;white-space:nowrap;">${escapeHtml(currentGroupId)}_</span>
-                            <input id="add-oc-name" type="text" placeholder="work, research, coding"
-                                   style="width:100%;padding:6px 8px;border:1px solid #d1d5db;border-radius:0 6px 6px 0;font-size:12px;"
-                                   pattern="[a-zA-Z0-9_-]+" title="仅支持字母、数字、下划线、短横线">
+                        Team内名称
+                        <input id="add-oc-name" type="text" placeholder="work, research, coding"
+                               style="width:100%;padding:6px 8px;border:1px solid #d1d5db;border-radius:6px;font-size:12px;margin-top:2px;"
+                               pattern="[a-zA-Z0-9_-]+" title="仅支持字母、数字、下划线、短横线">
+                        <div style="font-size:10px;color:#6b7280;margin-top:3px;">
+                            🔗 Global Name 将自动生成为 <b>${escapeHtml(currentGroupId)}_&lt;名称&gt;</b>
                         </div>
                     </label>
                     <label style="font-size:11px;font-weight:600;color:#374151;">
@@ -4934,14 +4931,14 @@ async function addOasisMember() {
 
 async function addExternalMember() {
     const name = document.getElementById('add-ext-name').value.trim();
-    const session = document.getElementById('add-ext-session').value.trim();
+    const globalName = document.getElementById('add-ext-global-name').value.trim();
     const apiUrl = document.getElementById('add-ext-url').value.trim();
     const apiKey = document.getElementById('add-ext-key').value.trim();
     const model = document.getElementById('add-ext-model').value.trim();
     const headersStr = document.getElementById('add-ext-headers').value.trim();
     
-    if (!name || !session) {
-        alert('请输入名称和会话ID');
+    if (!name || !globalName) {
+        alert('请输入名称和Global Name');
         return;
     }
     
@@ -4967,7 +4964,7 @@ async function addExternalMember() {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
                 name: name,
-                session: session,
+                global_name: globalName,
                 api_url: apiUrl,
                 api_key: apiKey,
                 model: model,
@@ -5097,8 +5094,8 @@ function toggleOrchFocusMode() {
 // Agent 配置模态框
 let currentConfigAgent = null;
 
-async function showAgentConfigModal(type, session, name, tag, api_url, api_key, model, headers) {
-    currentConfigAgent = { type, session, name, tag, api_url, api_key, model, headers };
+async function showAgentConfigModal(type, globalName, name, tag, api_url, api_key, model, headers) {
+    currentConfigAgent = { type, globalName, name, tag, api_url, api_key, model, headers };
     
     // Create modal dynamically like orchestration page
     const overlay = document.createElement('div');
@@ -5143,8 +5140,8 @@ async function showAgentConfigModal(type, session, name, tag, api_url, api_key, 
                 ${tagSection}
                 ${externalForm}
                 
-                <label style="font-size:11px;font-weight:600;color:#374151;">会话ID (Session ID)</label>
-                <input id="config-agent-session" type="text" value="${session}" disabled style="width:100%;padding:6px 8px;border:1px solid #d1d5db;border-radius:6px;font-size:12px;margin-top:2px;background:#f3f4f6;cursor:not-allowed;color:#9ca3af;">
+                <label style="font-size:11px;font-weight:600;color:#374151;">Global Name</label>
+                <input id="config-agent-global-name" type="text" value="${globalName}" disabled style="width:100%;padding:6px 8px;border:1px solid #d1d5db;border-radius:6px;font-size:12px;margin-top:2px;background:#f3f4f6;cursor:not-allowed;color:#9ca3af;">
             </div>
             <div class="orch-modal-btns">
                 <button id="config-cancel" style="padding:6px 14px;border-radius:6px;border:1px solid #d1d5db;background:white;color:#374151;cursor:pointer;font-size:12px;">取消</button>
@@ -5210,7 +5207,7 @@ async function showAgentConfigModal(type, session, name, tag, api_url, api_key, 
         }
         
         try {
-            const url = `/internal_agents/${encodeURIComponent(session)}?team=${encodeURIComponent(currentGroupId)}`;
+            const url = `/internal_agents/${encodeURIComponent(globalName)}?team=${encodeURIComponent(currentGroupId)}`;
             const resp = await fetch(url, {
                 method: 'PUT',
                 headers: { 'Content-Type': 'application/json' },
@@ -5669,17 +5666,14 @@ async function addOpenClawMember() {
     const ocNameInp = document.getElementById('add-oc-name');
     const ocWsInp = document.getElementById('add-oc-workspace');
     
-    let name = ocNameInp.value.trim();
+    const shortName = ocNameInp.value.trim();
     const workspace = ocWsInp.value.trim();
     
-    // Prepend team prefix
-    name = currentGroupId + '_' + name;
-    
-    if (!name) {
+    if (!shortName) {
         alert('请输入Agent名称');
         return;
     }
-    if (!/^[a-zA-Z0-9_-]+$/.test(name)) {
+    if (!/^[a-zA-Z0-9_-]+$/.test(shortName)) {
         alert('名称只能包含字母、数字、下划线、短横线');
         return;
     }
@@ -5687,6 +5681,9 @@ async function addOpenClawMember() {
         alert('请输入工作空间路径');
         return;
     }
+
+    // Auto-generate global name: team + "_" + shortName
+    const globalName = currentGroupId + '_' + shortName;
 
     const btn = overlay.querySelector('#form-openclaw button[onclick="addOpenClawMember()"]');
     btn.disabled = true;
@@ -5697,15 +5694,16 @@ async function addOpenClawMember() {
     const selectedExpertContent = pickBtn ? pickBtn._selectedExpertContent : null;
 
     try {
+        // 1. Create the agent on OASIS server (use globalName as the OASIS agent name)
         const r = await fetch('/proxy_openclaw_add', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ name, workspace }),
+            body: JSON.stringify({ name: globalName, workspace }),
         });
         const res = await r.json();
         
         if (r.ok && res.ok) {
-            // If expert was selected, write IDENTITY.md
+            // 2. If expert was selected, write IDENTITY.md
             if (selectedExpertContent) {
                 try {
                     await fetch('/proxy_openclaw_workspace_file', {
@@ -5719,22 +5717,26 @@ async function addOpenClawMember() {
                     });
                 } catch(e) { console.warn('Failed to write IDENTITY.md:', e); }
             }
+
+            // 3. Save to external_agents.json (name=shortName, tag=openclaw, global_name=globalName)
+            try {
+                await fetch(`/teams/${encodeURIComponent(currentGroupId)}/members/external`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        name: shortName,
+                        tag: 'openclaw',
+                        global_name: globalName
+                    })
+                });
+            } catch(e) { console.warn('Failed to save to external_agents.json:', e); }
             
             alert('🦞 OpenClaw Agent创建成功！');
             overlay.remove();
             loadTeamMembers();
 
-            // Sync all openclaw agents info into team's openclaw_agents.json
-            try {
-                await fetch('/team_openclaw_snapshot/sync_all', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ team: currentGroupId }),
-                });
-            } catch(e) { console.warn('Failed to sync openclaw agents snapshot:', e); }
-
             // Auto-open the full config modal (files/tools/channels) for the new agent
-            setTimeout(() => orchShowAgentConfigModal(name), 500);
+            setTimeout(() => orchShowAgentConfigModal(globalName), 500);
         } else {
             if (r.status === 409) {
                 alert('⚠️ Agent名称已存在，请使用其他名称');

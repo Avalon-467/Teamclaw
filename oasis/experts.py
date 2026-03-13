@@ -883,7 +883,7 @@ class ExternalExpert:
         timeout: float | None = None,
         tag: str = "",
         extra_headers: dict[str, str] | None = None,
-        team: str = "",
+        oc_agent_name: str = "",
     ):
         self.title = name
         self.ext_id = ext_id
@@ -898,19 +898,14 @@ class ExternalExpert:
         m = self._OPENCLAW_MODEL_RE.match(model)
         if m:
             self._is_openclaw_agent = True
+            # Use explicit oc_agent_name (from external_agents.json "global_name" field)
+            # if provided; otherwise fall back to the name extracted from model string.
             raw_agent_name = m.group(1)
-            # When team is specified, auto-prepend the team prefix so that
-            # the YAML can stay portable (no hardcoded team prefix).
-            # e.g. team="alpha", model="agent:coding" → _oc_agent_name="alpha_coding"
-            if team and not raw_agent_name.startswith(team + "_"):
-                self._oc_agent_name = team + "_" + raw_agent_name
-            else:
-                self._oc_agent_name = raw_agent_name
+            self._oc_agent_name = oc_agent_name or raw_agent_name
             self._openclaw_bin = shutil.which("openclaw")
             print(f"  [OASIS] 🦞 OpenClaw agent detected: agent={self._oc_agent_name}"
                   f" — CLI priority"
-                  f"{', CLI available' if self._openclaw_bin else ', CLI NOT found (HTTP only)'}"
-                  f"{' (team=' + team + ')' if team else ''}")
+                  f"{', CLI available' if self._openclaw_bin else ', CLI NOT found (HTTP only)'}")
         else:
             self._is_openclaw_agent = False
             self._oc_agent_name = ""
