@@ -1,17 +1,12 @@
-[CmdletBinding()]
-param()
-
+Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
-$projectRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
-. (Join-Path $PSScriptRoot "common.ps1")
 
-Set-TeamClawUtf8
-$python = Ensure-VenvPython -ProjectRoot $projectRoot
+$ProjectRoot = Split-Path -Parent $PSScriptRoot
+Set-Location $ProjectRoot
 
-Push-Location $projectRoot
-try {
-    & $python "scripts\launcher.py"
-    exit $LASTEXITCODE
-} finally {
-    Pop-Location
+$activateScript = Join-Path $ProjectRoot ".venv\Scripts\Activate.ps1"
+if (Test-Path $activateScript) {
+    . $activateScript
 }
+
+python "scripts\launcher.py"

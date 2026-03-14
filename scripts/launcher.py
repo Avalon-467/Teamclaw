@@ -38,7 +38,7 @@ PORT_AGENT = os.getenv("PORT_AGENT", "51200")
 PORT_FRONTEND = os.getenv("PORT_FRONTEND", "51209")
 PORT_OASIS = os.getenv("PORT_OASIS", "51202")
 
-# 使用当前 Python 解释器（虚拟环境已由 run.sh/run.bat 激活）
+# 使用当前 Python 解释器（虚拟环境已由 run.sh/run.ps1 激活）
 venv_python = sys.executable
 
 # 子进程列表
@@ -179,7 +179,7 @@ is_headless = os.getenv("MINI_TIMEBOT_HEADLESS", "0") == "1"
 if os.path.exists(chatbot_setup):
     if is_headless:
         print(f"💬 [4/5] 跳过聊天机器人交互式配置（headless 模式）")
-        print(f"   提示: 如需配置 chatbot，请在人工模式下运行 run.sh 或手动编辑 config/.env")
+        print(f"   提示: 如需配置 chatbot，请在人工模式下运行 run.sh / run.ps1 或手动编辑 config/.env")
     else:
         print(f"💬 [4/5] 启动聊天机器人...")
         chatbot_dir = os.path.join(PROJECT_ROOT, "chatbot")

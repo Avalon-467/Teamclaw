@@ -46,7 +46,7 @@ def build_exe():
     if os.path.exists(icon):
         cmd += ["--icon", icon]
 
-    # 保留控制台（run.bat 需要交互：用户输入 y/N）
+    # 保留控制台（run.ps1 需要交互：用户输入 y/N）
     cmd.append(launcher)
 
     print(f"[BUILD] 正在打包 MiniTimeBot.exe ...")

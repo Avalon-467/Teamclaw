@@ -1,40 +1,79 @@
-[CmdletBinding()]
-param()
-
+Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
-$projectRoot = $PSScriptRoot
-. (Join-Path $projectRoot "scripts\common.ps1")
 
-Set-TeamClawUtf8
+$ProjectRoot = $PSScriptRoot
+Set-Location $ProjectRoot
+$env:MINI_TIMEBOT_HEADLESS = "0"
 
-& (Join-Path $projectRoot "scripts\setup_env.ps1")
-if ($LASTEXITCODE -ne 0) {
-    exit $LASTEXITCODE
+function Stop-TeamClawProcesses {
+    $patterns = @(
+        "scripts\\launcher.py",
+        "src\\time.py",
+        "oasis\\server.py",
+        "src\\mainagent.py",
+        "src\\front.py"
+    )
+
+    $procs = Get-CimInstance Win32_Process | Where-Object {
+        $cmd = $_.CommandLine
+        if ([string]::IsNullOrWhiteSpace($cmd)) {
+            return $false
+        }
+
+        foreach ($pattern in $patterns) {
+            if ($cmd -match [regex]::Escape($pattern)) {
+                return $true
+            }
+        }
+
+        return $false
+    }
+
+    foreach ($proc in $procs) {
+        Write-Host "Cleaning old process PID $($proc.ProcessId): $($proc.CommandLine)"
+        Stop-Process -Id $proc.ProcessId -Force -ErrorAction SilentlyContinue
+    }
 }
 
-$python = Ensure-VenvPython -ProjectRoot $projectRoot
-$envPath = Join-Path $projectRoot "config\.env"
+Write-Host "========== 1/4 Environment setup =========="
+& (Join-Path $ProjectRoot "scripts\setup_env.ps1")
 
-Push-Location $projectRoot
+$activateScript = Join-Path $ProjectRoot ".venv\Scripts\Activate.ps1"
+if (Test-Path $activateScript) {
+    . $activateScript
+}
+
+Write-Host ""
+Write-Host "========== 2/4 API Key setup =========="
 try {
-    if (-not (Test-Path $envPath)) {
-        & $python "selfskill\scripts\configure.py" "--init"
-        if ($LASTEXITCODE -ne 0) {
-            exit $LASTEXITCODE
-        }
-    }
+    & (Join-Path $ProjectRoot "scripts\setup_apikey.ps1")
+} catch {
+    Write-Warning "API Key setup did not finish: $($_.Exception.Message)"
+}
 
-    $envValues = Read-TeamClawEnvFile -Path $envPath
-    $apiKey = if ($envValues.ContainsKey("LLM_API_KEY")) { $envValues["LLM_API_KEY"] } else { "" }
-    if ([string]::IsNullOrWhiteSpace($apiKey) -or $apiKey -eq "your_api_key_here") {
-        Write-Host "config/.env exists, but LLM_API_KEY is still missing."
-        Write-Host "Run this first:"
-        Write-Host "  powershell -ExecutionPolicy Bypass -File .\selfskill\scripts\run.ps1 configure --batch LLM_API_KEY=<your-key> LLM_BASE_URL=<base-url> LLM_MODEL=<model>"
-        exit 0
-    }
+Write-Host ""
+Write-Host "========== 3/4 User management =========="
+$addUser = Read-Host "Add a new user? (y/N)"
+if ($addUser -match "^[Yy]$") {
+    & (Join-Path $ProjectRoot "scripts\adduser.ps1")
+}
 
-    & (Join-Path $projectRoot "selfskill\scripts\run.ps1") "start"
-    exit $LASTEXITCODE
+Write-Host ""
+Write-Host "========== 4/4 Start services =========="
+Stop-TeamClawProcesses
+
+$tunnelProc = $null
+$useTunnel = Read-Host "Deploy to public network? (y/N)"
+if ($useTunnel -match "^[Yy]$") {
+    Write-Host "Starting Cloudflare Tunnel in background..."
+    $tunnelProc = Start-Process -FilePath "python" -ArgumentList "scripts/tunnel.py" -WorkingDirectory $ProjectRoot -PassThru
+    Start-Sleep -Seconds 2
+}
+
+try {
+    python "scripts\launcher.py"
 } finally {
-    Pop-Location
+    if ($null -ne $tunnelProc -and -not $tunnelProc.HasExited) {
+        Stop-Process -Id $tunnelProc.Id -Force -ErrorAction SilentlyContinue
+    }
 }

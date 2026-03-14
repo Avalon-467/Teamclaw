@@ -18,7 +18,6 @@
     python skill/scripts/configure.py --auto-model
 """
 import os
-import platform
 import re
 import subprocess
 import sys
@@ -50,39 +49,6 @@ VALID_KEYS = {
     "TELEGRAM_BOT_TOKEN", "TELEGRAM_ALLOWED_USERS", "QQ_APP_ID", "QQ_BOT_SECRET", 
     "QQ_BOT_USERNAME", "AI_MODEL_TG", "AI_MODEL_QQ", "AI_API_URL"
 }
-
-_OPENAI_ENDPOINT_SUFFIXES = (
-    "/v1/chat/completions",
-    "/chat/completions",
-    "/v1/responses",
-    "/responses",
-    "/v1/models",
-    "/models",
-)
-
-
-def get_run_command():
-    """Return the local command prefix that matches the current platform."""
-    if platform.system() == "Windows":
-        return "powershell -ExecutionPolicy Bypass -File selfskill/scripts/run.ps1"
-    return "bash selfskill/scripts/run.sh"
-
-
-def normalize_openai_base_url(base_url):
-    """Accept either a root base URL or a full OpenAI-style endpoint URL."""
-    cleaned = (base_url or "").strip().rstrip("/")
-    cleaned_lower = cleaned.lower()
-
-    for suffix in _OPENAI_ENDPOINT_SUFFIXES:
-        if cleaned_lower.endswith(suffix):
-            cleaned = cleaned[: -len(suffix)]
-            cleaned_lower = cleaned.lower()
-            break
-
-    if cleaned and not cleaned_lower.endswith("/v1"):
-        cleaned = cleaned.rstrip("/") + "/v1"
-
-    return cleaned
 
 
 def validate_key(key):
