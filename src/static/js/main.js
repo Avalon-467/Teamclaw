@@ -4913,19 +4913,35 @@ function showAddTeamMemberModal() {
     fetch('/proxy_openclaw_default_workspace').then(r => r.json()).then(res => {
         if (res.ok && res.parent_dir) {
             ocParentDir = res.parent_dir;
+            // If name already typed, populate workspace
+            const wn = _ocWsAgentName();
+            if (wn && !ocWsManualEdit) {
+                ocWsInp.value = ocParentDir + '/workspace-' + wn;
+            }
             ocWsInp.placeholder = ocParentDir + '/workspace-...';
         } else {
             ocWsInp.placeholder = '请输入工作空间路径';
         }
     }).catch(() => { ocWsInp.placeholder = '请输入工作空间路径'; });
 
+    // Derive workspace-friendly agent name (includes team prefix)
+    function _ocWsAgentName() {
+        const n = ocNameInp.value.trim();
+        if (!n) return '';
+        return currentGroupId ? (currentGroupId + '_' + n) : n;
+    }
+
     // Name changes → auto-update workspace (unless user has manually edited it)
     ocNameInp.addEventListener('input', () => {
         ocNameInp.style.borderColor = '#d1d5db';
         ocNameInp.style.background = '';
-        if (!ocWsManualEdit && ocParentDir) {
-            const n = ocNameInp.value.trim();
-            ocWsInp.value = n ? (ocParentDir + '/workspace-' + n) : '';
+        if (!ocWsManualEdit) {
+            const wn = _ocWsAgentName();
+            if (wn) {
+                ocWsInp.value = (ocParentDir || '') + '/workspace-' + wn;
+            } else {
+                ocWsInp.value = '';
+            }
         }
     });
 
@@ -4935,8 +4951,8 @@ function showAddTeamMemberModal() {
     // Reset button: revert workspace to auto-derived value
     overlay.querySelector('#add-oc-ws-reset').addEventListener('click', () => {
         ocWsManualEdit = false;
-        const n = ocNameInp.value.trim();
-        ocWsInp.value = (ocParentDir && n) ? (ocParentDir + '/workspace-' + n) : '';
+        const wn = _ocWsAgentName();
+        ocWsInp.value = wn ? ((ocParentDir || '') + '/workspace-' + wn) : '';
         ocWsInp.style.borderColor = '#d1d5db';
     });
 

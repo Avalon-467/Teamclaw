@@ -316,7 +316,7 @@ function orchFindNodeAtPoint(clientX, clientY) {
     return null;
 }
 
-/** Toggle a node's selector status on (with visual feedback) */
+/** Toggle a node's selector status on (with visual feedback). */
 function orchSetNodeSelector(node) {
     node.isSelector = true;
     const el = document.getElementById('onode-' + node.id);
@@ -1704,14 +1704,21 @@ function orchShowAddOpenClawModal() {
     let parentDir = '';       // default workspace parent dir from server
     let wsManualEdit = false; // whether user has manually edited workspace
 
+    // Derive the workspace-friendly agent name (includes team prefix when active)
+    function _orchWsAgentName() {
+        const n = nameInp.value.trim();
+        if (!n) return '';
+        return (orch.teamEnabled && orch.teamName) ? (orch.teamName + '_' + n) : n;
+    }
+
     // Fetch default workspace parent dir
     fetch('/proxy_openclaw_default_workspace').then(r => r.json()).then(res => {
         if (res.ok && res.parent_dir) {
             parentDir = res.parent_dir;
             // If name already typed, populate workspace
-            const n = nameInp.value.trim();
-            if (n && !wsManualEdit) {
-                wsInp.value = parentDir + '/workspace-' + n;
+            const wn = _orchWsAgentName();
+            if (wn && !wsManualEdit) {
+                wsInp.value = parentDir + '/workspace-' + wn;
             }
             wsInp.placeholder = parentDir + '/workspace-...';
         } else {
@@ -1723,9 +1730,13 @@ function orchShowAddOpenClawModal() {
     nameInp.addEventListener('input', () => {
         nameInp.style.borderColor = '#d1d5db';
         nameInp.style.background = '';
-        if (!wsManualEdit && parentDir) {
-            const n = nameInp.value.trim();
-            wsInp.value = n ? (parentDir + '/workspace-' + n) : '';
+        if (!wsManualEdit) {
+            const wn = _orchWsAgentName();
+            if (wn) {
+                wsInp.value = (parentDir || '') + '/workspace-' + wn;
+            } else {
+                wsInp.value = '';
+            }
         }
     });
 
@@ -1735,8 +1746,8 @@ function orchShowAddOpenClawModal() {
     // Reset button: revert workspace to auto-derived value
     overlay.querySelector('#orch-oc-ws-reset').addEventListener('click', () => {
         wsManualEdit = false;
-        const n = nameInp.value.trim();
-        wsInp.value = (parentDir && n) ? (parentDir + '/workspace-' + n) : '';
+        const wn = _orchWsAgentName();
+        wsInp.value = wn ? ((parentDir || '') + '/workspace-' + wn) : '';
         wsInp.style.borderColor = '#d1d5db';
     });
 

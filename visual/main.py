@@ -730,7 +730,7 @@ Supported conditions: `last_post_contains:<keyword>`, `last_post_not_contains:<k
 ```yaml
 plan:
   - id: router
-    expert: "#oasis#router_agent"  # ⚠️ Selector MUST use #oasis# format (stateful, has context)
+    expert: "router_tag#temp#1"   # Selector can use any expert format (#temp#, #oasis#, etc.)
     selector: true                 # Mark as selector node
 
 selector_edges:
@@ -740,10 +740,6 @@ selector_edges:
       2: branch_b                  # [oasis reply choose 2] → branch_b
       3: __end__                   # [oasis reply choose 3] → end
 ```
-
-⚠️ **IMPORTANT for selector nodes**: Selector nodes MUST use `#oasis#name` or `tag#oasis#name` format
-(stateful session agents with memory). Do NOT use `#temp#` for selectors — temp agents are stateless
-and cannot retain context across rounds, which causes them to always pick the default choice.
 
 ### Parallel Groups (within plan):
 ```yaml
@@ -769,20 +765,17 @@ plan:
 - The graph supports cycles (via conditional/selector edges for loops).
 
 ## Expert Name Formats
-1. `tag#temp#N` — Preset expert instance N (stateless, no memory), e.g. "creative#temp#1". ⚠️ NOT suitable for selector nodes.
+1. `tag#temp#N` — Preset expert instance N (stateless, no memory), e.g. "creative#temp#1"
 2. `tag#oasis#new` — Preset expert (stateful session, auto-creates new session), use when the individual node has stateful=true
 3. `tag#oasis#name` — Internal session agent by name (tag enables persona lookup), e.g. "test#oasis#test1"
 4. `#oasis#name` — Internal session agent by name (no tag), e.g. "#oasis#test1"
-
-⚠️ For **selector nodes** (nodes with `selector: true`), you MUST use `#oasis#` format (type 3 or 4).
-`#temp#` agents have no memory and cannot make informed routing decisions based on conversation history.
 
 ## Available Step Types (all require `id` field)
 1. `expert: "Name"` — Single expert speaks
 2. `parallel: [...]` — Multiple experts speak simultaneously
 3. `all_experts: true` — Everyone speaks at once
 4. `manual: {{author, content}}` — Inject fixed text (no LLM)
-5. `selector: true` + `expert` — Selector node (LLM-powered routing, must be #oasis# format)
+5. `selector: true` + `expert` — Selector node (LLM-powered routing, any expert format)
 
 ## Special Node: __end__
 Use `__end__` as an edge target to terminate the workflow. It is not a plan node.
@@ -825,7 +818,6 @@ Based on the above canvas arrangement, generate an OASIS YAML schedule that:
 4. Interprets the spatial arrangement when no explicit connections exist
 5. Uses `repeat: {str(settings.get('repeat', False)).lower()}`
 6. Maximizes parallelism — nodes with no dependency relationship should be able to run concurrently
-7. Selector nodes MUST use `#oasis#` format (stateful, with memory)
 
 You MUST follow this exact order:
 1. FIRST, call the `set_oasis_workflow` tool to save the generated YAML as a named workflow (so the workflow is immediately ready to use from the OASIS panel).
@@ -886,7 +878,6 @@ def agent_generate_yaml():
                         "2. THEN: Output the complete YAML schedule in your response text.\n\n"
                         "The schedule uses version 2 graph format: `plan` defines nodes (each with a unique `id`), "
                         "`edges` defines connections, and `conditional_edges`/`selector_edges` handle branching.\n"
-                        "Selector nodes MUST use #oasis# format (stateful agents with memory). "
                         "No markdown fences around the YAML. Both steps are mandatory and the order matters — save first, then output."
                     ),
                 },
