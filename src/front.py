@@ -236,8 +236,16 @@ def proxy_openai_completions():
         resp.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization"
         return resp
 
-    # 直接透传请求体和 Authorization header 到后端
+    # 认证策略：
+    # 1. 有 Flask session（前端网页登录）→ 用 INTERNAL_TOKEN:user_id 构造认证头
+    # 2. 无 session 但有 Authorization（远程 CLI / 第三方客户端经 Tunnel）→ 原样透传
     auth_header = request.headers.get("Authorization", "")
+    user_id = session.get("user_id")
+    if user_id:
+        # 前端网页走 session，用 INTERNAL_TOKEN 补全认证，不暴露密码
+        auth_header = f"Bearer {INTERNAL_TOKEN}:{user_id}"
+    # else: 外部调用自带 Bearer user:password，原样透传
+
     try:
         r = requests.post(
             LOCAL_OPENAI_COMPLETIONS_URL,

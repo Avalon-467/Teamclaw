@@ -29,18 +29,6 @@ uv run scripts/cli.py [-u USER] <子命令> [参数...]
 
 ---
 
-## 端口映射速查
-
-| 变量 | 端口 | 服务 | 使用的命令 |
-|------|------|------|-----------|
-| `AGENT_BASE` | **51200** | `src/mainagent.py` | chat, sessions, history, settings, tools, tts, cancel, groups |
-| `OASIS_BASE` | **51202** | `oasis/server.py` | openclaw, topics, experts, workflows |
-| `FRONT_BASE` | **51209** | `src/front.py` | openclaw-snapshot, visual, internal-agents, teams |
-| — | — | 本地操作 | restart, tunnel |
-| — | 全部 | 多服务探测 | status |
-
----
-
 ## 目录
 
 1. [chat](#1-chat) — 发送消息
@@ -72,23 +60,16 @@ uv run scripts/cli.py [-u USER] <子命令> [参数...]
 
 **发送消息（流式输出）**
 
-| 端口 | 端点 |
-|------|------|
-| 51200 (Agent) | `POST /v1/chat/completions`（SSE） |
-
 ```bash
 # 基本用法（-s 必填）
-uv run scripts/cli.py -u alice chat "你好" -s mysession
+uv run scripts/cli.py -u Avalon_01 chat "你好" -s mysession
 
-# 指定模型
-uv run scripts/cli.py -u alice chat "分析一下" -s mysession -m gpt-4o
 ```
 
 | 参数 | 说明 | 必填 | 默认值 |
 |------|------|------|--------|
 | `message` | 消息内容（位置参数） | ✅ | — |
 | `-s`, `--session` | 会话 ID | ✅ | — |
-| `-m`, `--model` | 模型名称 | ❌ | `default` |
 
 ---
 
@@ -96,12 +77,8 @@ uv run scripts/cli.py -u alice chat "分析一下" -s mysession -m gpt-4o
 
 **查看会话列表**
 
-| 端口 | 端点 |
-|------|------|
-| 51200 (Agent) | `POST /sessions` |
-
 ```bash
-uv run scripts/cli.py -u alice sessions
+uv run scripts/cli.py -u Avalon_01 sessions
 ```
 
 无额外参数。
@@ -111,10 +88,6 @@ uv run scripts/cli.py -u alice sessions
 ## 3. sessions-status
 
 **查看所有会话忙碌状态**
-
-| 端口 | 端点 |
-|------|------|
-| 51200 (Agent) | `POST /sessions_status` |
 
 ```bash
 uv run scripts/cli.py sessions-status
@@ -127,10 +100,6 @@ uv run scripts/cli.py sessions-status
 ## 4. session-status
 
 **查看单个会话状态**
-
-| 端口 | 端点 |
-|------|------|
-| 51200 (Agent) | `POST /session_status` |
 
 ```bash
 uv run scripts/cli.py session-status -s mysession
@@ -146,19 +115,15 @@ uv run scripts/cli.py session-status -s mysession
 
 **查看会话历史**
 
-| 端口 | 端点 |
-|------|------|
-| 51200 (Agent) | `POST /session_history` |
-
 ```bash
 # 查看完整历史
-uv run scripts/cli.py -u alice history -s mysession
+uv run scripts/cli.py -u Avalon_01 history -s mysession
 
 # 最近 5 条
-uv run scripts/cli.py -u alice history -s mysession -n 5
+uv run scripts/cli.py -u Avalon_01 history -s mysession -n 5
 
 # 不截断长消息
-uv run scripts/cli.py -u alice history -s mysession --full
+uv run scripts/cli.py -u Avalon_01 history -s mysession --full
 ```
 
 | 参数 | 说明 | 必填 | 默认值 |
@@ -173,12 +138,8 @@ uv run scripts/cli.py -u alice history -s mysession --full
 
 **删除会话**
 
-| 端口 | 端点 |
-|------|------|
-| 51200 (Agent) | `POST /delete_session` |
-
 ```bash
-uv run scripts/cli.py -u alice delete-session mysession
+uv run scripts/cli.py -u Avalon_01 delete-session mysession
 ```
 
 | 参数 | 说明 | 必填 | 默认值 |
@@ -190,10 +151,6 @@ uv run scripts/cli.py -u alice delete-session mysession
 ## 7. settings
 
 **查看/修改设置**
-
-| 端口 | 端点 |
-|------|------|
-| 51200 (Agent) | `GET /settings`、`GET /settings/full`、`POST /settings` |
 
 ```bash
 # 查看基本设置
@@ -217,10 +174,6 @@ uv run scripts/cli.py settings --set model gpt-4o
 
 **查看可用工具**
 
-| 端口 | 端点 |
-|------|------|
-| 51200 (Agent) | `GET /tools` |
-
 ```bash
 # 完整工具列表
 uv run scripts/cli.py tools
@@ -239,10 +192,6 @@ uv run scripts/cli.py tools --brief
 
 **文字转语音**
 
-| 端口 | 端点 |
-|------|------|
-| 51200 (Agent) | `POST /tts` |
-
 ```bash
 uv run scripts/cli.py tts "你好世界" -o hello.mp3 --voice alloy
 ```
@@ -258,10 +207,6 @@ uv run scripts/cli.py tts "你好世界" -o hello.mp3 --voice alloy
 ## 10. cancel
 
 **取消当前生成**
-
-| 端口 | 端点 |
-|------|------|
-| 51200 (Agent) | `POST /cancel` |
 
 ```bash
 uv run scripts/cli.py cancel -s mysession
@@ -290,10 +235,6 @@ uv run scripts/cli.py restart
 ## 12. groups
 
 **群组管理**
-
-| 端口 | 端点 |
-|------|------|
-| 51200 (Agent) | `/groups` 系列 |
 
 ```bash
 # 列出群组
@@ -337,31 +278,13 @@ uv run scripts/cli.py groups sessions --group-id abc123
 | `--data` | JSON 数据 | ❌ | — |
 | `--after-id` | 增量消息起点 | ❌ | — |
 
-**action 与端点映射：**
 
-| action | 方法 | 端点 |
-|--------|------|------|
-| `list` | GET | `/groups` |
-| `create` | POST | `/groups` |
-| `get` | GET | `/groups/{id}` |
-| `update` | PUT | `/groups/{id}` |
-| `delete` | DELETE | `/groups/{id}` |
-| `messages` | GET | `/groups/{id}/messages` |
-| `send` | POST | `/groups/{id}/messages` |
-| `mute` | POST | `/groups/{id}/mute` |
-| `unmute` | POST | `/groups/{id}/unmute` |
-| `mute-status` | GET | `/groups/{id}/mute_status` |
-| `sessions` | GET | `/groups/{id}/sessions` |
 
 ---
 
 ## 13. openclaw
 
 **OpenClaw Agent 管理**
-
-| 端口 | 端点 |
-|------|------|
-| 51202 (OASIS) | `/sessions/openclaw` 系列 |
 
 ```bash
 # 列出 OpenClaw 会话
@@ -408,24 +331,6 @@ uv run scripts/cli.py openclaw remove --name mybot
 | `--filename` | 文件名 | 视操作 | — |
 | `--data` | JSON 数据 | 视操作 | — |
 
-**action 与端点映射：**
-
-| action | 方法 | 端点 |
-|--------|------|------|
-| `sessions` | GET | `/sessions/openclaw` |
-| `add` | POST | `/sessions/openclaw/add` |
-| `default-workspace` | GET | `/sessions/openclaw/default-workspace` |
-| `workspace-files` | GET | `/sessions/openclaw/workspace-files` |
-| `workspace-file-read` | GET | `/sessions/openclaw/workspace-file` |
-| `workspace-file-save` | POST | `/sessions/openclaw/workspace-file` |
-| `detail` | GET | `/sessions/openclaw/agent-detail` |
-| `skills` | GET | `/sessions/openclaw/skills` |
-| `tool-groups` | GET | `/sessions/openclaw/tool-groups` |
-| `update-config` | POST | `/sessions/openclaw/update-config` |
-| `channels` | GET | `/sessions/openclaw/channels` |
-| `bindings` | GET | `/sessions/openclaw/agent-bindings` |
-| `bind` | POST | `/sessions/openclaw/agent-bind` |
-| `remove` | DELETE | `/sessions/openclaw/remove` |
 
 ---
 
@@ -433,28 +338,24 @@ uv run scripts/cli.py openclaw remove --name mybot
 
 **OpenClaw 快照管理**
 
-| 端口 | 端点 |
-|------|------|
-| 51209 (Front) | `/team_openclaw_snapshot` 系列 |
-
 ```bash
 # 获取快照列表
-uv run scripts/cli.py -u alice openclaw-snapshot get --team myteam
+uv run scripts/cli.py -u Avalon_01 openclaw-snapshot get --team myteam
 
 # 导出单个快照
-uv run scripts/cli.py -u alice openclaw-snapshot export --team myteam --agent-name "Agent全名" --short-name "显示名"
+uv run scripts/cli.py -u Avalon_01 openclaw-snapshot export --team myteam --agent-name "Agent全名" --short-name "显示名"
 
 # 导出全部
-uv run scripts/cli.py -u alice openclaw-snapshot export-all --team myteam
+uv run scripts/cli.py -u Avalon_01 openclaw-snapshot export-all --team myteam
 
 # 同步全部
-uv run scripts/cli.py -u alice openclaw-snapshot sync-all --team myteam
+uv run scripts/cli.py -u Avalon_01 openclaw-snapshot sync-all --team myteam
 
 # 恢复单个
-uv run scripts/cli.py -u alice openclaw-snapshot restore --team myteam --short-name "显示名" --target-name "目标Agent"
+uv run scripts/cli.py -u Avalon_01 openclaw-snapshot restore --team myteam --short-name "显示名" --target-name "目标Agent"
 
 # 恢复全部
-uv run scripts/cli.py -u alice openclaw-snapshot restore-all --team myteam
+uv run scripts/cli.py -u Avalon_01 openclaw-snapshot restore-all --team myteam
 ```
 
 | 参数 | 说明 | 必填 | 默认值 |
@@ -465,16 +366,6 @@ uv run scripts/cli.py -u alice openclaw-snapshot restore-all --team myteam
 | `--short-name` | 显示名 | export/restore 时 | — |
 | `--target-name` | 恢复目标 Agent 名 | restore 时 | — |
 
-**action 与端点映射：**
-
-| action | 方法 | 端点 |
-|--------|------|------|
-| `get` | GET | `/team_openclaw_snapshot` |
-| `export` | POST | `/team_openclaw_snapshot/export` |
-| `export-all` | POST | `/team_openclaw_snapshot/export_all` |
-| `sync-all` | POST | `/team_openclaw_snapshot/sync_all` |
-| `restore` | POST | `/team_openclaw_snapshot/restore` |
-| `restore-all` | POST | `/team_openclaw_snapshot/restore_all` |
 
 ---
 
@@ -482,34 +373,30 @@ uv run scripts/cli.py -u alice openclaw-snapshot restore-all --team myteam
 
 **可视化编排管理**
 
-| 端口 | 端点 |
-|------|------|
-| 51209 (Front) | `/proxy_visual` 系列 |
-
 ```bash
 # 专家列表
-uv run scripts/cli.py -u alice visual experts --team myteam
+uv run scripts/cli.py -u Avalon_01 visual experts --team myteam
 
 # 添加/删除自定义专家
-uv run scripts/cli.py -u alice visual add-expert --data '{"tag":"myexpert","name":"我的专家","prompt":"..."}' --team myteam
-uv run scripts/cli.py -u alice visual delete-expert --tag myexpert --team myteam
+uv run scripts/cli.py -u Avalon_01 visual add-expert --data '{"tag":"myexpert","name":"我的专家","prompt":"..."}' --team myteam
+uv run scripts/cli.py -u Avalon_01 visual delete-expert --tag myexpert --team myteam
 
 # 生成 YAML
-uv run scripts/cli.py -u alice visual generate-yaml --data '{"nodes":[...],"edges":[...]}' --team myteam
-uv run scripts/cli.py -u alice visual agent-generate-yaml --data '{"prompt":"..."}' --team myteam
+uv run scripts/cli.py -u Avalon_01 visual generate-yaml --data '{"nodes":[...],"edges":[...]}' --team myteam
+uv run scripts/cli.py -u Avalon_01 visual agent-generate-yaml --data '{"prompt":"..."}' --team myteam
 
 # 布局管理
-uv run scripts/cli.py -u alice visual save-layout --data '{"name":"myflow","nodes":[...],"edges":[...]}' --team myteam
-uv run scripts/cli.py -u alice visual load-layouts --team myteam
-uv run scripts/cli.py -u alice visual load-layout --name myflow --team myteam
-uv run scripts/cli.py -u alice visual load-yaml-raw --name myflow --team myteam
-uv run scripts/cli.py -u alice visual delete-layout --name myflow --team myteam
+uv run scripts/cli.py -u Avalon_01 visual save-layout --data '{"name":"myflow","nodes":[...],"edges":[...]}' --team myteam
+uv run scripts/cli.py -u Avalon_01 visual load-layouts --team myteam
+uv run scripts/cli.py -u Avalon_01 visual load-layout --name myflow --team myteam
+uv run scripts/cli.py -u Avalon_01 visual load-yaml-raw --name myflow --team myteam
+uv run scripts/cli.py -u Avalon_01 visual delete-layout --name myflow --team myteam
 
 # 上传 YAML
-uv run scripts/cli.py -u alice visual upload-yaml --data '{"name":"myflow","yaml_content":"..."}' --team myteam
+uv run scripts/cli.py -u Avalon_01 visual upload-yaml --data '{"name":"myflow","yaml_content":"..."}' --team myteam
 
 # 编排会话状态
-uv run scripts/cli.py -u alice visual sessions-status
+uv run scripts/cli.py -u Avalon_01 visual sessions-status
 ```
 
 | 参数 | 说明 | 必填 | 默认值 |
@@ -520,46 +407,25 @@ uv run scripts/cli.py -u alice visual sessions-status
 | `--name` | 布局名称 | load/delete 时 | — |
 | `--data` | JSON 数据 | 视操作 | — |
 
-**action 与端点映射：**
-
-| action | 方法 | 端点 |
-|--------|------|------|
-| `experts` | GET | `/proxy_visual/experts` |
-| `add-expert` | POST | `/proxy_visual/experts/custom` |
-| `delete-expert` | DELETE | `/proxy_visual/experts/custom/{tag}` |
-| `generate-yaml` | POST | `/proxy_visual/generate-yaml` |
-| `agent-generate-yaml` | POST | `/proxy_visual/agent-generate-yaml` |
-| `save-layout` | POST | `/proxy_visual/save-layout` |
-| `load-layouts` | GET | `/proxy_visual/load-layouts` |
-| `load-layout` | GET | `/proxy_visual/load-layout/{name}` |
-| `load-yaml-raw` | GET | `/proxy_visual/load-yaml-raw/{name}` |
-| `delete-layout` | DELETE | `/proxy_visual/delete-layout/{name}` |
-| `upload-yaml` | POST | `/proxy_visual/upload-yaml` |
-| `sessions-status` | GET | `/proxy_visual/sessions-status` |
-
 ---
 
 ## 16. internal-agents
 
 **内部 Agent CRUD**
 
-| 端口 | 端点 |
-|------|------|
-| 51209 (Front) | `/internal_agents` |
-
 ```bash
 # 列出
-uv run scripts/cli.py -u alice internal-agents list --team myteam
+uv run scripts/cli.py -u Avalon_01 internal-agents list --team myteam
 
 # 添加
-uv run scripts/cli.py -u alice internal-agents add --team myteam --data '{"session":"s1","meta":{"name":"bot","tag":"assistant"}}'
-uv run scripts/cli.py -u alice internal-agents add --team myteam --session s1 --data '{"meta":{"name":"bot"}}'
+uv run scripts/cli.py -u Avalon_01 internal-agents add --team myteam --data '{"session":"s1","meta":{"name":"bot","tag":"assistant"}}'
+uv run scripts/cli.py -u Avalon_01 internal-agents add --team myteam --session s1 --data '{"meta":{"name":"bot"}}'
 
 # 更新（--sid 必填）
-uv run scripts/cli.py -u alice internal-agents update --sid s1 --team myteam --data '{"meta":{"name":"new_name"}}'
+uv run scripts/cli.py -u Avalon_01 internal-agents update --sid s1 --team myteam --data '{"meta":{"name":"new_name"}}'
 
 # 删除（--sid 必填）
-uv run scripts/cli.py -u alice internal-agents delete --sid s1 --team myteam
+uv run scripts/cli.py -u Avalon_01 internal-agents delete --sid s1 --team myteam
 ```
 
 | 参数 | 说明 | 必填 | 默认值 |
@@ -570,48 +436,35 @@ uv run scripts/cli.py -u alice internal-agents delete --sid s1 --team myteam
 | `--session` | Session ID（add 时自动补入 data） | ❌ | — |
 | `--data` | JSON 数据 | add/update 时 | — |
 
-**action 与端点映射：**
-
-| action | 方法 | 端点 |
-|--------|------|------|
-| `list` | GET | `/internal_agents` |
-| `add` | POST | `/internal_agents` |
-| `update` | PUT | `/internal_agents/{sid}` |
-| `delete` | DELETE | `/internal_agents/{sid}` |
-
 ---
 
 ## 17. teams
 
 **Team 管理**
 
-| 端口 | 端点 |
-|------|------|
-| 51209 (Front) | `/teams` 系列 |
-
 ```bash
 # 团队列表
-uv run scripts/cli.py -u alice teams
+uv run scripts/cli.py -u Avalon_01 teams
 
 # 创建 / 删除团队
-uv run scripts/cli.py -u alice teams create --team-name newteam --data '{"description":"..."}'
-uv run scripts/cli.py -u alice teams delete --team-name oldteam
+uv run scripts/cli.py -u Avalon_01 teams create --team-name newteam --data '{"description":"..."}'
+uv run scripts/cli.py -u Avalon_01 teams delete --team-name oldteam
 
 # 成员管理
-uv run scripts/cli.py -u alice teams members --team-name myteam
-uv run scripts/cli.py -u alice teams add-ext-member --team-name myteam --data '{"user_id":"bob","role":"member"}'
-uv run scripts/cli.py -u alice teams update-ext-member --team-name myteam --data '{"user_id":"bob","role":"admin"}'
-uv run scripts/cli.py -u alice teams delete-ext-member --team-name myteam --data '{"user_id":"bob"}'
+uv run scripts/cli.py -u Avalon_01 teams members --team-name myteam
+uv run scripts/cli.py -u Avalon_01 teams add-ext-member --team-name myteam --data '{"user_id":"bob","role":"member"}'
+uv run scripts/cli.py -u Avalon_01 teams update-ext-member --team-name myteam --data '{"user_id":"bob","role":"admin"}'
+uv run scripts/cli.py -u Avalon_01 teams delete-ext-member --team-name myteam --data '{"user_id":"bob"}'
 
 # 团队专家管理
-uv run scripts/cli.py -u alice teams experts --team-name myteam
-uv run scripts/cli.py -u alice teams add-expert --team-name myteam --data '{"tag":"myexpert","name":"...","prompt":"..."}'
-uv run scripts/cli.py -u alice teams update-expert --team-name myteam --tag myexpert --data '{"name":"..."}'
-uv run scripts/cli.py -u alice teams delete-expert --team-name myteam --tag myexpert
+uv run scripts/cli.py -u Avalon_01 teams experts --team-name myteam
+uv run scripts/cli.py -u Avalon_01 teams add-expert --team-name myteam --data '{"tag":"myexpert","name":"...","prompt":"..."}'
+uv run scripts/cli.py -u Avalon_01 teams update-expert --team-name myteam --tag myexpert --data '{"name":"..."}'
+uv run scripts/cli.py -u Avalon_01 teams delete-expert --team-name myteam --tag myexpert
 
 # 团队快照
-uv run scripts/cli.py -u alice teams snapshot-download --team-name myteam -o snapshot.zip
-uv run scripts/cli.py -u alice teams snapshot-upload --team-name myteam --file snapshot.zip
+uv run scripts/cli.py -u Avalon_01 teams snapshot-download --team-name myteam -o snapshot.zip
+uv run scripts/cli.py -u Avalon_01 teams snapshot-upload --team-name myteam --file snapshot.zip
 ```
 
 | 参数 | 说明 | 必填 | 默认值 |
@@ -623,33 +476,11 @@ uv run scripts/cli.py -u alice teams snapshot-upload --team-name myteam --file s
 | `-o`, `--output` | 输出文件路径 | ❌ | `team_{name}_snapshot.zip` |
 | `--file` | 上传文件路径 | snapshot-upload 时 | — |
 
-**action 与端点映射：**
-
-| action | 方法 | 端点 |
-|--------|------|------|
-| `list` | GET | `/teams` |
-| `create` | POST | `/teams` |
-| `delete` | DELETE | `/teams/{name}` |
-| `members` | GET | `/teams/{name}/members` |
-| `add-ext-member` | POST | `/teams/{name}/members/external` |
-| `delete-ext-member` | DELETE | `/teams/{name}/members/external` |
-| `update-ext-member` | PUT | `/teams/{name}/members/external` |
-| `experts` | GET | `/teams/{name}/experts` |
-| `add-expert` | POST | `/teams/{name}/experts` |
-| `update-expert` | PUT | `/teams/{name}/experts/{tag}` |
-| `delete-expert` | DELETE | `/teams/{name}/experts/{tag}` |
-| `snapshot-download` | POST | `/teams/snapshot/download` |
-| `snapshot-upload` | POST | `/teams/snapshot/upload`（multipart） |
-
 ---
 
 ## 18. topics
 
 **OASIS 话题管理**
-
-| 端口 | 端点 |
-|------|------|
-| 51202 (OASIS) | `/topics` 系列 |
 
 ```bash
 # 列出话题
@@ -673,25 +504,10 @@ uv run scripts/cli.py topics delete-all
 | `action` | 操作 | ❌ | `list` |
 | `--topic-id` | 话题 ID | show/cancel/purge 时 ✅ | — |
 
-**action 与端点映射：**
-
-| action | 方法 | 端点 |
-|--------|------|------|
-| `list` | GET | `/topics` |
-| `show` | GET | `/topics/{id}` |
-| `cancel` | DELETE | `/topics/{id}` |
-| `purge` | POST | `/topics/{id}/purge` |
-| `delete-all` | DELETE | `/topics` |
-
----
 
 ## 19. experts
 
 **查看 OASIS 专家列表**
-
-| 端口 | 端点 |
-|------|------|
-| 51202 (OASIS) | `GET /experts` |
 
 ```bash
 uv run scripts/cli.py experts
@@ -705,22 +521,17 @@ uv run scripts/cli.py experts
 
 **OASIS Workflow 查看**
 
-| 端口 | 端点 |
-|------|------|
-| 51202 (OASIS) | `GET /workflows`（list） |
-| — | 本地文件读取（show） |
-
 ```bash
 # 列出所有 workflow
-uv run scripts/cli.py -u alice workflows
-uv run scripts/cli.py -u alice workflows list
+uv run scripts/cli.py -u Avalon_01 workflows
+uv run scripts/cli.py -u Avalon_01 workflows list
 
 # 按 team 过滤
-uv run scripts/cli.py -u alice workflows list --team team2
+uv run scripts/cli.py -u Avalon_01 workflows list --team team2
 
 # 查看 YAML 内容
-uv run scripts/cli.py -u alice workflows show --name creative_critical_workflow
-uv run scripts/cli.py -u alice workflows show --name test2flow --team team2
+uv run scripts/cli.py -u Avalon_01 workflows show --name creative_critical_workflow
+uv run scripts/cli.py -u Avalon_01 workflows show --name test2flow --team team2
 ```
 
 | 参数 | 说明 | 必填 | 默认值 |
@@ -767,12 +578,6 @@ uv run scripts/cli.py tunnel stop
 uv run scripts/cli.py status
 ```
 
-| 服务 | 端口 | 探测端点 |
-|------|------|----------|
-| Agent | 51200 | `GET /v1/models` |
-| OASIS | 51202 | `GET /experts` |
-| Frontend | 51209 | `GET /proxy_check_session` |
-
 无额外参数。
 
 ---
@@ -783,27 +588,25 @@ uv run scripts/cli.py status
 # 检查服务是否正常
 uv run scripts/cli.py status
 
-# 以 Xavier_01 身份管理 team2
-uv run scripts/cli.py -u Xavier_01 teams members --team-name team2
-uv run scripts/cli.py -u Xavier_01 internal-agents list --team team2
-uv run scripts/cli.py -u Xavier_01 workflows list --team team2
-uv run scripts/cli.py -u Xavier_01 workflows show --name test2flow --team team2
+# 以 Avalon_01 身份管理 team2
+uv run scripts/cli.py -u Avalon_01 teams members --team-name team2
+uv run scripts/cli.py -u Avalon_01 internal-agents list --team team2
+uv run scripts/cli.py -u Avalon_01 workflows list --team team2
+uv run scripts/cli.py -u Avalon_01 workflows show --name test2flow --team team2
 
 # 聊天
-uv run scripts/cli.py -u alice chat "帮我分析这段数据" -s analysis_session
+uv run scripts/cli.py -u Avalon_01 chat "帮我分析这段数据" -s analysis_session
 
 # 查看聊天历史（最近 10 条，完整输出）
-uv run scripts/cli.py -u alice history -s analysis_session -n 10 --full
+uv run scripts/cli.py -u Avalon_01 history -s analysis_session -n 10 --full
 
 # 可视化编排：查看布局 → 查看 YAML → 查看会话状态
-uv run scripts/cli.py -u alice visual load-layouts --team myteam
-uv run scripts/cli.py -u alice visual load-yaml-raw --name myflow --team myteam
-uv run scripts/cli.py -u alice visual sessions-status
+uv run scripts/cli.py -u Avalon_01 visual load-layouts --team myteam
+uv run scripts/cli.py -u Avalon_01 visual load-yaml-raw --name myflow --team myteam
+uv run scripts/cli.py -u Avalon_01 visual sessions-status
 
 # OpenClaw 快照：导出全部 → 恢复全部
-uv run scripts/cli.py -u alice openclaw-snapshot export-all --team myteam
-uv run scripts/cli.py -u alice openclaw-snapshot restore-all --team myteam
+uv run scripts/cli.py -u Avalon_01 openclaw-snapshot export-all --team myteam
+uv run scripts/cli.py -u Avalon_01 openclaw-snapshot restore-all --team myteam
 
-# TTS
-uv run scripts/cli.py tts "Hello World" -o greeting.mp3
 ```

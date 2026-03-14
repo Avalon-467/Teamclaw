@@ -1080,8 +1080,7 @@ let pendingFiles = [];  // [{name: "data.csv", content: "...(text content)"}, ..
 let pendingAudios = []; // [{base64: "data:audio/...", name: "recording.wav", format: "wav"}, ...]
 let isRecording = false;
 
-// OpenAI API 配置
-function getAuthToken() { return sessionStorage.getItem('authToken') || ''; }
+// OpenAI API 配置（前端不再存储 authToken，认证由服务端 session 完成）
 const TEXT_EXTENSIONS = new Set(['.txt','.md','.csv','.json','.xml','.yaml','.yml','.log','.py','.js','.ts','.html','.css','.java','.c','.cpp','.h','.go','.rs','.sh','.bat','.ini','.toml','.cfg','.conf','.sql','.r','.rb']);
 const AUDIO_EXTENSIONS = new Set(['.mp3','.wav','.ogg','.m4a','.webm','.flac','.aac']);
 const VIDEO_EXTENSIONS = new Set(['.avi','.mp4','.mkv','.mov']);
@@ -2140,9 +2139,7 @@ async function handleLogin() {
 
         currentUserId = name;
         sessionStorage.setItem('userId', name);
-        // 存储 OpenAI 格式的 Bearer token: user_id:password
-        const authToken = name + ':' + password;
-        sessionStorage.setItem('authToken', authToken);
+        // 密码不再存储到前端，认证由服务端 session + INTERNAL_TOKEN 完成
         initSession();
 
         document.getElementById('uid-display').textContent = 'UID: ' + name;
@@ -2464,7 +2461,6 @@ function handleLogout() {
     currentSessionId = null;
     stopHistoryPolling();
     sessionStorage.removeItem('userId');
-    sessionStorage.removeItem('authToken');
     sessionStorage.removeItem('sessionId');
     fetch("/proxy_logout", { method: 'POST' });
     document.getElementById('chat-screen').style.display = 'none';
@@ -2592,7 +2588,6 @@ async function loadTools() {
         }
         // 后端 session 无效，清除前端状态，回退到登录页
         sessionStorage.removeItem('userId');
-        sessionStorage.removeItem('authToken');
         sessionStorage.removeItem('sessionId');
     }
 })();
@@ -2938,8 +2933,7 @@ async function handleSend() {
         const response = await fetch("/v1/chat/completions", {
             method: 'POST',
             headers: {
-                'Content-Type': 'application/json',
-                'Authorization': 'Bearer ' + getAuthToken()
+                'Content-Type': 'application/json'
             },
             body: JSON.stringify(openaiPayload),
             signal: currentAbortController.signal
@@ -3127,8 +3121,8 @@ async function showWorkflowPopup() {
     try {
         // Load team list and global workflows in parallel
         const [teamsResp, globalResp] = await Promise.all([
-            fetch('/teams', { headers: { 'Authorization': 'Bearer ' + getAuthToken() } }),
-            fetch('/proxy_visual/load-layouts', { headers: { 'Authorization': 'Bearer ' + getAuthToken() } }),
+            fetch('/teams'),
+            fetch('/proxy_visual/load-layouts'),
         ]);
         const teamsData = await teamsResp.json();
         const globalLayouts = await globalResp.json();
@@ -3137,9 +3131,7 @@ async function showWorkflowPopup() {
         // Load team workflows in parallel
         const teamResults = await Promise.all(teams.map(async (teamName) => {
             try {
-                const r = await fetch('/proxy_visual/load-layouts?team=' + encodeURIComponent(teamName), {
-                    headers: { 'Authorization': 'Bearer ' + getAuthToken() }
-                });
+                const r = await fetch('/proxy_visual/load-layouts?team=' + encodeURIComponent(teamName));
                 const layouts = await r.json();
                 return { team: teamName, layouts: layouts || [] };
             } catch { return { team: teamName, layouts: [] }; }
@@ -3230,9 +3222,7 @@ async function addWorkflowToContext(name, team) {
     let yamlText = '';
     try {
         const teamQ = team ? '?team=' + encodeURIComponent(team) : '';
-        const r = await fetch(`/proxy_visual/load-yaml-raw/${encodeURIComponent(name)}${teamQ}`, {
-            headers: { 'Authorization': 'Bearer ' + getAuthToken() }
-        });
+        const r = await fetch(`/proxy_visual/load-yaml-raw/${encodeURIComponent(name)}${teamQ}`);
         const data = await r.json();
         yamlText = data.yaml || '';
     } catch(e) {
@@ -3272,9 +3262,7 @@ function clearPersona() {
 
 async function showPersonaPopup() {
     try {
-        const r = await fetch('/proxy_oasis/experts', {
-            headers: { 'Authorization': 'Bearer ' + getAuthToken() }
-        });
+        const r = await fetch('/proxy_oasis/experts');
         const data = await r.json();
         const experts = data.experts || [];
         if (!experts.length) { alert(t('persona_no_experts')); return; }
@@ -4298,9 +4286,7 @@ function startGroupPolling(groupId) {
             return;
         }
         try {
-            const resp = await fetch(`/proxy_groups/${groupId}/messages?after_id=${groupLastMsgId}`, {
-                headers: { 'Authorization': 'Bearer ' + getAuthToken() }
-            });
+            const resp = await fetch(`/proxy_groups/${groupId}/messages?after_id=${groupLastMsgId}`);
             if (!resp.ok) return;
             const data = await resp.json();
             if (data.messages && data.messages.length > 0) {
@@ -4332,8 +4318,7 @@ async function sendGroupMessage() {
         const resp = await fetch(`/proxy_groups/${currentGroupId}/messages`, {
             method: 'POST',
             headers: {
-                'Content-Type': 'application/json',
-                'Authorization': 'Bearer ' + getAuthToken()
+                'Content-Type': 'application/json'
             },
             body: JSON.stringify(body)
         });
@@ -4382,9 +4367,7 @@ async function loadAvailableSessions() {
     try {
         // Load sessions, group detail, and agent meta in parallel
         const [resp, agentMap] = await Promise.all([
-            fetch(`/proxy_groups/${currentGroupId}/sessions`, {
-                headers: { 'Authorization': 'Bearer ' + getAuthToken() }
-            }),
+            fetch(`/proxy_groups/${currentGroupId}/sessions`),
             _loadAgentMetaMap()
         ]);
         if (!resp.ok) return;
@@ -4392,9 +4375,7 @@ async function loadAvailableSessions() {
         const sessions = data.sessions || [];
 
         // Get current members to mark them
-        const detailResp = await fetch(`/proxy_groups/${currentGroupId}`, {
-            headers: { 'Authorization': 'Bearer ' + getAuthToken() }
-        });
+        const detailResp = await fetch(`/proxy_groups/${currentGroupId}`);
         const detail = await detailResp.json();
         const memberSet = new Set((detail.members || []).map(m => m.user_id + '#' + m.session_id));
 
@@ -4424,8 +4405,7 @@ async function toggleGroupAgent(sessionId, add) {
         await fetch(`/proxy_groups/${currentGroupId}`, {
             method: 'PUT',
             headers: {
-                'Content-Type': 'application/json',
-                'Authorization': 'Bearer ' + getAuthToken()
+                'Content-Type': 'application/json'
             },
             body: JSON.stringify({
                 members: [{
@@ -4436,9 +4416,7 @@ async function toggleGroupAgent(sessionId, add) {
             })
         });
         // Refresh member list
-        const resp = await fetch(`/proxy_groups/${currentGroupId}`, {
-            headers: { 'Authorization': 'Bearer ' + getAuthToken() }
-        });
+        const resp = await fetch(`/proxy_groups/${currentGroupId}`);
         const detail = await resp.json();
         renderGroupMembers(detail.members || []);
     } catch (e) {
@@ -5066,8 +5044,7 @@ async function addExternalMember() {
 async function deleteGroup(groupId) {    if (!confirm(t('group_delete_confirm'))) return;
     try {
         await fetch(`/proxy_groups/${groupId}`, {
-            method: 'DELETE',
-            headers: { 'Authorization': 'Bearer ' + getAuthToken() }
+            method: 'DELETE'
         });
         if (currentGroupId === groupId) {
             currentGroupId = null;
@@ -5100,9 +5077,7 @@ function updateMuteButton() {
 
 async function loadGroupMuteStatus(groupId) {
     try {
-        const resp = await fetch(`/proxy_groups/${groupId}/mute_status`, {
-            headers: { 'Authorization': 'Bearer ' + getAuthToken() }
-        });
+        const resp = await fetch(`/proxy_groups/${groupId}/mute_status`);
         if (resp.ok) {
             const data = await resp.json();
             groupMuted = data.muted;
@@ -5116,8 +5091,7 @@ async function toggleGroupMute() {
     const action = groupMuted ? 'unmute' : 'mute';
     try {
         const resp = await fetch(`/proxy_groups/${currentGroupId}/${action}`, {
-            method: 'POST',
-            headers: { 'Authorization': 'Bearer ' + getAuthToken() }
+            method: 'POST'
         });
         if (resp.ok) {
             groupMuted = !groupMuted;
