@@ -35,7 +35,28 @@ metadata:
 
 ## 是什么
 
-TeamClaw 是一个**多 Agent 编排平台**，核心能力：
+TeamClaw 是一个**多 Agent 编排平台**，核心概念：
+
+### Team（团队）
+
+Team 是协作单位，由以下部分组成：
+
+| 组件 | 说明 |
+|------|------|
+| **成员（Agent）** | 执行任务的实体，包括： |
+| └─ 内置 Agent | TeamClaw 内置的轻量级 Agent（文件管理、指令执行、社交媒体） |
+| └─ OpenClaw Agent | 外部 OpenClaw 平台的 Agent |
+| └─ 外部 API Agent | 任意外部 API 服务（如 GPT-4 API） |
+| **自定义 Expert** | 人设，通过 prompt 定义身份、性格、能力 |
+| **工作流** | 定义成员之间的协作方式（串行、并行、选择、循环） |
+
+> **公共 vs 私有**：
+> - **公共 Agent/Expert**: 在非team状态可用，可以加入team后，在team中使用
+> - **私有 Agent/Expert**：仅当前 Team 可用
+> - **公共工作流**：只能使用公共 Agent/Expert
+> - **私有工作流**：仅当前 Team 可用，只能使用已经加入team的Agent
+
+### 核心能力
 
 1. **可视化编排团队 Agent**
    - 将 OpenClaw Agent、TeamClaw 内置 Agent 或任意外部 API Agent 编排为"团队"
