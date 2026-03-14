@@ -45,8 +45,8 @@ VALID_KEYS = {
     "LLM_API_KEY", "LLM_BASE_URL", "LLM_MODEL", "LLM_PROVIDER", "LLM_VISION_SUPPORT",
     # 端口配置
     "PORT_AGENT", "PORT_SCHEDULER", "PORT_OASIS", "PORT_FRONTEND",
-    # TTS配置
-    "TTS_MODEL", "TTS_VOICE",
+    # Audio配置
+    "TTS_MODEL", "TTS_VOICE", "STT_MODEL", "WHISPER_MODEL",
     # OpenClaw配置
     "OPENCLAW_API_URL", "OPENCLAW_GATEWAY_TOKEN", "OPENCLAW_SESSIONS_FILE",
     # 内部配置
@@ -168,9 +168,10 @@ LLM_MODEL=deepseek-chat
 # 如需强制覆盖，显式设为 true 或 false
 # LLM_VISION_SUPPORT=
 
-# === TTS 文本转语音配置（可选，使用与 LLM 相同的 API 代理）===
-# TTS_MODEL=gemini-2.5-flash-preview-tts
-# TTS_VOICE=charon
+# === Audio 语音配置（可选，使用与 LLM 相同的 API 代理）===
+# TTS_MODEL=gpt-4o-mini-tts
+# TTS_VOICE=alloy
+# STT_MODEL=whisper-1
 
 # === 前端与 Agent 通信模式 ===
 # true: 前端使用 OpenAI 标准 /v1/chat/completions 格式与 agent 交互

@@ -36,6 +36,28 @@ fi
 
 PIDFILE="$PROJECT_ROOT/.mini_timebot.pid"
 
+is_wsl() {
+    [ -n "${WSL_DISTRO_NAME:-}" ] || grep -qi microsoft /proc/version 2>/dev/null
+}
+
+print_wsl_access_hint() {
+    if ! is_wsl; then
+        return
+    fi
+
+    local wsl_ip
+    wsl_ip=$(hostname -I 2>/dev/null | awk '{print $1}')
+    if [ -z "$wsl_ip" ]; then
+        return
+    fi
+
+    local frontend_port="${PORT_FRONTEND:-51209}"
+    local agent_port="${PORT_AGENT:-51200}"
+    echo "   WSL host frontend: http://$wsl_ip:$frontend_port"
+    echo "   WSL host agent API: http://$wsl_ip:$agent_port"
+    echo "   If Windows localhost forwarding does not work, open these WSL IP URLs from Windows."
+}
+
 case "${1:-help}" in
 
     start)
@@ -82,6 +104,7 @@ case "${1:-help}" in
         for i in $(seq 1 30); do
             if curl -sf "http://127.0.0.1:$AGENT_PORT/v1/models" > /dev/null 2>&1; then
                 echo " ✅"
+                print_wsl_access_hint
                 exit 0
             fi
             echo -n "."
@@ -131,6 +154,7 @@ case "${1:-help}" in
                     echo "  ⚠️  端口 $port 未监听"
                 fi
             done
+            print_wsl_access_hint
             exit 0
         else
             echo "❌ Mini TimeBot 未运行"

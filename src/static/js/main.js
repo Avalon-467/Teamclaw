@@ -2008,7 +2008,7 @@ async function switchToSession(sessionId, force = false) {
         // 为历史 AI 消息添加朗读按钮
         chatBox.querySelectorAll('[data-tts-ready="1"]').forEach(div => {
             div.removeAttribute('data-tts-ready');
-            const ttsBtn = createTtsButton(() => div.innerText || div.textContent || '');
+            const ttsBtn = createTtsButton(() => extractTtsTextFromElement(div));
             div.appendChild(ttsBtn);
         });
         // 高亮代码块
@@ -2710,6 +2710,13 @@ function stripMarkdownForTTS(md) {
     return text;
 }
 
+function extractTtsTextFromElement(element) {
+    if (!element) return '';
+    const clone = element.cloneNode(true);
+    clone.querySelectorAll('.tts-btn').forEach(btn => btn.remove());
+    return (clone.innerText || clone.textContent || '').trim();
+}
+
 function stopTtsPlayback() {
     if (currentTtsAudio) {
         currentTtsAudio.pause();
@@ -2816,7 +2823,7 @@ function appendMessage(content, isUser = false, images = [], fileNames = [], aud
         div.querySelectorAll('pre code').forEach((block) => hljs.highlightElement(block));
         // AI 消息添加朗读按钮（content 非空时）
         if (content) {
-            const ttsBtn = createTtsButton(() => div.innerText || div.textContent || '');
+            const ttsBtn = createTtsButton(() => extractTtsTextFromElement(div));
             div.appendChild(ttsBtn);
         }
     }
@@ -2969,7 +2976,7 @@ async function handleSend() {
             if (fullText && agentDiv) {
                 agentDiv.innerHTML = marked.parse(fullText);
                 agentDiv.querySelectorAll('pre code').forEach(b => hljs.highlightElement(b));
-                const ttsBtn = createTtsButton(() => agentDiv.innerText || agentDiv.textContent || '');
+                const ttsBtn = createTtsButton(() => extractTtsTextFromElement(agentDiv));
                 agentDiv.appendChild(ttsBtn);
                 allSegmentTexts.push(fullText);
             }
@@ -3064,7 +3071,7 @@ async function handleSend() {
         if (fullText) {
             agentDiv.innerHTML = marked.parse(fullText);
             agentDiv.querySelectorAll('pre code').forEach((block) => hljs.highlightElement(block));
-            const ttsBtn = createTtsButton(() => agentDiv.innerText || agentDiv.textContent || '');
+            const ttsBtn = createTtsButton(() => extractTtsTextFromElement(agentDiv));
             agentDiv.appendChild(ttsBtn);
             chatBox.scrollTop = chatBox.scrollHeight;
         }

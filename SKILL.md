@@ -114,10 +114,22 @@ Then inside WSL:
 
 ```bash
 sudo apt update
-sudo apt install -y curl git python3 python3-venv python3-pip
+sudo apt install -y curl git python3 python3-venv python3-pip rsync
 curl -LsSf https://astral.sh/uv/install.sh | sh
 source ~/.bashrc
-cd /mnt/c/Users/<user>/Downloads/BorisGuo6.github.io/TeamClaw
+
+# Prefer a Linux-side copy instead of running directly from /mnt/c.
+# This avoids slower virtualenv behavior and shell-script CRLF issues.
+mkdir -p ~/TeamClaw-wsl
+rsync -a --delete \
+  --exclude .git \
+  --exclude .venv \
+  --exclude logs \
+  --exclude __pycache__ \
+  /mnt/c/Users/<user>/Downloads/BorisGuo6.github.io/TeamClaw/ \
+  ~/TeamClaw-wsl/
+
+cd ~/TeamClaw-wsl
 bash selfskill/scripts/run.sh setup
 bash selfskill/scripts/run.sh configure --init
 bash selfskill/scripts/run.sh start
@@ -153,6 +165,8 @@ These notes come from a full Windows installation that was verified locally.
 - `gpt-5.4` has been tested successfully with `LLM_BASE_URL=https://api.openai.com/` and TeamClaw's `/v1/chat/completions` endpoint.
 - `auto-model` is for discovery only. It should print the model list, and the caller or agent should pick one model explicitly afterward.
 - If WSL is not already installed, the first WSL setup step requires Administrator privileges on Windows before the Linux-side TeamClaw install can be tested.
+- For WSL installs, a Linux-side copy such as `~/TeamClaw-wsl` is more reliable than running from `/mnt/c/...`.
+- On some WSL setups, Windows host access to TeamClaw does not forward cleanly through `127.0.0.1`. When that happens, use the WSL VM IP shown by `status` or `start`, for example `http://172.x.x.x:51209`.
 
 ## Common Operations
 
