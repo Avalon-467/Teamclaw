@@ -6,6 +6,9 @@
 
 # TeamClaw
 https://github.com/Avalon-467/Teamclaw
+
+![TeamClaw Poster](docs/poster.png)
+
 > **OpenAI-compatible AI Agent with a built-in programmable multi-expert orchestration engine and one-click public deployment.**
 >
 > **Skill Mode:** This repository is designed to run and be documented in a Skill-oriented workflow (see `SKILL.md`).
