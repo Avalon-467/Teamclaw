@@ -2,6 +2,7 @@ import os
 import json
 import copy
 import asyncio
+import sys
 from typing import Annotated, TypedDict, Optional
 
 # LangGraph related
@@ -277,44 +278,45 @@ class MiniTimeAgent:
         self._memory = await self._memory_ctx.__aenter__()
 
         # 2. Start MCP servers
+        python_command = sys.executable
         self._mcp_client = MultiServerMCPClient({
             "scheduler_service": {
-                "command": "python",
+                "command": python_command,
                 "args": [os.path.join(self._src_dir, "mcp_scheduler.py")],
                 "transport": "stdio",
             },
             "search_service": {
-                "command": "python",
+                "command": python_command,
                 "args": [os.path.join(self._src_dir, "mcp_search.py")],
                 "transport": "stdio",
             },
             "file_service": {
-                "command": "python",
+                "command": python_command,
                 "args": [os.path.join(self._src_dir, "mcp_filemanager.py")],
                 "transport": "stdio",
             },
             "commander_service": {
-                "command": "python",
+                "command": python_command,
                 "args": [os.path.join(self._src_dir, "mcp_commander.py")],
                 "transport": "stdio",
             },
             "oasis_service": {
-                "command": "python",
+                "command": python_command,
                 "args": [os.path.join(self._src_dir, "mcp_oasis.py")],
                 "transport": "stdio",
             },
             "session_service": {
-                "command": "python",
+                "command": python_command,
                 "args": [os.path.join(self._src_dir, "mcp_session.py")],
                 "transport": "stdio",
             },
             "telegram_service": {
-                "command": "python",
+                "command": python_command,
                 "args": [os.path.join(self._src_dir, "mcp_telegram.py")],
                 "transport": "stdio",
             },
             "llmapi_service": {
-                "command": "python",
+                "command": python_command,
                 "args": [os.path.join(self._src_dir, "mcp_llmapi.py")],
                 "transport": "stdio",
             },

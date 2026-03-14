@@ -1,12 +1,17 @@
-Set-StrictMode -Version Latest
+[CmdletBinding()]
+param()
+
 $ErrorActionPreference = "Stop"
+$projectRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
+. (Join-Path $PSScriptRoot "common.ps1")
 
-$ProjectRoot = Split-Path -Parent $PSScriptRoot
-Set-Location $ProjectRoot
+Set-TeamClawUtf8
+$python = Ensure-VenvPython -ProjectRoot $projectRoot
 
-$activateScript = Join-Path $ProjectRoot ".venv\Scripts\Activate.ps1"
-if (Test-Path $activateScript) {
-    . $activateScript
+Push-Location $projectRoot
+try {
+    & $python "tools\gen_password.py"
+    exit $LASTEXITCODE
+} finally {
+    Pop-Location
 }
-
-python "tools\gen_password.py"

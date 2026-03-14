@@ -40,6 +40,14 @@ env_path = os.path.join(_project_root, "config", ".env")
 load_dotenv(dotenv_path=env_path)
 
 
+def _server_host() -> str:
+    """Expose services to the Windows host when running inside WSL."""
+    explicit_host = os.getenv("TEAMCLAW_SERVER_HOST", "").strip()
+    if explicit_host:
+        return explicit_host
+    return "0.0.0.0" if os.getenv("WSL_DISTRO_NAME") else "127.0.0.1"
+
+
 def _get_env(key: str, default: str = "") -> str:
     """Read from os.environ first; fall back to .env file if missing.
 
@@ -1893,4 +1901,4 @@ async def restore_openclaw_agent_snapshot(req: Request):
 # --- Entrypoint ---
 if __name__ == "__main__":
     port = int(os.getenv("PORT_OASIS", "51202"))
-    uvicorn.run(app, host="127.0.0.1", port=port)
+    uvicorn.run(app, host=_server_host(), port=port)

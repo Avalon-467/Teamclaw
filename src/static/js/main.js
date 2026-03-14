@@ -451,6 +451,8 @@ orch_openclaw_sessions: '🦞 OpenClaw',
         persona_custom: '🔧 自定义专家',
 
         // 其他
+        persona_search_placeholder: '🔍 搜索专家名称 / 标签...',
+        persona_no_match: '没有匹配的专家',
         splash_subtitle: 'TeamBot AI Agent',
         secure_footer: 'Secured by Nginx Reverse Proxy & SSH Tunnel',
         refresh: '刷新',
@@ -950,6 +952,8 @@ orch_openclaw_sessions: '🦞 OpenClaw',
         persona_custom: '🔧 Custom Experts',
 
         // Others
+        persona_search_placeholder: '🔍 Search expert name / tag...',
+        persona_no_match: 'No matching experts',
         splash_subtitle: 'TeamBot AI Agent',
         secure_footer: 'Secured by Nginx Reverse Proxy & SSH Tunnel',
         refresh: 'Refresh',
@@ -1060,6 +1064,9 @@ function applyTranslations() {
             orchRenderNode(node);
         });
         orchRenderEdges();
+    }
+    if (typeof renderPersonaPreview === 'function') {
+        renderPersonaPreview();
     }
 }
 
@@ -2001,7 +2008,7 @@ async function switchToSession(sessionId, force = false) {
         // 为历史 AI 消息添加朗读按钮
         chatBox.querySelectorAll('[data-tts-ready="1"]').forEach(div => {
             div.removeAttribute('data-tts-ready');
-            const ttsBtn = createTtsButton(() => div.innerText || div.textContent || '');
+            const ttsBtn = createTtsButton(() => extractTtsTextFromElement(div));
             div.appendChild(ttsBtn);
         });
         // 高亮代码块
@@ -2703,6 +2710,13 @@ function stripMarkdownForTTS(md) {
     return text;
 }
 
+function extractTtsTextFromElement(element) {
+    if (!element) return '';
+    const clone = element.cloneNode(true);
+    clone.querySelectorAll('.tts-btn').forEach(btn => btn.remove());
+    return (clone.innerText || clone.textContent || '').trim();
+}
+
 function stopTtsPlayback() {
     if (currentTtsAudio) {
         currentTtsAudio.pause();
@@ -2809,7 +2823,7 @@ function appendMessage(content, isUser = false, images = [], fileNames = [], aud
         div.querySelectorAll('pre code').forEach((block) => hljs.highlightElement(block));
         // AI 消息添加朗读按钮（content 非空时）
         if (content) {
-            const ttsBtn = createTtsButton(() => div.innerText || div.textContent || '');
+            const ttsBtn = createTtsButton(() => extractTtsTextFromElement(div));
             div.appendChild(ttsBtn);
         }
     }
@@ -2962,7 +2976,7 @@ async function handleSend() {
             if (fullText && agentDiv) {
                 agentDiv.innerHTML = marked.parse(fullText);
                 agentDiv.querySelectorAll('pre code').forEach(b => hljs.highlightElement(b));
-                const ttsBtn = createTtsButton(() => agentDiv.innerText || agentDiv.textContent || '');
+                const ttsBtn = createTtsButton(() => extractTtsTextFromElement(agentDiv));
                 agentDiv.appendChild(ttsBtn);
                 allSegmentTexts.push(fullText);
             }
@@ -3057,7 +3071,7 @@ async function handleSend() {
         if (fullText) {
             agentDiv.innerHTML = marked.parse(fullText);
             agentDiv.querySelectorAll('pre code').forEach((block) => hljs.highlightElement(block));
-            const ttsBtn = createTtsButton(() => agentDiv.innerText || agentDiv.textContent || '');
+            const ttsBtn = createTtsButton(() => extractTtsTextFromElement(agentDiv));
             agentDiv.appendChild(ttsBtn);
             chatBox.scrollTop = chatBox.scrollHeight;
         }
@@ -3240,9 +3254,28 @@ async function addWorkflowToContext(name, team) {
 let selectedPersona = null;  // { name, tag, persona, source }
 let personaInjectedSession = null;  // session ID where persona was already injected (avoid repeated prompt)
 
+function getLocalizedExpertName(expert) {
+    if (!expert) return '';
+    const isZh = (typeof currentLang !== 'undefined' && currentLang === 'zh-CN');
+    return (isZh ? (expert.name_zh || expert.name) : (expert.name_en || expert.name)) || expert.tag || '';
+}
+
+function createPersonaSelection(expert) {
+    if (!expert) return null;
+    return {
+        name: expert.name,
+        name_zh: expert.name_zh,
+        name_en: expert.name_en,
+        tag: expert.tag,
+        persona: expert.persona,
+        source: expert.source,
+    };
+}
+
 function renderPersonaPreview() {
     const area = document.getElementById('persona-preview-area');
     const btn = document.getElementById('persona-add-btn');
+    if (!area) return;
     if (!selectedPersona) {
         area.style.display = 'none';
         if (btn) btn.classList.remove('active');
@@ -3251,7 +3284,8 @@ function renderPersonaPreview() {
     area.style.display = 'flex';
     if (btn) btn.classList.add('active');
     const preview = selectedPersona.persona.length > 60 ? selectedPersona.persona.slice(0, 60) + '…' : selectedPersona.persona;
-    area.innerHTML = `<span class="persona-tag" title="${escapeHtml(selectedPersona.persona)}">🎭 ${escapeHtml(selectedPersona.name)}: ${escapeHtml(preview)}<span class="persona-remove" onclick="clearPersona()">&times;</span></span>`;
+    const displayName = getLocalizedExpertName(selectedPersona);
+    area.innerHTML = `<span class="persona-tag" title="${escapeHtml(selectedPersona.persona)}">🎭 ${escapeHtml(displayName)}: ${escapeHtml(preview)}<span class="persona-remove" onclick="clearPersona()">&times;</span></span>`;
 }
 
 function clearPersona() {
@@ -3278,7 +3312,7 @@ async function showPersonaPopup() {
             <div class="orch-modal" style="min-width:360px;max-width:480px;">
                 <h3>${t('persona_popup_title')}</h3>
                 <div id="persona-search-box" style="margin-bottom:8px;">
-                    <input type="text" id="persona-search-input" placeholder="🔍 Search..." style="width:100%;padding:6px 10px;border:1px solid #d1d5db;border-radius:8px;font-size:12px;outline:none;" />
+                    <input type="text" id="persona-search-input" placeholder="${escapeHtml(t('persona_search_placeholder'))}" style="width:100%;padding:6px 10px;border:1px solid #d1d5db;border-radius:8px;font-size:12px;outline:none;" />
                 </div>
                 <div id="persona-select-list" style="max-height:360px;overflow-y:auto;"></div>
                 <div class="orch-modal-btns">
@@ -3318,12 +3352,13 @@ async function showPersonaPopup() {
                         item.classList.add('selected');
                     }
                     const personaPreview = expert.persona.length > 80 ? expert.persona.slice(0, 80) + '…' : expert.persona;
+                    const displayName = getLocalizedExpertName(expert);
                     const desc = expert.description ? `<div style="font-size:10px;color:#9ca3af;margin-top:1px;">${escapeHtml(expert.description)}</div>` : '';
                     item.innerHTML = `
                         <div style="display:flex;align-items:center;gap:8px;">
                             <span style="font-size:16px;">🎭</span>
                             <div style="flex:1;min-width:0;">
-                                <div style="font-size:13px;color:#374151;font-weight:600;">${escapeHtml(expert.name)} <span style="font-size:10px;color:#9ca3af;font-weight:400;">${escapeHtml(expert.tag)}</span></div>
+                                <div style="font-size:13px;color:#374151;font-weight:600;">${escapeHtml(displayName)} <span style="font-size:10px;color:#9ca3af;font-weight:400;">${escapeHtml(expert.tag)}</span></div>
                                 <div style="font-size:11px;color:#6b7280;margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escapeHtml(personaPreview)}</div>
                                 ${desc}
                             </div>
@@ -3339,7 +3374,7 @@ async function showPersonaPopup() {
                     });
                     item.addEventListener('dblclick', () => {
                         chosen = expert;
-                        selectedPersona = { name: chosen.name, tag: chosen.tag, persona: chosen.persona, source: chosen.source };
+                        selectedPersona = createPersonaSelection(chosen);
                         personaInjectedSession = null;  // Reset so persona is injected in next send
                         renderPersonaPreview();
                         overlay.remove();
@@ -3349,7 +3384,7 @@ async function showPersonaPopup() {
             }
 
             if (!filteredExperts.length) {
-                listEl.innerHTML = '<div style="text-align:center;color:#9ca3af;padding:20px;font-size:12px;">No matching experts</div>';
+                listEl.innerHTML = `<div style="text-align:center;color:#9ca3af;padding:20px;font-size:12px;">${escapeHtml(t('persona_no_match'))}</div>`;
             }
         }
 
@@ -3361,7 +3396,9 @@ async function showPersonaPopup() {
             const q = searchInput.value.trim().toLowerCase();
             if (!q) { renderExpertList(experts); return; }
             const filtered = experts.filter(e =>
-                e.name.toLowerCase().includes(q) ||
+                (e.name || '').toLowerCase().includes(q) ||
+                (e.name_zh || '').toLowerCase().includes(q) ||
+                (e.name_en || '').toLowerCase().includes(q) ||
                 e.tag.toLowerCase().includes(q) ||
                 (e.persona || '').toLowerCase().includes(q) ||
                 (e.description || '').toLowerCase().includes(q) ||
@@ -3373,7 +3410,7 @@ async function showPersonaPopup() {
 
         overlay.querySelector('#persona-confirm-btn').addEventListener('click', () => {
             if (chosen) {
-                selectedPersona = { name: chosen.name, tag: chosen.tag, persona: chosen.persona, source: chosen.source };
+                selectedPersona = createPersonaSelection(chosen);
                 personaInjectedSession = null;  // Reset so persona is injected in next send
                 renderPersonaPreview();
                 overlay.remove();

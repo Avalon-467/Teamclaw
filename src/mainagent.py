@@ -39,6 +39,136 @@ prompts_dir = os.path.join(root_dir, "data", "prompts")
 
 load_dotenv(dotenv_path=env_path)
 
+_AUDIO_ENDPOINT_SUFFIXES = (
+    "/v1/audio/speech",
+    "/audio/speech",
+    "/v1/audio/transcriptions",
+    "/audio/transcriptions",
+    "/v1/audio/translations",
+    "/audio/translations",
+    "/v1/chat/completions",
+    "/chat/completions",
+    "/v1/responses",
+    "/responses",
+    "/v1/models",
+    "/models",
+)
+_AUDIO_UPLOAD_MIME = {
+    "mp3": "audio/mpeg",
+    "wav": "audio/wav",
+    "webm": "audio/webm",
+    "ogg": "audio/ogg",
+    "flac": "audio/flac",
+    "aac": "audio/aac",
+    "m4a": "audio/m4a",
+    "mpeg": "audio/mpeg",
+}
+
+
+def _server_host() -> str:
+    """Expose services to the Windows host when running inside WSL."""
+    explicit_host = os.getenv("TEAMCLAW_SERVER_HOST", "").strip()
+    if explicit_host:
+        return explicit_host
+    return "0.0.0.0" if os.getenv("WSL_DISTRO_NAME") else "127.0.0.1"
+
+
+def _normalize_audio_api_base_url(base_url: str) -> str:
+    cleaned = (base_url or "").strip().rstrip("/")
+    cleaned_lower = cleaned.lower()
+
+    for suffix in _AUDIO_ENDPOINT_SUFFIXES:
+        if cleaned_lower.endswith(suffix):
+            cleaned = cleaned[: -len(suffix)]
+            cleaned_lower = cleaned.lower()
+            break
+
+    if cleaned and not cleaned_lower.endswith("/v1"):
+        cleaned = cleaned.rstrip("/") + "/v1"
+
+    return cleaned
+
+
+def _build_audio_api_url(base_url: str, path: str) -> str:
+    normalized = _normalize_audio_api_base_url(base_url)
+    if not normalized:
+        return ""
+    return normalized + path
+
+
+def _get_tts_model() -> str:
+    configured = os.getenv("TTS_MODEL", "").strip()
+    if configured:
+        return configured
+    return "gpt-4o-mini-tts"
+
+
+def _get_tts_voice(override: str | None = None) -> str:
+    if override:
+        return override
+    configured = os.getenv("TTS_VOICE", "").strip()
+    if configured:
+        return configured
+    return "alloy"
+
+
+def _get_stt_model() -> str:
+    for key in ("STT_MODEL", "WHISPER_MODEL"):
+        configured = os.getenv(key, "").strip()
+        if configured:
+            return configured
+    return "whisper-1"
+
+
+async def _transcribe_audio_input(audio_b64: str, audio_fmt: str = "webm") -> str:
+    api_key = os.getenv("LLM_API_KEY", "").strip()
+    base_url = os.getenv("LLM_BASE_URL", "").strip()
+    if not api_key or not base_url or not audio_b64:
+        return ""
+
+    if audio_b64.startswith("data:"):
+        audio_b64 = audio_b64.split(",", 1)[-1]
+
+    try:
+        audio_bytes = base64.b64decode(audio_b64)
+    except Exception as exc:
+        print(f"[audio] failed to decode input audio: {exc}")
+        return ""
+
+    audio_fmt = (audio_fmt or "webm").lower()
+    transcription_url = _build_audio_api_url(base_url, "/audio/transcriptions")
+    mime = _AUDIO_UPLOAD_MIME.get(audio_fmt, f"audio/{audio_fmt}")
+    filename = f"recording.{audio_fmt}"
+
+    try:
+        async with httpx.AsyncClient(timeout=60.0) as client:
+            resp = await client.post(
+                transcription_url,
+                headers={"Authorization": f"Bearer {api_key}"},
+                data={
+                    "model": _get_stt_model(),
+                    "response_format": "json",
+                },
+                files={"file": (filename, audio_bytes, mime)},
+            )
+    except Exception as exc:
+        print(f"[audio] transcription request failed: {exc}")
+        return ""
+
+    if resp.status_code != 200:
+        print(f"[audio] transcription error {resp.status_code}: {resp.text[:200]}")
+        return ""
+
+    try:
+        payload = resp.json()
+    except Exception:
+        return resp.text.strip()
+
+    if isinstance(payload, dict):
+        return str(payload.get("text", "")).strip()
+
+    return str(payload).strip()
+
 
 # --- Internal token for service-to-service auth ---
 INTERNAL_TOKEN = os.getenv("INTERNAL_TOKEN", "").strip()
@@ -458,15 +588,15 @@ async def text_to_speech(req: TTSRequest, x_internal_token: str | None = Header(
     if len(tts_text) > 4000:
         tts_text = tts_text[:4000]
 
-    api_key = os.getenv("LLM_API_KEY", "")
-    base_url = os.getenv("LLM_BASE_URL", "").rstrip("/")
-    tts_model = os.getenv("TTS_MODEL", "gemini-2.5-flash-preview-tts")
-    tts_voice = req.voice or os.getenv("TTS_VOICE", "charon")
+    api_key = os.getenv("LLM_API_KEY", "").strip()
+    base_url = os.getenv("LLM_BASE_URL", "").strip()
+    tts_model = _get_tts_model()
+    tts_voice = _get_tts_voice(req.voice)
 
     if not api_key or not base_url:
         raise HTTPException(status_code=500, detail="TTS API 未配置")
 
-    tts_url = f"{base_url}/audio/speech"
+    tts_url = _build_audio_api_url(base_url, "/audio/speech")
 
     async def audio_stream():
         async with httpx.AsyncClient(timeout=60.0) as client:
@@ -724,7 +854,7 @@ async def session_status(req: SessionStatusRequest, x_internal_token: str | None
 # 允许前端读写的配置项白名单（敏感项如 INTERNAL_TOKEN 不暴露）
 _SETTINGS_WHITELIST = [
     "LLM_API_KEY", "LLM_BASE_URL", "LLM_MODEL", "LLM_PROVIDER", "LLM_VISION_SUPPORT",
-    "TTS_MODEL", "TTS_VOICE",
+    "TTS_MODEL", "TTS_VOICE", "STT_MODEL", "WHISPER_MODEL",
     "PORT_AGENT", "PORT_SCHEDULER", "PORT_OASIS", "PORT_FRONTEND",
     "TELEGRAM_BOT_TOKEN", "TELEGRAM_ALLOWED_USERS",
     "QQ_APP_ID", "QQ_BOT_SECRET", "QQ_BOT_USERNAME",
@@ -975,7 +1105,7 @@ async def system_trigger(req: SystemTriggerRequest, x_internal_token: str | None
 # OpenAI-compatible API: /v1/chat/completions
 # ------------------------------------------------------------------
 
-def _openai_msg_to_human_message(msg: ChatMessage) -> HumanMessage:
+async def _openai_msg_to_human_message(msg: ChatMessage) -> HumanMessage:
     """将 OpenAI 格式的 user message 转为 LangChain HumanMessage。
     支持纯文本和多模态（图片、音频、文件）content parts。"""
     content = msg.content
@@ -1016,14 +1146,22 @@ def _openai_msg_to_human_message(msg: ChatMessage) -> HumanMessage:
         if url:
             images.append(url)
 
-    # 提取音频列表
+    # 语音输入优先走转写；失败时再回退到原始音频输入
     audios = []
-    for ad in audio_parts:
-        audios.append({
-            "base64": ad.get("data", ""),
-            "format": ad.get("format", "webm"),
-            "name": f"recording.{ad.get('format', 'webm')}",
-        })
+    if audio_parts:
+        transcripts = await asyncio.gather(*[
+            _transcribe_audio_input(ad.get("data", ""), ad.get("format", "webm"))
+            for ad in audio_parts
+        ])
+        for idx, (ad, transcript) in enumerate(zip(audio_parts, transcripts), start=1):
+            if transcript:
+                text_parts.append(f"[用户语音转写 {idx}]\n{transcript}")
+                continue
+            audios.append({
+                "base64": ad.get("data", ""),
+                "format": ad.get("format", "webm"),
+                "name": f"recording.{ad.get('format', 'webm')}",
+            })
 
     # 提取文件列表
     # 媒体文件扩展名：以 file content part 直传，不当文本展开
@@ -1261,7 +1399,7 @@ async def openai_chat_completions(
         if not last_user_msg:
             raise HTTPException(status_code=400, detail="messages 中缺少 user 或 tool 消息")
 
-        human_msg = _openai_msg_to_human_message(last_user_msg)
+        human_msg = await _openai_msg_to_human_message(last_user_msg)
         # 将 system messages 内容前置到 user message 中
         if system_parts:
             sys_text = "\n".join(system_parts)
@@ -1961,4 +2099,4 @@ async def list_available_sessions(group_id: str, authorization: str | None = Hea
 
 
 if __name__ == "__main__":
-    uvicorn.run(app, host="127.0.0.1", port=int(os.getenv("PORT_AGENT", "51200")))
+    uvicorn.run(app, host=_server_host(), port=int(os.getenv("PORT_AGENT", "51200")))

@@ -1,0 +1,2 @@
+# Keep shell scripts runnable in WSL and other Unix environments.
+*.sh text eol=lf

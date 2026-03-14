@@ -23,6 +23,14 @@ TASKS_FILE = os.path.join(root_dir, "data", "timeset", "tasks.json")
 # 加载 .env 配置
 load_dotenv(dotenv_path=os.path.join(root_dir, "config", ".env"))
 
+
+def _server_host() -> str:
+    """Expose services to the Windows host when running inside WSL."""
+    explicit_host = os.getenv("TEAMCLAW_SERVER_HOST", "").strip()
+    if explicit_host:
+        return explicit_host
+    return "0.0.0.0" if os.getenv("WSL_DISTRO_NAME") else "127.0.0.1"
+
 # 确保目录存在
 os.makedirs(os.path.dirname(TASKS_FILE), exist_ok=True)
 
@@ -168,4 +176,4 @@ async def delete_task(task_id: str):
     raise HTTPException(status_code=404, detail="未找到任务")
 
 if __name__ == "__main__":
-    uvicorn.run(app, host="127.0.0.1", port=int(os.getenv("PORT_SCHEDULER", "51201")))
+    uvicorn.run(app, host=_server_host(), port=int(os.getenv("PORT_SCHEDULER", "51201")))

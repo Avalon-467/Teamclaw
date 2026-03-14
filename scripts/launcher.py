@@ -19,6 +19,16 @@ import urllib.request
 import webbrowser
 from dotenv import load_dotenv
 
+os.environ.setdefault("PYTHONUTF8", "1")
+os.environ.setdefault("PYTHONIOENCODING", "utf-8")
+for stream_name in ("stdout", "stderr"):
+    stream = getattr(sys, stream_name, None)
+    if hasattr(stream, "reconfigure"):
+        try:
+            stream.reconfigure(encoding="utf-8", errors="replace")
+        except Exception:
+            pass
+
 # 切换到项目根目录
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 os.chdir(PROJECT_ROOT)

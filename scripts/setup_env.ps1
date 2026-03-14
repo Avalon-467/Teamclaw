@@ -1,90 +1,70 @@
-Set-StrictMode -Version Latest
+[CmdletBinding()]
+param(
+    [string]$PythonVersion = "3.11"
+)
+
 $ErrorActionPreference = "Stop"
+$projectRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
+. (Join-Path $PSScriptRoot "common.ps1")
 
-$ProjectRoot = Split-Path -Parent $PSScriptRoot
-Set-Location $ProjectRoot
+Set-TeamClawUtf8
+Push-Location $projectRoot
 
-function Resolve-UvPath {
-    $cmd = Get-Command uv -ErrorAction SilentlyContinue
-    if ($cmd) {
-        if ($cmd.Path) {
-            return $cmd.Path
+try {
+    Write-Host "=========================================="
+    Write-Host "  TeamClaw Windows environment setup"
+    Write-Host "=========================================="
+    Write-Host ""
+
+    $uv = Ensure-UvInstalled
+    Write-Host "Detected uv at: $uv"
+
+    $venvPython = Get-VenvPython -ProjectRoot $projectRoot
+    if (-not $venvPython) {
+        Write-Host "Creating .venv with Python $PythonVersion ..."
+        & $uv venv .venv --python $PythonVersion
+        if ($LASTEXITCODE -ne 0) {
+            Write-Host "uv venv failed on the first attempt. Trying to install Python $PythonVersion via uv ..."
+            & $uv python install $PythonVersion
+            if ($LASTEXITCODE -ne 0) {
+                throw "uv python install failed. Verify your network connection or install Python manually."
+            }
+
+            & $uv venv .venv --python $PythonVersion
+            if ($LASTEXITCODE -ne 0) {
+                throw "Failed to create .venv."
+            }
         }
 
-        if ($cmd.Source -and (Test-Path $cmd.Source)) {
-            return $cmd.Source
-        }
+        $venvPython = Ensure-VenvPython -ProjectRoot $projectRoot
+        Write-Host "Created virtual environment: $venvPython"
+    } else {
+        Write-Host "Virtual environment already exists: $venvPython"
     }
 
-    $fallback = Join-Path $HOME ".local\bin\uv.exe"
-    if (Test-Path $fallback) {
-        return $fallback
+    Write-Host "Installing or updating Python dependencies ..."
+    & $uv pip install -r config\requirements.txt --python $venvPython
+    if ($LASTEXITCODE -ne 0) {
+        throw "Dependency installation failed."
     }
 
-    return $null
-}
-
-Write-Host "=========================================="
-Write-Host "  Mini TimeBot environment setup"
-Write-Host "=========================================="
-Write-Host ""
-
-$uvPath = Resolve-UvPath
-if ($null -ne $uvPath) {
-    Write-Host "uv detected: $(& $uvPath --version)"
-} else {
-    Write-Host "uv not found, installing from Astral..."
-    Invoke-RestMethod "https://astral.sh/uv/install.ps1" | Invoke-Expression
-
-    $uvBin = Join-Path $HOME ".local\bin"
-    if (Test-Path $uvBin) {
-        $env:Path = "$uvBin;$env:Path"
+    Write-Host ""
+    if (Test-Path "config\.env") {
+        Write-Host "config/.env already exists"
+    } else {
+        Write-Host "config/.env is missing. Initialize it with:"
+        Write-Host "  powershell -ExecutionPolicy Bypass -File .\selfskill\scripts\run.ps1 configure --init"
     }
 
-    $uvPath = Resolve-UvPath
-    if ($null -eq $uvPath) {
-        throw "uv install failed. Please install uv manually: https://docs.astral.sh/uv/"
+    if (Test-Path "config\users.json") {
+        Write-Host "config/users.json already exists"
+    } else {
+        Write-Host "config/users.json is missing. If you need password login, run:"
+        Write-Host "  powershell -ExecutionPolicy Bypass -File .\scripts\adduser.ps1"
     }
-    Write-Host "uv installed: $(& $uvPath --version)"
+
+    Write-Host ""
+    Write-Host "Environment setup completed."
+} finally {
+    Pop-Location
 }
-
-if (Test-Path ".venv") {
-    Write-Host "Virtual environment already exists: .venv/"
-} else {
-    Write-Host "Creating virtual environment (.venv, Python 3.11+)..."
-    & $uvPath venv ".venv" "--python" "3.11"
-    Write-Host "Virtual environment created"
-}
-
-$activateScript = Join-Path $ProjectRoot ".venv\Scripts\Activate.ps1"
-if (-not (Test-Path $activateScript)) {
-    throw "Activation script not found: $activateScript"
-}
-
-. $activateScript
-Write-Host "Virtual environment activated: $(python --version)"
-
-Write-Host "Installing dependencies (config/requirements.txt)..."
-& $uvPath pip install "-r" "config\requirements.txt"
-Write-Host "Dependencies installed"
-
-Write-Host ""
-Write-Host "--- Config check ---"
-
-if (Test-Path "config/.env") {
-    Write-Host "config/.env found"
-} else {
-    Write-Host "config/.env missing. Run scripts\setup_apikey.ps1 or create it from config\.env.example."
-}
-
-if (Test-Path "config/users.json") {
-    Write-Host "config/users.json found"
-} else {
-    Write-Host "config/users.json missing. Run scripts\adduser.ps1 to create a user."
-}
-
-Write-Host ""
-Write-Host "=========================================="
-Write-Host "  Environment setup complete"
-Write-Host "  Start services with: scripts\start.ps1"
-Write-Host "=========================================="
