@@ -1241,7 +1241,7 @@ class ExternalExpert:
         except json.JSONDecodeError as e:
             print(f"  [OASIS] ⚠️ {self.name} (external) JSON parse error: {e}")
             try:
-                await forum.publish(author=self.name, content=reply.strip()[:300])
+                await forum.publish(author=self.name, content=reply.strip()[:2048])
             except Exception:
                 pass
         except Exception as e:

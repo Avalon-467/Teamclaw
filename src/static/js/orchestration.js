@@ -657,8 +657,29 @@ async function orchLoadOpenClawSessions() {
     if (!list) return;
     list.innerHTML = '<div style="padding:6px 10px;font-size:10px;color:#9ca3af;text-align:center;">⏳ ' + t('loading') + '</div>';
     try {
+        // Load CLI agents list
         const resp = await fetch('/proxy_openclaw_sessions');
         const data = await resp.json();
+
+        // When team mode is active, also load external_agents.json to get
+        // the authoritative name↔global_name mapping.
+        // global_name is the real OpenClaw agent name; name is the short display name.
+        // They do NOT necessarily have a prefix relationship.
+        let extAgentMap = {};   // global_name (lowercase) → { name, global_name }
+        if (orch.teamEnabled && orch.teamName) {
+            try {
+                const extResp = await fetch('/team_openclaw_snapshot?team=' + encodeURIComponent(orch.teamName));
+                const extData = await extResp.json();
+                if (extData.ok && extData.agents) {
+                    for (const ea of extData.agents) {
+                        if (ea.global_name) {
+                            extAgentMap[ea.global_name.toLowerCase()] = ea;
+                        }
+                    }
+                }
+            } catch(e) { /* ignore, will fall back to prefix stripping */ }
+        }
+
         list.innerHTML = '';
         if (!data.available) {
             list.innerHTML = '<div style="padding:6px 10px;font-size:10px;color:#d1d5db;text-align:center;">🚫 Not configured</div>';
@@ -668,11 +689,16 @@ async function orchLoadOpenClawSessions() {
             list.innerHTML = '<div style="padding:6px 10px;font-size:10px;color:#d1d5db;text-align:center;">No OpenClaw agents</div>';
             return;
         }
-        // Filter by team prefix when team mode is active
+        // Filter by team: prefer matching against external_agents.json global_name,
+        // fall back to prefix matching for agents not yet in JSON.
         let agents = data.agents;
         if (orch.teamEnabled && orch.teamName) {
             const prefix = orch.teamName.toLowerCase() + '_';
-            agents = agents.filter(a => (a.name || '').toLowerCase().startsWith(prefix));
+            agents = agents.filter(a => {
+                const aName = (a.name || '').toLowerCase();
+                // Include if in external_agents.json OR matches team prefix
+                return extAgentMap[aName] || aName.startsWith(prefix);
+            });
             if (agents.length === 0) {
                 list.innerHTML = '<div style="padding:6px 10px;font-size:10px;color:#d1d5db;text-align:center;">No agents with prefix \'' + escapeHtml(orch.teamName) + '_\'</div>';
                 return;
@@ -684,7 +710,6 @@ async function orchLoadOpenClawSessions() {
             card.className = 'orch-expert-card';
             card.draggable = true;
             const agentName = a.name || 'unknown';
-            const title = agentName + (a.is_default ? ' ⭐' : '');
             const mdl = (a.model && a.model !== 'unknown' && a.model !== 'auto') ? a.model : '';
             const agentWs = a.workspace || '';
 
@@ -695,16 +720,25 @@ async function orchLoadOpenClawSessions() {
             if (toolProfile) metaLine += '🔧' + toolProfile;
             if (skillCount) metaLine += (metaLine ? ' · ' : '') + '🧩' + skillCount;
 
-            // When team mode is active, strip the team prefix from the name
-            // so that the YAML stays portable across different team setups.
-            // The oasis engine will re-add the prefix at runtime based on the team parameter.
+            // Resolve display name (yamlName) from external_agents.json.
+            // The JSON "name" field is the authoritative short display name used in YAML;
+            // "global_name" is the real OpenClaw CLI agent name.
+            // They do NOT necessarily have a teamName_ prefix relationship.
             let yamlName = agentName;
+            const extEntry = extAgentMap[agentName.toLowerCase()];
             if (orch.teamEnabled && orch.teamName) {
-                const prefix = orch.teamName + '_';
-                if (agentName.startsWith(prefix)) {
-                    yamlName = agentName.slice(prefix.length);
+                if (extEntry && extEntry.name) {
+                    // Prefer the name from external_agents.json
+                    yamlName = extEntry.name;
+                } else {
+                    // Fallback: strip team prefix (for agents not yet in JSON)
+                    const prefix = orch.teamName + '_';
+                    if (agentName.startsWith(prefix)) {
+                        yamlName = agentName.slice(prefix.length);
+                    }
                 }
             }
+            const title = yamlName + (a.is_default ? ' ⭐' : '');
 
             card.innerHTML = `<span class="orch-emoji">🦞</span><div style="min-width:0;flex:1;"><div class="orch-name" title="${escapeHtml(agentName)}">${escapeHtml(title)}</div>${mdl ? '<div class="orch-tag" style="color:#10b981;font-family:monospace;">' + escapeHtml(mdl) + '</div>' : ''}${metaLine ? '<div class="orch-tag" style="color:#6b7280;font-size:9px;">' + escapeHtml(metaLine) + '</div>' : ''}</div><div style="display:flex;flex-direction:column;gap:2px;flex-shrink:0;">${(orch.teamEnabled && orch.teamName) ? '<button class="orch-oc-snap-btn" data-agent="' + escapeHtml(agentName) + '" data-short="' + escapeHtml(yamlName) + '" title="Export to team snapshot" style="background:none;border:none;cursor:pointer;font-size:12px;padding:1px 3px;opacity:0.5;line-height:1;" onmouseenter="this.style.opacity=1" onmouseleave="this.style.opacity=0.5">📤</button>' : ''}${agentWs ? '<button class="orch-oc-edit-btn" data-ws="' + escapeHtml(agentWs) + '" data-agent="' + escapeHtml(agentName) + '" title="' + t('orch_oc_edit_files') + '" style="background:none;border:none;cursor:pointer;font-size:12px;padding:1px 3px;opacity:0.5;line-height:1;" onmouseenter="this.style.opacity=1" onmouseleave="this.style.opacity=0.5">📝</button>' : ''}<button class="orch-oc-cfg-btn" data-agent="${escapeHtml(agentName)}" title="${t('orch_oc_config')}" style="background:none;border:none;cursor:pointer;font-size:12px;padding:1px 3px;opacity:0.5;line-height:1;" onmouseenter="this.style.opacity=1" onmouseleave="this.style.opacity=0.5">⚙️</button></div>`;
             // model format: agent:<name> (CLI uses --agent <name>, no session-id)
@@ -1727,14 +1761,15 @@ function orchShowAddOpenClawModal() {
     });
 
     overlay.querySelector('#orch-oc-create').addEventListener('click', async () => {
-        let name = nameInp.value.trim();
+        const shortName = nameInp.value.trim();
         const workspace = wsInp.value.trim();
-        // Prepend team prefix if team mode is active
+        // globalName = the real OpenClaw agent name (with team prefix if team mode)
+        let globalName = shortName;
         if (orch.teamEnabled && orch.teamName) {
-            name = orch.teamName + '_' + name;
+            globalName = orch.teamName + '_' + shortName;
         }
-        if (!name) { orchToast(t('orch_openclaw_name_required')); return; }
-        if (!/^[a-zA-Z0-9_-]+$/.test(name)) { orchToast(t('orch_openclaw_name_invalid')); return; }
+        if (!globalName) { orchToast(t('orch_openclaw_name_required')); return; }
+        if (!/^[a-zA-Z0-9_-]+$/.test(globalName)) { orchToast(t('orch_openclaw_name_invalid')); return; }
         if (!workspace) { orchToast(t('orch_openclaw_ws_required')); return; }
         const btn = overlay.querySelector('#orch-oc-create');
         btn.disabled = true;
@@ -1743,7 +1778,7 @@ function orchShowAddOpenClawModal() {
             const r = await fetch('/proxy_openclaw_add', {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({ name, workspace }),
+                body: JSON.stringify({ name: globalName, workspace }),
             });
             const res = await r.json();
             if (r.ok && res.ok) {
@@ -1754,17 +1789,32 @@ function orchShowAddOpenClawModal() {
                             method: 'POST', headers: {'Content-Type': 'application/json'},
                             body: JSON.stringify({ workspace, filename: 'IDENTITY.md', content: selectedExpertContent }),
                         });
-                        orchToast('📥 ' + t('orch_oc_import_done', { name: name }));
+                        orchToast('📥 ' + t('orch_oc_import_done', { name: globalName }));
                     } catch(e) { /* ignore write error, user can edit later */ }
                 }
-                orchToast('🦞 ' + t('orch_openclaw_created', {name}));
+                // Save to external_agents.json so the engine can resolve
+                // name (short display name) ↔ global_name (real OpenClaw agent name)
+                if (orch.teamEnabled && orch.teamName) {
+                    try {
+                        await fetch('/teams/' + encodeURIComponent(orch.teamName) + '/members/external', {
+                            method: 'POST',
+                            headers: {'Content-Type': 'application/json'},
+                            body: JSON.stringify({
+                                name: shortName,
+                                tag: 'openclaw',
+                                global_name: globalName
+                            })
+                        });
+                    } catch(e) { console.warn('Failed to save to external_agents.json:', e); }
+                }
+                orchToast('🦞 ' + t('orch_openclaw_created', {name: globalName}));
                 overlay.remove();
                 orchLoadOpenClawSessions();
                 // Auto-open config modal for the newly created agent
-                setTimeout(() => orchShowAgentConfigModal(name), 500);
+                setTimeout(() => orchShowAgentConfigModal(globalName), 500);
             } else {
                 if (r.status === 409) {
-                    orchToast('⚠️ ' + t('orch_openclaw_exists', {name}));
+                    orchToast('⚠️ ' + t('orch_openclaw_exists', {name: globalName}));
                     nameInp.style.borderColor = '#ef4444';
                     nameInp.style.background = '#fef2f2';
                     nameInp.focus();
