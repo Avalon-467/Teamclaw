@@ -446,6 +446,9 @@ uv run scripts/cli.py -u Avalon_01 internal-agents delete --sid s1 --team myteam
 # 团队列表
 uv run scripts/cli.py -u Avalon_01 teams
 
+# 🆕 一次性查看 team 完整信息（聚合成员、专家、workflows、话题等）
+uv run scripts/cli.py -u Avalon_01 teams info --team-name team2
+
 # 创建 / 删除团队
 uv run scripts/cli.py -u Avalon_01 teams create --team-name newteam --data '{"description":"..."}'
 uv run scripts/cli.py -u Avalon_01 teams delete --team-name oldteam
@@ -469,12 +472,14 @@ uv run scripts/cli.py -u Avalon_01 teams snapshot-upload --team-name myteam --fi
 
 | 参数 | 说明 | 必填 | 默认值 |
 |------|------|------|--------|
-| `action` | 操作 | ❌ | `list` |
+| `action` | 操作 (`list`, `info`, `create`, `delete`, `members`, ...) | ❌ | `list` |
 | `--team-name` | Team 名称 | 视操作 | — |
 | `--tag` | 专家 tag | update/delete-expert 时 | — |
 | `--data` | JSON 数据 | 视操作 | — |
 | `-o`, `--output` | 输出文件路径 | ❌ | `team_{name}_snapshot.zip` |
 | `--file` | 上传文件路径 | snapshot-upload 时 | — |
+
+> 💡 **`info` 命令**：一次性聚合调用多个 API（成员、专家、workflows、话题、OpenClaw 快照），美化输出该 team 的完整信息快照，不直接对应单个接口。
 
 ---
 

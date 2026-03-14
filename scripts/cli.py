@@ -1392,6 +1392,150 @@ def cmd_teams(args):
         else:
             _err(code, body)
 
+    elif act == "info":
+        if not args.team_name:
+            print("❌ 请指定 --team-name", file=sys.stderr); return
+        team = args.team_name
+        hdrs = _front_headers()
+        print(f"{'═' * 60}")
+        print(f"📋 Team: {team}")
+        print(f"{'═' * 60}")
+
+        # ── 1. 成员 ──
+        code, body = _req("GET", f"{FRONT_BASE}/teams/{team}/members", headers=hdrs)
+        if code == 200:
+            members = body.get("members", [])
+            oasis_members = [m for m in members if m.get("type") == "oasis"]
+            ext_members = [m for m in members if m.get("type") != "oasis"]
+            print(f"\n👥 成员 ({len(members)} 个):")
+            if oasis_members:
+                print(f"\n  内部 Agent ({len(oasis_members)}):")
+                for m in oasis_members:
+                    name = m.get("name", "?")
+                    tag = m.get("tag", "")
+                    gn = m.get("global_name", "")
+                    parts = [f"    • {name}"]
+                    if tag:
+                        parts.append(f"[{tag}]")
+                    if gn:
+                        parts.append(f"(session: {gn})")
+                    print(" ".join(parts))
+            if ext_members:
+                print(f"\n  外部 Agent ({len(ext_members)}):")
+                for m in ext_members:
+                    name = m.get("name", "?")
+                    tag = m.get("tag", "")
+                    gn = m.get("global_name", "")
+                    meta = m.get("meta", {})
+                    parts = [f"    • {name}"]
+                    if tag:
+                        parts.append(f"[{tag}]")
+                    if gn:
+                        parts.append(f"(global: {gn})")
+                    print(" ".join(parts))
+                    if meta:
+                        model = meta.get("model", "")
+                        if model:
+                            print(f"      model: {model}")
+            if not members:
+                print("  📭 暂无成员")
+        else:
+            print(f"  ⚠️ 获取成员失败: [{code}]", file=sys.stderr)
+
+        # ── 2. 专家 ──
+        code2, body2 = _req("GET", f"{FRONT_BASE}/teams/{team}/experts", headers=hdrs)
+        if code2 == 200:
+            experts = body2.get("experts", [])
+            print(f"\n🧑‍🏫 自定义专家 ({len(experts)} 个):")
+            if experts:
+                for e in experts:
+                    tag = e.get("tag", "?")
+                    name = e.get("name", tag)
+                    prompt = e.get("prompt", e.get("persona", ""))
+                    print(f"  • [{tag}] {name}")
+                    if prompt:
+                        preview = prompt[:80].replace("\n", " ")
+                        if len(prompt) > 80:
+                            preview += "..."
+                        print(f"    {preview}")
+            else:
+                print("  📭 暂无自定义专家")
+        else:
+            print(f"  ⚠️ 获取专家失败: [{code2}]", file=sys.stderr)
+
+        # ── 3. Workflows ──
+        params_wf = {"user_id": args.user, "team": team}
+        code3, body3 = _req("GET", f"{OASIS_BASE}/workflows", params=params_wf)
+        if code3 == 200:
+            wfs = body3.get("workflows", []) if isinstance(body3, dict) else body3
+            print(f"\n📐 Workflows ({len(wfs)} 个):")
+            if wfs:
+                for w in wfs:
+                    fname = w.get("file", "?")
+                    desc = w.get("description", "")
+                    line = f"  • {fname}"
+                    if desc:
+                        line += f"  — {desc}"
+                    print(line)
+            else:
+                print("  📭 暂无 workflow")
+        else:
+            print(f"  ⚠️ 获取 workflows 失败: [{code3}]", file=sys.stderr)
+
+        # ── 4. 最近话题 ──
+        params_tp = {"user_id": args.user}
+        code4, body4 = _req("GET", f"{OASIS_BASE}/topics", params=params_tp)
+        if code4 == 200:
+            all_topics = body4 if isinstance(body4, list) else body4.get("topics", [])
+            # 过滤属于当前 team 的话题 (通过 team 字段或 schedule_file 路径)
+            team_topics = []
+            for t in all_topics:
+                t_team = t.get("team", "")
+                if t_team == team:
+                    team_topics.append(t)
+            print(f"\n💬 话题 ({len(team_topics)} 个):")
+            if team_topics:
+                status_icon = {"pending": "⏳", "discussing": "🔄", "concluded": "✅",
+                               "error": "❌"}
+                for t in team_topics[-10:]:  # 最多展示最近 10 个
+                    tid = t.get("id", t.get("topic_id", "?"))
+                    q = t.get("title", t.get("question", ""))
+                    st = t.get("status", "?")
+                    icon = status_icon.get(st, "❓")
+                    # 截断过长标题
+                    if len(q) > 60:
+                        q = q[:60] + "..."
+                    print(f"  {icon} [{tid}] {q}  ({st})")
+                if len(team_topics) > 10:
+                    print(f"  ... 共 {len(team_topics)} 个话题，仅展示最近 10 个")
+            else:
+                print("  📭 暂无话题")
+        else:
+            print(f"  ⚠️ 获取话题失败: [{code4}]", file=sys.stderr)
+
+        # ── 5. OpenClaw 快照 ──
+        code5, body5 = _req("GET", f"{FRONT_BASE}/team_openclaw_snapshot",
+                             headers=hdrs, params={"team": team})
+        if code5 == 200:
+            snapshots = body5.get("snapshots", body5.get("agents", []))
+            if isinstance(body5, dict) and not snapshots:
+                # 尝试其他可能的字段
+                for k, v in body5.items():
+                    if isinstance(v, list) and v:
+                        snapshots = v
+                        break
+            if snapshots:
+                print(f"\n📸 OpenClaw 快照 ({len(snapshots)} 个):")
+                for s in snapshots:
+                    sname = s.get("short_name", s.get("name", "?"))
+                    agent_name = s.get("agent_name", "")
+                    line = f"  • {sname}"
+                    if agent_name:
+                        line += f"  → {agent_name}"
+                    print(line)
+
+        print(f"\n{'═' * 60}")
+
     elif act == "members":
         if not args.team_name:
             print("❌ 请指定 --team-name", file=sys.stderr); return
@@ -1704,7 +1848,7 @@ def build_parser():
     # teams
     c = sub.add_parser("teams", help="Team 管理")
     c.add_argument("action", nargs="?", default="list",
-                   choices=["list", "create", "delete", "members",
+                   choices=["list", "info", "create", "delete", "members",
                             "add-ext-member", "delete-ext-member",
                             "update-ext-member", "experts", "add-expert",
                             "update-expert", "delete-expert",

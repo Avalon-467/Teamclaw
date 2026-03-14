@@ -221,7 +221,7 @@ Agent 询问用户"是否需要拓展设置"后，按需配置：
 ### 启动/停止
 
 ```bash
-bash selfskill/scripts/run.sh start     # 启动（后台）
+bash selfskill/scripts/run.sh start     # 启动或重启（后台）
 bash selfskill/scripts/run.sh status    # 查看状态
 bash selfskill/scripts/run.sh stop      # 停止
 ```
@@ -257,6 +257,44 @@ AGENT需要使用CLI提供的工具，严格遵守用户指令。
 - 配置 LLM、创建用户、启动服务
 - 创建和管理团队、编排工作流
 - 发起讨论、执行任务
+
+注意推荐Agent使用CLI工具，而不是Web UI。
+### CLI 服务状态检查
+
+启动服务后（或排查问题时），使用 `status` 命令快速检查三个核心服务是否正常运行：
+
+```bash
+uv run scripts/cli.py status
+```
+
+输出示例：
+```
+📊 服务状态:
+
+  ✅ Agent         :51200  正常
+  ✅ OASIS         :51202  正常
+  ✅ Frontend      :51209  正常
+```
+
+- **Agent** (`:51200`) — 对话引擎，处理 chat/sessions/tools 等
+- **OASIS** (`:51202`) — 工作流引擎，处理 topics/experts/workflows
+- **Frontend** (`:51209`) — Web UI 前端，提供可视化界面
+
+> 如果某个服务显示 ❌ 不可达，可尝试 `bash selfskill/scripts/run.sh start` 重启服务。
+
+### 查看 Team 列表
+
+```bash
+uv run scripts/cli.py -u <用户名> teams list
+```
+
+### 一键查看 Team 完整信息
+
+使用 `teams info` 一次性聚合输出某个 Team 的全部信息（成员、专家、Workflows、话题）：
+
+```bash
+uv run scripts/cli.py -u <用户名> teams info --team-name <team名称>
+```
 
 > 完整命令列表和细节请参考 [docs/cli.md](./docs/cli.md)
 
