@@ -15,13 +15,11 @@ Three expert backends:
      Connects to external endpoints (DeepSeek, GPT-4, Moonshot, Ollama, etc)
      with their own URL and API key. External service is assumed stateful
      (holds conversation history server-side); only incremental context is sent.
-     **OpenClaw CLI priority**: When model matches "agent:<name>:<session>",
-     prefers `openclaw agent --agent <name> --session-id <session> --message ...`
-     CLI over HTTP API. Falls back to HTTP if CLI unavailable or fails.
-     To integrate with OpenClaw sessions via HTTP, pass x-openclaw-session-key
-     via the YAML headers field, e.g.:
-       headers:
-         x-openclaw-session-key: "my-session-id"
+    **ACP agent support**: When model matches "agent:<name>[:<session>]" and
+    the tag is an ACP-capable tool (openclaw, codex, etc), prefers ACP persistent
+    connection; falls back to HTTP API if ACP is unavailable and api_url is set.
+    The tag determines which CLI binary is used for the ACP subprocess.
+    Session defaults to team name if not specified in the model string.
 
 Expert pool is built from schedule_yaml or schedule_file (YAML-only mode).
 schedule_file takes priority if both provided.
@@ -815,7 +813,7 @@ class SessionExpert:
 #   name = "title#ext#id"
 #   Does NOT go through local mini_timebot agent.
 #   Calls external api_url directly using httpx + OpenAI chat format.
-#   To adapt OpenClaw sessions, set x-openclaw-session-key in YAML headers.
+#   ACP agent support: tag (openclaw/codex) determines the ACP binary.
 # ======================================================================
 
 # ── ACP long-lived connection helpers (inline from acptest4.py) ──
@@ -824,7 +822,7 @@ if _ACP_AVAILABLE:
     class _SecureStreamReader(asyncio.StreamReader):
         """Wraps subprocess stdout, only passing JSON-RPC lines (starts with '{').
 
-        CLI tools (e.g. openclaw acp) may print decorative banners or logs to
+        CLI tools (e.g. openclaw/codex acp) may print decorative banners or logs to
         stdout alongside JSON-RPC messages. This filter discards non-JSON lines
         so the ACP protocol layer only sees valid messages.
         """
@@ -864,19 +862,17 @@ class ExternalExpert:
     ExternalExpert directly calls any OpenAI-compatible endpoint (DeepSeek,
     GPT-4, Moonshot, Ollama, another mini_timebot instance, etc).
 
-    **ACP Agent Support (preferred)**: When the ``model`` field matches
+    **ACP Agent Support**: When the ``model`` field matches
     ``agent:<agent_name>`` or ``agent:<agent_name>:<session>``, ACP
-    long-lived subprocess connections are used. The subprocess is started
-    once during ``acp_start()``, messages are sent via ``acp_send()``,
-    and the process is cleaned up during ``acp_stop()``. This replaces
-    the old per-call CLI invocation model with a persistent connection.
+    long-lived subprocess connections are preferred. If ACP is unavailable
+    (binary not found or start failed), falls back to HTTP API when
+    ``api_url`` is configured. The ``tag`` field (e.g. "openclaw", "codex")
+    determines which CLI binary is used for the ACP subprocess. Session
+    defaults to the team name if not specified in the model string.
 
-    **Legacy CLI fallback**: If ACP library is unavailable, falls back to
-    ``openclaw agent --agent <name> --message <msg>`` CLI calls (one
-    subprocess per call, no persistent connection).
-
-    **HTTP API fallback**: If both ACP and CLI are unavailable, uses the
-    OpenAI-compatible HTTP API (ChatCompletions endpoint).
+    The subprocess is started once during ``acp_start()``, messages are
+    sent via ``acp_send()``, and the process is cleaned up during
+    ``acp_stop()``.
 
     Session management is handled by the ACP connection internally —
     users cannot and do not need to specify session IDs.
@@ -889,7 +885,7 @@ class ExternalExpert:
 
     Features:
       - ACP agents: persistent long-lived connection (start/send/stop lifecycle)
-      - Legacy CLI fallback: one-shot CLI calls when ACP unavailable
+      - HTTP fallback: when ACP unavailable but api_url is configured
       - Non-agent externals: direct HTTP API call
       - Incremental context (first call = full, subsequent = delta only)
       - Identity injection via system prompt on first call (persona from presets)
@@ -900,11 +896,10 @@ class ExternalExpert:
     non-standard fields — just standard /v1/chat/completions.
     """
 
-    # Regex to match agent model format: agent:<agent_name> or agent:<agent_name>:<session>
-    # Group 1 = agent_name, Group 2 (optional) = session suffix
+    # Regex to match ACP agent model format: agent:<agent_name> or agent:<agent_name>:<session>
+    # Group 1 = agent_name (ignored — real name comes from global_name in JSON)
+    # Group 2 (optional) = session suffix (defaults to team name if omitted)
     _AGENT_MODEL_RE = re.compile(r"^agent:([^:]+)(?::(.+))?$")
-    # Keep the old alias for backward compatibility checks
-    _OPENCLAW_MODEL_RE = _AGENT_MODEL_RE
 
     # Oasis reply protocol: require agent to wrap reply with start/end tags
     _OASIS_REPLY_START = "[oasis reply start]"
@@ -929,6 +924,10 @@ class ExternalExpert:
     )
     _OASIS_REPLY_MAX_RETRIES = 10
 
+    # Known ACP-capable tool tags: the tag in YAML (e.g. "openclaw", "codex")
+    # maps to the CLI binary name used for ACP subprocess.
+    _ACP_TOOL_TAGS = {"openclaw", "codex"}
+
     def __init__(
         self,
         name: str,
@@ -941,6 +940,7 @@ class ExternalExpert:
         tag: str = "",
         extra_headers: dict[str, str] | None = None,
         oc_agent_name: str = "",
+        team: str = "",
     ):
         self.title = name
         self.ext_id = ext_id
@@ -949,36 +949,51 @@ class ExternalExpert:
         self.timeout = timeout or 500.0
         self.tag = tag
         self.model = model
+        self._team = team
         self._extra_headers = extra_headers or {}
 
-        # Detect agent model pattern: agent:<agent_name> or agent:<agent_name>:<session>
+        # Detect ACP agent model pattern: agent:<name> or agent:<name>:<session>
+        # The tag (e.g. "openclaw", "codex") determines which CLI tool to use.
         m = self._AGENT_MODEL_RE.match(model)
         if m:
-            self._is_openclaw_agent = True
-            raw_agent_name = m.group(1)
-            self._oc_agent_name = oc_agent_name or raw_agent_name
-            # Extract ACP session suffix (e.g. "agent:test2:main" → session="main")
-            self._acp_session_suffix = m.group(2) or "main"
-            self._openclaw_bin = shutil.which("openclaw")
+            self._is_acp_agent = True
+            if not oc_agent_name:
+                raise ValueError(
+                    f"Agent model '{model}' requires a global_name in "
+                    f"external_agents.json, but none was found for '{name}'."
+                )
+            self._oc_agent_name = oc_agent_name
+
+            # Session suffix: explicit from model > team name > "main"
+            self._acp_session_suffix = m.group(2) or team or "main"
+
+            # Determine ACP tool binary from tag (openclaw, codex, etc.)
+            tag_lower = tag.lower()
+            if tag_lower in self._ACP_TOOL_TAGS:
+                self._acp_tool_name = tag_lower
+            else:
+                # Default: use "openclaw" as the ACP tool
+                self._acp_tool_name = "openclaw"
+            self._acp_bin = shutil.which(self._acp_tool_name)
 
             # ── ACP long-lived connection state (initialized later via acp_start) ──
-            self._acp_available = _ACP_AVAILABLE and bool(self._openclaw_bin)
+            self._acp_available = _ACP_AVAILABLE and bool(self._acp_bin)
             self._acp_proc = None       # subprocess handle
             self._acp_conn = None       # ACP connection
             self._acp_session_id = None # ACP session_id
             self._acp_client = None     # _ACPClient callback handler
             self._acp_started = False   # True after successful acp_start()
 
-            method = "ACP long-lived" if self._acp_available else (
-                "CLI one-shot" if self._openclaw_bin else "HTTP only"
-            )
-            print(f"  [OASIS] 🦞 Agent detected: agent={self._oc_agent_name}"
+            status = "ACP ready" if self._acp_available else f"⚠️ {self._acp_tool_name} not found"
+            print(f"  [OASIS] 🔌 ACP agent detected: name={self._oc_agent_name}"
                   f" session={self._acp_session_suffix}"
-                  f" — {method}")
+                  f" tool={self._acp_tool_name}"
+                  f" — {status}")
         else:
-            self._is_openclaw_agent = False
+            self._is_acp_agent = False
             self._oc_agent_name = ""
-            self._openclaw_bin = None
+            self._acp_tool_name = ""
+            self._acp_bin = None
             self._acp_available = False
             self._acp_started = False
 
@@ -1014,7 +1029,7 @@ class ExternalExpert:
 
         Call order: acp_start() → [participate() * N] → acp_stop()
         """
-        if not self._acp_available or not self._is_openclaw_agent:
+        if not self._acp_available or not self._is_acp_agent:
             return  # Not an ACP agent, nothing to do
 
         if self._acp_started:
@@ -1022,9 +1037,9 @@ class ExternalExpert:
             return
 
         try:
-            # Build the ACP command: openclaw acp --session agent:<name>:<session>
+            # Build the ACP command: <tool> acp --session agent:<name>:<session>
             acp_session_arg = f"agent:{self._oc_agent_name}:{self._acp_session_suffix}"
-            cmd = [self._openclaw_bin, "acp", "--session", acp_session_arg, "--no-prefix-cwd"]
+            cmd = [self._acp_bin, "acp", "--session", acp_session_arg, "--no-prefix-cwd"]
 
             print(f"  [OASIS] 🔌 Starting ACP connection for {self.name}: "
                   f"{' '.join(cmd)}")
@@ -1063,8 +1078,7 @@ class ExternalExpert:
                   f"(session_id={self._acp_session_id})")
 
         except Exception as e:
-            print(f"  [OASIS] ❌ ACP start failed for {self.name}: {e}")
-            print(f"  [OASIS] 🔄 Will fall back to CLI/HTTP for this agent")
+            print(f"  [OASIS] ❌ ACP start failed for {self.name} (tool={self._acp_tool_name}): {e}")
             self._acp_started = False
             self._acp_available = False  # Disable ACP for this instance
             # Clean up partial state
@@ -1125,86 +1139,15 @@ class ExternalExpert:
             self._acp_session_id = None
             self._acp_client = None
 
-    async def _call_openclaw_cli(self, message: str, timeout: float | None = ...) -> str:
-        """Call OpenClaw agent via CLI command.
-
-        Runs: openclaw agent --agent <name> --message <msg>
-        Returns the stdout output (agent's reply).
-        Raises RuntimeError if CLI fails.
-        """
-        cmd = [
-            self._openclaw_bin,
-            "agent",
-            "--agent", self._oc_agent_name,
-            "--message", message,
-        ]
-        print(f"  [OASIS] 🦞 CLI call: openclaw agent --agent {self._oc_agent_name} "
-              f"--message <{len(message)} chars>")
-        effective_timeout = self.timeout if timeout is ... else timeout
-        try:
-            proc = await asyncio.create_subprocess_exec(
-                *cmd,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-            )
-            stdout, stderr = await asyncio.wait_for(
-                proc.communicate(), timeout=effective_timeout
-            )
-            stdout_text = stdout.decode("utf-8", errors="replace").strip()
-            stderr_text = stderr.decode("utf-8", errors="replace").strip()
-
-            if proc.returncode != 0:
-                raise RuntimeError(
-                    f"openclaw CLI exit code {proc.returncode}: "
-                    f"{stderr_text or stdout_text}"
-                )
-
-            # OpenClaw CLI output may contain a header line like:
-            # "🦞 OpenClaw 2026.3.1 (unknown) — Less middlemen, more messages."
-            # and decorative lines (│, ◇, etc). Extract the actual reply.
-            reply = self._parse_openclaw_output(stdout_text)
-            if not reply:
-                raise RuntimeError(f"Empty response from openclaw CLI. Raw: {stdout_text[:200]}")
-            return reply
-        except asyncio.TimeoutError:
-            raise RuntimeError(f"openclaw CLI timed out after {effective_timeout}s")
-
-    @staticmethod
-    def _parse_openclaw_output(raw: str) -> str:
-        """Parse openclaw agent CLI output, stripping decorative lines.
-
-        The CLI typically outputs:
-            🦞 OpenClaw 2026.3.1 (unknown) — Less middlemen, more messages.
-            │
-            ◇
-            <actual reply content>
-
-        We strip the header/decorative lines and return the meaningful content.
-        """
-        lines = raw.split("\n")
-        content_lines = []
-        skip_header = True
-        for line in lines:
-            stripped = line.strip()
-            # Skip known decorative/header patterns
-            if skip_header:
-                if (stripped.startswith("🦞") or
-                    stripped in ("│", "◇", "◆", "└", "") or
-                    stripped.startswith("OpenClaw")):
-                    continue
-                skip_header = False
-            content_lines.append(line)
-        return "\n".join(content_lines).strip()
-
     async def _call_api(self, messages: list[dict], timeout_override: float | None = ...) -> str:
         """Send messages to external API and return the assistant response text.
 
-        Priority chain for agent-type externals:
-          1. ACP persistent connection (if started) — fastest, maintains context
-          2. Legacy CLI one-shot (if ACP not available) — slower, no context
-          3. HTTP API (if CLI also unavailable) — universal fallback
+        For ACP agent-type externals (model="agent:<name>" with tag openclaw/codex/etc):
+          - Prefers ACP persistent connection when available.
+          - Falls back to HTTP API if ACP not started and api_url is configured.
+          - Raises RuntimeError only when neither ACP nor HTTP is available.
 
-        For non-agent externals: direct HTTP API call (no ACP/CLI).
+        For non-agent externals: direct HTTP API call.
 
         Args:
             timeout_override: Explicit timeout value. None = no timeout;
@@ -1212,8 +1155,8 @@ class ExternalExpert:
         """
         effective_timeout = self.timeout if timeout_override is ... else timeout_override
 
-        # ── Extract the message text for ACP/CLI (they take plain text, not messages array) ──
-        if self._is_openclaw_agent:
+        # ── ACP agent type: prefer ACP, fallback to HTTP ──
+        if self._is_acp_agent:
             cli_message = ""
             for msg in reversed(messages):
                 if msg.get("role") == "user":
@@ -1222,32 +1165,24 @@ class ExternalExpert:
             if not cli_message:
                 cli_message = messages[-1].get("content", "") if messages else ""
 
-            # ── Priority 1: ACP persistent connection ──
             if self._acp_started:
-                try:
-                    reply = await self.acp_send(cli_message)
-                    print(f"  [OASIS] 🔌 ACP send success for {self.name} ({len(reply)} chars)")
-                    return reply
-                except Exception as acp_err:
-                    print(f"  [OASIS] ⚠️ ACP send failed for {self.name}: {acp_err}")
-                    print(f"  [OASIS] 🔄 Falling back to CLI/HTTP")
-                    # Don't disable ACP permanently — might be transient
-                    # Fall through to CLI/HTTP
+                reply = await self.acp_send(cli_message)
+                print(f"  [OASIS] 🔌 ACP send success for {self.name} ({len(reply)} chars)")
+                return reply
+            else:
+                # ACP not available — try HTTP fallback
+                if self._api_url:
+                    print(f"  [OASIS] ⚠️ ACP not started for {self.name}, falling back to HTTP API")
+                else:
+                    raise RuntimeError(
+                        f"ACP connection not started for agent {self.name} "
+                        f"(agent={self._oc_agent_name}, tool={self._acp_tool_name}) "
+                        f"and no api_url configured for HTTP fallback."
+                    )
 
-            # ── Priority 2: Legacy CLI one-shot ──
-            if self._openclaw_bin:
-                try:
-                    reply = await self._call_openclaw_cli(cli_message, timeout=effective_timeout)
-                    print(f"  [OASIS] 🦞 CLI success for {self.name}")
-                    return reply
-                except Exception as cli_err:
-                    print(f"  [OASIS] ⚠️ CLI failed for {self.name}: {cli_err}")
-                    print(f"  [OASIS] 🔄 Falling back to HTTP API")
-                    # Fall through to HTTP API below
-
-        # ── Priority 3: HTTP API call (primary for non-agent, fallback for agent) ──
+        # ── HTTP API call (non-agent type, or ACP agent HTTP fallback) ──
         if not self._api_url:
-            raise RuntimeError(f"No api_url configured for {self.name} and ACP/CLI unavailable/failed")
+            raise RuntimeError(f"No api_url configured for external expert {self.name}")
         body = {
             "model": self.model,
             "messages": messages,
@@ -1264,8 +1199,8 @@ class ExternalExpert:
             raise RuntimeError(f"API call failed for {self.name}: {api_err}")
 
     def _inject_oasis_reply_instruction(self, messages: list[dict]) -> None:
-        """Append [oasis reply] instruction to the last user message (openclaw only)."""
-        if not self._is_openclaw_agent:
+        """Append [oasis reply] instruction to the last user message (ACP agent only)."""
+        if not self._is_acp_agent:
             return
         for msg in reversed(messages):
             if msg.get("role") == "user":
@@ -1305,7 +1240,7 @@ class ExternalExpert:
 
         Each participate() call is independent; no state carries across rounds.
         """
-        if not self._is_openclaw_agent:
+        if not self._is_acp_agent:
             return await self._call_api(messages, **kwargs)
 
         self._inject_oasis_reply_instruction(messages)

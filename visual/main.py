@@ -593,7 +593,8 @@ def _build_llm_prompt(data: dict) -> str:
         if n.get("type") == "session_agent":
             expert_list_str += f"  {i}. {n['emoji']} {n['name']}{inst_label} [SESSION AGENT: session_id={n.get('session_id', '?')}] — existing agent with its own tools & memory\n"
         elif n.get("type") == "external":
-            expert_list_str += f"  {i}. {n['emoji']} {n['name']}{inst_label} [EXTERNAL API: api_url={n.get('api_url', '?')}] — external OpenAI-compatible service\n"
+            model_info = f", model={n['model']}" if n.get("model") else ""
+            expert_list_str += f"  {i}. {n['emoji']} {n['name']}{inst_label} [EXTERNAL: tag={n.get('tag', '?')}, api_url={n.get('api_url', '?')}{model_info}] — ACP agent or external API service\n"
         else:
             sf_label = " ⚡STATEFUL" if n.get("stateful", False) else ""
             expert_list_str += f"  {i}. {n['emoji']} {n['name']}{inst_label}{sf_label} (tag: {n['tag']}, temperature: {n.get('temperature', 0.5)}, source: {n.get('source', 'public')})\n"
@@ -769,6 +770,14 @@ plan:
 2. `tag#oasis#new` — Preset expert (stateful session, auto-creates new session), use when the individual node has stateful=true
 3. `tag#oasis#name` — Internal session agent by name (tag enables persona lookup), e.g. "test#oasis#test1"
 4. `#oasis#name` — Internal session agent by name (no tag), e.g. "#oasis#test1"
+5. `tag#ext#id` — External ACP agent (tag=openclaw/codex/etc), e.g. "openclaw#ext#Alice"
+
+## External ACP Agent — Session Number
+For external ACP agents (tag = openclaw, codex, etc), the `model` field controls session:
+- `model: "agent:<name>"` — session defaults to the **team name** (recommended)
+- `model: "agent:<name>:<session>"` — explicit session, e.g. "agent:test2:my-session"
+The `<name>` in model is ignored for routing (real name comes from external_agents.json `global_name`).
+Session determines conversation isolation: same session = shared context, different session = separate context.
 
 ## Available Step Types (all require `id` field)
 1. `expert: "Name"` — Single expert speaks

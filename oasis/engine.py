@@ -12,9 +12,10 @@ Three expert backends:
   3. ExternalExpert — external OpenAI-compatible API (name="tag#ext#id")
      - Directly calls external endpoints (DeepSeek, GPT-4, Ollama, etc)
      - Configured per-expert via YAML: api_url, api_key, model
-     - ACP persistent connection: model "agent:<name>" or "agent:<name>:<session>"
-       uses ACP long-lived subprocess connections (start/send/stop lifecycle).
-       Falls back to CLI one-shot or HTTP API if ACP unavailable.
+     - ACP agent support: tag (openclaw, codex, etc) determines the ACP binary;
+       model "agent:<name>[:<session>]" prefers ACP persistent connection,
+       falls back to HTTP API if ACP unavailable and api_url is configured.
+       Session defaults to team name if not specified.
 
 Expert pool sourcing (YAML-only, schedule_file or schedule_yaml required):
   Pool is built entirely from YAML expert names (deduplicated).
@@ -101,7 +102,7 @@ def _load_external_agents(user_id: str, team: str = "") -> list[dict]:
 def _find_external_agent_global_name(external_agents: list[dict], name: str) -> str:
     """Find the 'global_name' field from external_agents.json by agent name.
 
-    Returns the global_name string (the real OpenClaw agent name), or "" if not found.
+    Returns the global_name string (the real ACP agent name), or "" if not found.
     """
     name_lower = name.lower()
     for a in external_agents:
@@ -286,26 +287,25 @@ class DiscussionEngine:
                     ext_id = uuid.uuid4().hex[:8]
                     print(f"  [OASIS] 🆕 #new: '{full_name}' → new external session '{ext_id}'")
                 cfg = ext_configs.get(full_name, {})
-                is_openclaw = first.lower() == "openclaw"
-                if not cfg.get("api_url") and not is_openclaw:
+                is_acp_agent = first.lower() in ExternalExpert._ACP_TOOL_TAGS
+                if not cfg.get("api_url") and not is_acp_agent:
                     print(f"  [OASIS] ⚠️ External expert '{full_name}' missing 'api_url' in YAML, skipping.")
                     continue
-                # OpenClaw agents can work via CLI without api_url
+                # ACP agents can work without api_url
                 api_url = cfg.get("api_url", "") or ""
                 model_str = cfg.get("model", "gpt-3.5-turbo")
                 config = self._lookup_by_tag(first, user_id, self._team)
-                if is_openclaw:
-                    # For OpenClaw agents, the display name comes from ext_id
+                if is_acp_agent:
+                    # For ACP agents, the display name comes from ext_id
                     # (the short name in YAML, e.g. "Alice"), NOT from the tag
-                    # "openclaw" which is just the type identifier.
+                    # which is just the ACP tool identifier (openclaw, codex, etc).
                     expert_name = ext_id
                     persona = config.get("persona", "") if config else ""
                 else:
                     expert_name = config["name"] if config else first
                     persona = config.get("persona", "") if config else ""
-                # Look up the real OpenClaw agent name from external_agents.json
+                # Look up the real agent name from external_agents.json
                 # Use ext_id (the YAML short name) for lookup, not expert_name
-                # which may already be correct but ext_id is the canonical key
                 oc_name = _find_external_agent_global_name(external_agents, ext_id)
                 expert = ExternalExpert(
                     name=expert_name,
@@ -318,11 +318,14 @@ class DiscussionEngine:
                     tag=first,
                     extra_headers=cfg.get("headers"),
                     oc_agent_name=oc_name,
+                    team=self._team,
                 )
-                if is_openclaw and not api_url:
-                    print(f"  [OASIS] 🦞 OpenClaw agent: {expert.name} (CLI only, no api_url)")
-                else:
+                if is_acp_agent:
+                    print(f"  [OASIS] 🔌 ACP agent: {expert.name} (tool={first.lower()})")
+                elif api_url:
                     print(f"  [OASIS] 🌐 External expert: {expert.name} → {api_url}")
+                else:
+                    print(f"  [OASIS] 🌐 External expert: {expert.name} (no api_url)")
             elif sid.startswith("temp#"):
                 # e.g. "creative#temp#1" → ExpertAgent with explicit temp_id
                 config = self._lookup_by_tag(first, user_id, self._team)
