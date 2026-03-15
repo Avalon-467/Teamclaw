@@ -28,3 +28,5 @@ silk-python
 pydub
 av
 static_ffmpeg
+
+agent-client-protocol
